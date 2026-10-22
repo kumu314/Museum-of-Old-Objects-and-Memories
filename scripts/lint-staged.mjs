@@ -61,6 +61,10 @@ let numstat = '';
 let diff = '';
 let sizes = '';
 
+// 根提交（仓库无任何提交，如重建历史）时全部文件都是"新增"，
+// 巨型提交与空壳两类检查会误判——由钩子传 --root-commit 告知
+const isRootCommit = process.argv.includes('--root-commit');
+
 if (process.argv.includes('--stdin')) {
   let raw = '';
   try {
@@ -203,12 +207,19 @@ for (const f of files) {
   counted.push({ path: f.path, n });
 }
 if (totalLines > MAX_LINES) {
-  const top = counted.sort((a, b) => b.n - a.n).slice(0, 3);
-  errors.push(
-    `本次新增 ${totalLines} 行，超过 ${MAX_LINES} 行上限\n` +
-      `     最大的几个：${top.map((t) => `${t.path}(${t.n})`).join('、')}\n` +
-      `     拆成几个提交——理由不是洁癖，是回滚时你只想撤一个`
-  );
+  if (isRootCommit) {
+    console.log(
+      `（根提交：全部文件记为新增共 ${totalLines} 行，跳过 ${MAX_LINES} 行上限——` +
+        `上限管的是"一次改太多"，根提交决定的是"从哪开始"）`
+    );
+  } else {
+    const top = counted.sort((a, b) => b.n - a.n).slice(0, 3);
+    errors.push(
+      `本次新增 ${totalLines} 行，超过 ${MAX_LINES} 行上限\n` +
+        `     最大的几个：${top.map((t) => `${t.path}(${t.n})`).join('、')}\n` +
+        `     拆成几个提交——理由不是洁癖，是回滚时你只想撤一个`
+    );
+  }
 }
 // 大量删除只提示不拦：删除本身是合法的清理动作，但值得看一眼
 if (totalDeleted > 2000) {
@@ -234,8 +245,12 @@ for (const b of blocks) {
 }
 
 // 5. 空壳文件（新增文件里没有任何实质代码）
+// 配置点文件跳过：.gitattributes 这类行首是 * 的文件会被上面的注释过滤器
+// 整碗端走，误判成空壳（2026-10-23 根提交实测）
+const CONFIG_DOTFILE = /(^|\/)\.[^/]+$/;
 for (const b of blocks) {
   if (!b.isNew || b.added.length === 0) continue;
+  if (CONFIG_DOTFILE.test(b.path)) continue;
   const meaningful = b.added
     .map((l) => l.trim())
     .filter(Boolean)
