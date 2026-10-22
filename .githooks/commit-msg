@@ -1,0 +1,13 @@
+#!/bin/sh
+# 提交信息检查。跳过方式：git commit --no-verify（用完在群里说一句）
+set -e
+
+ROOT="$(git rev-parse --show-toplevel)"
+NODE_BIN="${NODE_BIN:-$(command -v node || command -v nodejs || true)}"
+
+if [ -z "$NODE_BIN" ]; then
+  echo "[hook] 没找到 node，跳过提交信息检查" >&2
+  exit 0
+fi
+
+exec "$NODE_BIN" "$ROOT/scripts/lint-commit.mjs" --file "$1"

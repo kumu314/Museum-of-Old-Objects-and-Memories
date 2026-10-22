@@ -1,0 +1,42 @@
+# 依赖
+node_modules/
+.pnpm-store/
+
+# Next.js
+.next/
+out/
+build/
+dist/
+next-env.d.ts
+
+# 环境变量（绝对不能提交）
+.env
+.env.local
+.env.*.local
+*.pem
+
+# 数据库文件
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# 采集到的真实数据（含个人信息，禁止入库）
+data/real/
+data/*-real.*
+data/*-raw.*
+
+# 系统 / 编辑器
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log
+
+# 录屏与演示文件（体积大，放网盘别放仓库）
+*.mp4
+*.mov
+
+# AI 协作工具的项目数据
+.workbuddy-ai/
+.agent/

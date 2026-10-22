@@ -1,0 +1,34 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: 全仓库噪声扫描
+        run: node scripts/scan-noise.mjs
+
+      - name: 提交信息检查
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            node scripts/lint-commit.mjs --range "origin/${{ github.base_ref }}..${{ github.event.pull_request.head.sha }}"
+          else
+            node scripts/lint-commit.mjs --range "${{ github.event.before }}..${{ github.sha }}"
+          fi
+
+      # 选题定下、有了测试之后，在这里加一步：
+      # - name: 测试
+      #   run: <你的测试命令>

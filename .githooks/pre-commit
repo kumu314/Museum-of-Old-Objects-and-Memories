@@ -1,0 +1,28 @@
+#!/bin/sh
+# 暂存区检查：空壳文件 / 调试残留 / 大文件 / 敏感文件 / 巨型提交
+# 跳过方式：git commit --no-verify（用完在群里说一句）
+#
+# 两个刻意的设计：
+#   1. git 调用放在 shell 里，不放 node —— Windows 上从 node spawn git 偶发 EBUSY。
+#   2. 用管道传数据，不落临时文件 —— 少一次写盘和清理，钩子就少一个卡死点。
+
+ROOT="$(git rev-parse --show-toplevel)"
+NODE_BIN="${NODE_BIN:-$(command -v node || command -v nodejs || true)}"
+
+if [ -z "$NODE_BIN" ]; then
+  echo "[hook] 没找到 node，跳过暂存区检查" >&2
+  exit 0
+fi
+
+{
+  echo "@@SECTION numstat"
+  git -c core.quotepath=false diff --cached --numstat
+  echo "@@SECTION sizes"
+  git -c core.quotepath=false diff --cached --name-only | while IFS= read -r f; do
+    [ -z "$f" ] && continue
+    s=$(git cat-file -s ":$f" 2>/dev/null || echo 0)
+    printf '%s\t%s\n' "$s" "$f"
+  done
+  echo "@@SECTION diff"
+  git -c core.quotepath=false diff --cached -U0 --no-color
+} | "$NODE_BIN" "$ROOT/scripts/lint-staged.mjs" --stdin
