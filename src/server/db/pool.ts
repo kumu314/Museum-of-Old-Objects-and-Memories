@@ -1,20 +1,44 @@
-import 'server-only';
-import { Pool } from 'pg';
-import { getEnv } from '@/server/config/env';
+import { Pool, type PoolClient } from 'pg';
+import { getServerConfig } from '../config';
 
-/**
- * 单例连接池。只在服务端模块里引用，客户端组件 import 本文件会在构建期报错。
- *
- * 挂在 globalThis 上而不是模块作用域：Next dev 的 HMR 每次热更新都会重新执行模块，
- * 模块级变量会被重置，池越攒越多，本地很容易把 PostgreSQL 的连接数打满。
- */
-const globalForPg = globalThis as typeof globalThis & { __pgPool?: Pool };
+const runtime = globalThis as typeof globalThis & { museumPool?: Pool };
 
 export function getPool(): Pool {
-  const existing = globalForPg.__pgPool;
-  if (existing) return existing;
+  if (!runtime.museumPool) {
+    runtime.museumPool = new Pool({
+      connectionString: getServerConfig().databaseUrl,
+      max: 8,
+      connectionTimeoutMillis: 5000,
+      idleTimeoutMillis: 30000,
+      statement_timeout: 15000,
+    });
+    // Idle-client disconnects do not belong to a request. Do not log connection strings.
+    runtime.museumPool.on('error', () => console.error('Database idle connection failed.'));
+  }
+  return runtime.museumPool;
+}
 
-  const created = new Pool({ connectionString: getEnv().DATABASE_URL });
-  globalForPg.__pgPool = created;
-  return created;
+export async function closePool(): Promise<void> {
+  const pool = runtime.museumPool;
+  delete runtime.museumPool;
+  await pool?.end();
+}
+
+export async function withTransaction<T>(work: (client: PoolClient) => Promise<T>, pool = getPool()): Promise<T> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await work(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (error) {
+    try {
+      await client.query('ROLLBACK');
+    } catch (rollbackError) {
+      throw new AggregateError([error, rollbackError], 'Transaction failed and rollback could not be confirmed.');
+    }
+    throw error;
+  } finally {
+    client.release();
+  }
 }

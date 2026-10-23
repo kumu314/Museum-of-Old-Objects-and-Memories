@@ -1,41 +1,57 @@
 {
-  "name": "museum-of-old-objects-and-memories",
-  "version": "0.0.0",
+  "name": "shiwuguan",
+  "version": "0.1.0",
   "private": true,
-  "packageManager": "pnpm@10.30.3",
+  "type": "module",
+  "packageManager": "pnpm@12.14.0",
   "engines": {
-    "node": ">=22.12.0 <23"
+    "node": ">=26.12.0 <27"
   },
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
+    "dev": "next dev --webpack --hostname 127.0.0.1 --port 17682",
+    "build": "next build --webpack",
+    "start": "next start --hostname 127.0.0.1 --port 17682",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint .",
-    "lint:fix": "eslint . --fix",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "check": "pnpm run typecheck && pnpm run lint && pnpm run test"
+    "lint": "eslint src tests scripts/*.ts",
+    "test": "node --env-file-if-exists=.env.local --import tsx --test tests/contracts/*.test.ts tests/server/*.test.ts",
+    "test:db": "node --env-file-if-exists=.env.local --import tsx --test tests/db/*.test.ts",
+    "test:http": "node --env-file-if-exists=.env.local --import tsx scripts/test-http.ts",
+    "db:migrate": "node --env-file-if-exists=.env.local --import tsx scripts/migrate.ts",
+    "db:migrate:test": "node --env-file-if-exists=.env.local --import tsx scripts/migrate.ts --test",
+    "check": "pnpm typecheck && pnpm lint && pnpm test && pnpm test:db && pnpm test:scene && pnpm build && pnpm build:scene",
+    "db:local": "node scripts/local-db.mjs",
+    "test:scene": "node --import tsx --test src/features/**/*.test.ts",
+    "team:create": "node --env-file-if-exists=.env.local --import tsx scripts/create-member.ts",
+    "dev:scene": "vite --config vite.scene.config.mjs",
+    "build:scene": "vite build --config vite.scene.config.mjs"
   },
   "dependencies": {
-    "next": "16.4.2",
-    "pg": "8.23.1",
+    "next": "16.4.3",
     "react": "19.3.1",
     "react-dom": "19.3.1",
+    "three": "0.186.1",
+    "@react-three/fiber": "9.8.2",
+    "@react-three/drei": "10.7.9",
+    "zod": "4.6.7",
+    "pg": "8.23.1",
+    "iron-session": "9.0.1",
+    "sharp": "0.35.5",
     "server-only": "0.0.1",
-    "zod": "4.6.7"
+    "music-metadata": "11.16.1"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "4.3.3",
-    "@types/node": "22.20.5",
-    "@types/pg": "8.23.1",
+    "typescript": "6.0.3",
+    "@types/node": "26.0.0",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
+    "@types/three": "0.186.0",
+    "@types/pg": "8.23.1",
     "eslint": "9.39.5",
-    "eslint-config-next": "16.4.2",
-    "tailwindcss": "4.3.3",
-    "typescript": "5.9.3",
+    "eslint-config-next": "16.4.3",
     "typescript-eslint": "8.72.0",
-    "vitest": "5.0.5"
+    "tailwindcss": "4.3.3",
+    "@tailwindcss/postcss": "4.3.3",
+    "tsx": "4.23.15",
+    "vite": "8.3.5"
   }
 }

@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>A 原型视觉检查</title>
+    <style>
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; overflow: hidden; }
+      body { height: 100vh; height: 100dvh; display: grid; grid-template-rows: auto minmax(0, 1fr); background: #222; color: #ddd; font: 12px system-ui, sans-serif; }
+      header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 10px 12px; border-bottom: 1px solid #484848; }
+      .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+      button, input { font: inherit; }
+      button { padding: 6px 9px; border: 1px solid #666; border-radius: 3px; background: #353535; color: #eee; cursor: pointer; }
+      button[aria-pressed="true"] { border-color: #c3a374; background: #57432b; }
+      button:disabled { opacity: .6; cursor: wait; }
+      button:focus-visible, input:focus-visible { outline: 2px solid #dbc192; outline-offset: 2px; }
+      label { display: flex; align-items: center; gap: 4px; }
+      input { width: 66px; padding: 5px; border: 1px solid #777; border-radius: 2px; background: #161616; color: #fff; }
+      .status { display: flex; flex-wrap: wrap; gap: 5px 18px; width: 100%; line-height: 1.7; }
+      output { color: #d7bf98; overflow-wrap: anywhere; }
+      .note { margin: 0; width: 100%; color: #aaa; font-size: 11px; line-height: 1.6; }
+      #preview-area { display: grid; place-items: center; min-width: 0; min-height: 0; overflow: hidden; }
+      #viewport { position: relative; }
+      iframe { position: absolute; top: 0; left: 0; display: block; border: 0; transform-origin: top left; background: #090706; }
+      body.capture { display: block; width: 1200px; height: 675px; overflow: visible; }
+      .capture header { display: none; }
+      .capture #preview-area { display: block; width: 1200px; height: 675px; overflow: visible; }
+    </style>
+  </head>
+  <body>
+    <header aria-label="原型 QA 控件">
+      <div class="controls" aria-label="预览尺寸">
+        <button type="button" id="desktop" aria-pressed="true">桌面 1600×900</button>
+        <button type="button" id="mobile" aria-pressed="false">窄屏 390×844</button>
+      </div>
+      <div class="controls" aria-label="动态效果模式">
+        <button type="button" id="motion-normal" aria-pressed="true">普通模式</button>
+        <button type="button" id="motion-reduced" aria-pressed="false">减少动态模拟</button>
+      </div>
+      <div class="controls" aria-label="图形上下文检查">
+        <button type="button" id="lose">中断 WebGL</button>
+        <button type="button" id="restore">恢复 WebGL</button>
+      </div>
+      <div class="controls" aria-label="悬停坐标与帧测量">
+        <label for="normalized-x">X <input id="normalized-x" type="number" min="0" max="1" step="0.01" value="0.25"></label>
+        <label for="normalized-y">Y <input id="normalized-y" type="number" min="0" max="1" step="0.01" value="0.35"></label>
+        <button type="button" id="hover-camera">悬停相机格</button>
+        <button type="button" id="leave-cell">移出格位</button>
+        <button type="button" id="measure">静止帧测量</button>
+      </div>
+      <div class="status">
+        <output id="frame-status" aria-live="polite">预览正在载入</output>
+        <output id="result" aria-live="polite">检查台就绪</output>
+        <output id="frame-measurement" aria-live="polite">尚未测量静止帧</output>
+      </div>
+      <p class="note">模拟只影响当前 iframe；普通模式沿用系统偏好。X/Y 为画布归一坐标；先等待场景静止，再测量 1 秒内 RAF 调度与执行次数，计数包含 iframe 的所有 RAF。</p>
+    </header>
+    <main id="preview-area" aria-label="缩放后的原型预览">
+      <div id="viewport"><iframe id="preview" title="拾物馆检查预览" src="/" width="1600" height="900"></iframe></div>
+    </main>
+    <script type="module" src="/qa.ts"></script>
+  </body>
+</html>
