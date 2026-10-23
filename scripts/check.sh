@@ -17,14 +17,8 @@ if "$NODE" scripts/scan-noise.mjs; then echo "  → 通过"; else echo "  → �
 
 echo
 echo "== 2/2 提交信息检查（最近 1 条）=="
-# 退出码 0 = 通过，2 = 本机无法调用 git（部分环境会 EBUSY），其余 = 真的不合格。
-# 把 2 判成失败会让自检永远红，反而没人看——所以按「跳过」处理，并说明 CI 会查。
-"$NODE" scripts/lint-commit.mjs --range HEAD~1..HEAD
-rc=$?
-if [ "$rc" -eq 0 ]; then
+if "$NODE" scripts/lint-commit.mjs --range HEAD~1..HEAD; then
   echo "  → 通过"
-elif [ "$rc" -eq 2 ]; then
-  echo "  → 跳过（本机读不到提交范围，CI 会查）"
 else
   echo "  → 失败"
   fail=1

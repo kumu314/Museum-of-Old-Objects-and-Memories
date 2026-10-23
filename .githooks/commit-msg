@@ -1,5 +1,5 @@
 #!/bin/sh
-# 提交信息检查。跳过方式：git commit --no-verify（用完在群里说一句）
+# 提交信息格式检查
 set -e
 
 ROOT="$(git rev-parse --show-toplevel)"

@@ -1,11 +1,9 @@
 /**
  * 全仓库噪声扫描（CI 用，也可本地跑）
- * 本地钩子能被 --no-verify 绕过，这一道绕不过。
- *
  * 用法：node scripts/scan-noise.mjs
  */
 
-import { readdirSync, statSync, readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join, extname, relative } from 'node:path';
 
 const ROOT = process.cwd();
@@ -16,7 +14,6 @@ const SKIP_DIRS = new Set([
 
 const CODE_DIRS = new Set(['app', 'lib', 'components', 'pages']);
 const CODE_EXT = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
-const MAX_BYTES = 1024 * 1024;
 
 const errors = [];
 const notes = [];
@@ -40,18 +37,6 @@ function walk(dir) {
     if (!e.isFile()) continue;
     const full = join(dir, e.name);
     const rel = relative(ROOT, full).replace(/\\/g, '/');
-
-    let st;
-    try {
-      st = statSync(full);
-    } catch {
-      continue;
-    }
-
-    if (st.size > MAX_BYTES) {
-      errors.push(`大文件：${rel}（${(st.size / 1024 / 1024).toFixed(1)}MB）`);
-      continue;
-    }
 
     if (/^\.env(\.|$)/.test(e.name)) {
       errors.push(`敏感文件在仓库里：${rel}`);

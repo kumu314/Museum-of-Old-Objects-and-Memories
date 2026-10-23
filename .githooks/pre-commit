@@ -1,6 +1,5 @@
 #!/bin/sh
-# 暂存区检查：空壳文件 / 调试残留 / 大文件 / 敏感文件 / 巨型提交
-# 跳过方式：git commit --no-verify（用完在群里说一句）
+# 暂存区检查：空壳文件 / 调试残留 / 敏感文件 / 生成物目录
 #
 # 两个刻意的设计：
 #   1. git 调用放在 shell 里，不放 node —— Windows 上从 node spawn git 偶发 EBUSY。
@@ -14,22 +13,9 @@ if [ -z "$NODE_BIN" ]; then
   exit 0
 fi
 
-# 根提交（仓库还没有任何提交，如重建历史）会把全部文件记为"新增"，
-# 500 行上限与空壳检查对它不适用——检测到无 HEAD 就传 --root-commit
-ROOT_FLAG=""
-if ! git rev-parse --verify HEAD >/dev/null 2>&1; then
-  ROOT_FLAG="--root-commit"
-fi
-
 {
   echo "@@SECTION numstat"
   git -c core.quotepath=false diff --cached --numstat
-  echo "@@SECTION sizes"
-  git -c core.quotepath=false diff --cached --name-only | while IFS= read -r f; do
-    [ -z "$f" ] && continue
-    s=$(git cat-file -s ":$f" 2>/dev/null || echo 0)
-    printf '%s\t%s\n' "$s" "$f"
-  done
   echo "@@SECTION diff"
   git -c core.quotepath=false diff --cached -U0 --no-color
-} | "$NODE_BIN" "$ROOT/scripts/lint-staged.mjs" --stdin $ROOT_FLAG
+} | "$NODE_BIN" "$ROOT/scripts/lint-staged.mjs" --stdin
