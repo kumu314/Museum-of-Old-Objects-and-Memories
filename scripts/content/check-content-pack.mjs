@@ -32,7 +32,7 @@ const isNonEmptyString = (v) => typeof v === 'string' && v.trim().length > 0;
 const isArray = Array.isArray;
 
 /** 校验一个内容包对象，返回 { errors, warnings } */
-function checkPack(pack, file) {
+function checkPack(pack) {
   const errors = [];
   const warnings = [];
   const E = (m) => errors.push(m);
@@ -248,7 +248,7 @@ function main(argv) {
       continue;
     }
 
-    const { errors, warnings } = checkPack(pack, f);
+    const { errors, warnings } = checkPack(pack);
     totalErrors += errors.length;
     totalWarnings += warnings.length;
 
