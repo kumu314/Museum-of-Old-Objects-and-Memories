@@ -1,0 +1,8 @@
+@import 'tailwindcss';
+
+/*
+ * 首版只有浅色主题。配色不在这里做设计决策，等 B 的界面稿确定了再加 token。
+ */
+:root {
+  color-scheme: light;
+}
