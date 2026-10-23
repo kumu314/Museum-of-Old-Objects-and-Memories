@@ -18,7 +18,7 @@
 
 ## 当前技术基线
 
-数据库为 **PostgreSQL**（驱动 `pg`，手写 SQL）；应用为 Next.js 16 App Router + React 19.3 + TypeScript 5.9（`strict`、`noUncheckedIndexedAccess`、`exactOptionalPropertyTypes`）、Tailwind CSS 4、Zod 4；三维用 Three.js 0.186 + React Three Fiber 9 + Drei 10。版本一律精确固定，清单与升级理由见[运行说明](docs/运行说明.md)。
+数据库为 **PostgreSQL**（驱动 `pg`，手写 SQL）；应用为 Next.js 16 App Router + React 19.3 + TypeScript 5.9（`strict`、`noUncheckedIndexedAccess`、`exactOptionalPropertyTypes`）、Tailwind CSS 4、Zod 4；三维用 Three.js 0.185.1 + React Three Fiber 9.8.2 + Drei 10.7.9。版本一律精确固定，清单与升级理由见[运行说明](docs/运行说明.md)。
 
 工具链为 Node.js 22.22.2（`.node-version`）与 pnpm 10.30.3（`packageManager`），CI 与本地使用同一基线，安装走 `pnpm install --frozen-lockfile`。
 
@@ -36,9 +36,10 @@ bash scripts/check.sh
 # 应用检查（需先 pnpm install --frozen-lockfile）
 pnpm run check   # typecheck + lint + test
 pnpm run build   # 生产构建
+pnpm run test:db # 真实 PostgreSQL 连接、迁移与事务（先按运行说明启动隔离测试库）
 ```
 
-`bash scripts/check.sh` 只覆盖仓库噪声与提交信息格式；类型检查、lint、单元测试和生产构建由 `pnpm run check` / `pnpm run build` 覆盖，两者都已接入 CI。仍不代表 PostgreSQL 连接、迁移、事务与备份恢复已验证，也不代表部署环境已跑通。已移除固定的提交行数和文件体积限制，保留敏感文件、生成物、空壳代码与调试残留检查。
+`bash scripts/check.sh` 只覆盖仓库噪声与提交信息格式；类型检查、lint、单元测试和生产构建由 `pnpm run check` / `pnpm run build` 覆盖，两者都已接入 CI。新增 `test:db` 使用隔离 PostgreSQL 17，覆盖连接、迁移执行器和事务提交/回滚，并接入 CI；业务发布、快照隔离、备份恢复和部署验收仍需对应实现与证据。已移除固定的提交行数和文件体积限制，保留敏感文件、生成物、空壳代码与调试残留检查。
 
 ## 协作与资料清理
 
