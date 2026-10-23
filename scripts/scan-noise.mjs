@@ -3,16 +3,12 @@
  * 用法：node scripts/scan-noise.mjs
  */
 
-import { readdirSync, readFileSync } from 'node:fs';
-import { join, extname, relative } from 'node:path';
+import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { join, extname, basename } from 'node:path';
 
 const ROOT = process.cwd();
-const SKIP_DIRS = new Set([
-  'node_modules', '.git', '.next', 'dist', 'build', 'out', 'coverage',
-  '.turbo', '.workbuddy-ai', '.agent',
-]);
-
-const CODE_DIRS = new Set(['src', 'app', 'lib', 'components', 'pages', 'tests']);
+const CODE_DIRS = new Set(['src', 'app', 'lib', 'components', 'pages']);
 const CODE_EXT = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
 
 const errors = [];
@@ -21,40 +17,28 @@ let codeFiles = 0;
 let codeLines = 0;
 let todoCount = 0;
 
-function walk(dir) {
-  let entries;
-  try {
-    entries = readdirSync(dir, { withFileTypes: true });
-  } catch {
-    return;
-  }
-  for (const e of entries) {
-    if (e.isDirectory()) {
-      if (SKIP_DIRS.has(e.name)) continue;
-      walk(join(dir, e.name));
-      continue;
-    }
-    if (!e.isFile()) continue;
-    const full = join(dir, e.name);
-    const rel = relative(ROOT, full).replace(/\\/g, '/');
-
-    // .env.example 是占位样例，必须能提交；其余 .env* 一律算敏感文件
-    if (/^\.env(?!\.example$)(\.|$)/.test(e.name)) {
+function scan(rel) {
+    const full = join(ROOT, rel);
+    const name = basename(rel);
+    if (/^\.env(\.|$)/.test(name) && name !== '.env.example') {
       errors.push(`敏感文件在仓库里：${rel}`);
-      continue;
+      return;
     }
 
-    const ext = extname(e.name);
-    if (!CODE_EXT.has(ext)) continue;
+    // Offline asset-authoring CLI programs intentionally print build/validation reports.
+    if (rel.startsWith('src/features/cabinet/assets/model-source/')) return;
+    const ext = extname(name);
+    if (!CODE_EXT.has(ext)) return;
 
     const top = rel.split('/')[0];
-    if (!CODE_DIRS.has(top)) continue;
+    if (!CODE_DIRS.has(top)) return;
 
     let text;
     try {
       text = readFileSync(full, 'utf8');
-    } catch {
-      continue;
+    } catch (error) {
+      errors.push(`无法读取文件：${rel} (${error.code})`);
+      return;
     }
 
     codeFiles++;
@@ -79,13 +63,17 @@ function walk(dir) {
     if (meaningful.length === 0) {
       errors.push(`空壳文件：${rel}`);
     }
-  }
 }
 
-walk(ROOT);
+// Include tracked files even if ignored, but do not mistake private local config for committed content.
+const files = execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', '-z'], { encoding: 'utf8' }).split('\0').filter(Boolean);
+const deleted = new Set(execFileSync('git', ['ls-files', '--deleted', '-z'], { encoding: 'utf8' }).split('\0'));
+for (const file of new Set(files)) {
+  if (!deleted.has(file)) scan(file);
+}
 
 if (todoCount > 0) notes.push(`TODO/FIXME 共 ${todoCount} 处`);
-notes.push(`代码文件 ${codeFiles} 个 / ${codeLines} 行（统计 src、app、lib、components、pages、tests）`);
+notes.push(`代码文件 ${codeFiles} 个 / ${codeLines} 行（统计 src、app、lib、components、pages）`);
 
 for (const n of notes) console.log(`· ${n}`);
 

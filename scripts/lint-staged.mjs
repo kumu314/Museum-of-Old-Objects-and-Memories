@@ -14,10 +14,9 @@
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 
-const GENERATED_DIRS = ['node_modules/', '.next/', 'dist/', 'build/', 'out/', '.turbo/', 'coverage/'];
+const GENERATED_DIRS = ['node_modules/', '.next/', 'dist/', 'build/', 'out/', '.turbo/', 'coverage/', '.vite/', '.local/'];
 const SENSITIVE = [
-  // .env / .env.local 一律拦下；.env.example 是占位样例，必须能提交
-  /^(?:.*\/)?\.env(?!\.example$)(?:\.[^/]*)?$/,
+  /(^|\/)\.env(\.|$)/,
   /\.pem$/, /\.key$/, /\.p12$/,
   /(^|\/)data\/responses-real\.json$/,
   /(^|\/)data\/responses-raw\.csv$/,
@@ -129,7 +128,7 @@ const warnings = [];
 
 // 1. 敏感文件 / 生成物
 for (const f of files) {
-  if (SENSITIVE.some((re) => re.test(f.path))) {
+  if (!/(^|\/)\.env\.example$/.test(f.path) && SENSITIVE.some((re) => re.test(f.path))) {
     errors.push(
       `敏感文件不能提交：${f.path}\n` +
         `     真提交过就立刻换密钥——删文件不够，它已经在历史里了`
@@ -146,6 +145,7 @@ for (const b of blocks) {
   for (const text of b.added) {
     if (/(\/\/|#|\/\*)\s*(TODO|FIXME|待实现|待补充)/.test(text)) todoCount++;
     if (!CODE_DIRS.test(b.path) || !CODE_EXT.test(b.path)) continue;
+    if (b.path.startsWith('src/features/cabinet/assets/model-source/')) continue;
     if (/allow-console/.test(text)) continue;
     if (/\bdebugger\b/.test(text)) {
       errors.push(`调试残留（debugger）：${b.path}\n     ${text.trim().slice(0, 70)}`);

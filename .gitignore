@@ -21,22 +21,14 @@ next-env.d.ts
 *.sqlite
 *.sqlite3
 
-# PostgreSQL：本地数据目录不共享、不提交（每人起自己的服务）
+# Preserve exclusions used by earlier local checkouts.
 .pgdata/
 pgdata/
 docker/pgdata/
-
-# 服务端素材：上传文件只在各自 checkout 内保存，不进 Git
 data/uploads/
 data/tmp/
-
-# 测试与构建缓存
-coverage/
 .turbo/
 .vitest/
-*.tsbuildinfo
-
-# AI 协作工具的本地数据（不进仓库）
 .workbuddy/
 
 # 采集到的真实数据（含个人信息，禁止入库）
@@ -58,3 +50,13 @@ Thumbs.db
 # AI 协作工具的项目数据
 .workbuddy-ai/
 .agent/
+
+# Local application runtime and verification artifacts
+.vite/
+.local/
+coverage/
+playwright-report/
+test-results/
+*.tsbuildinfo
+.env.*
+!.env.example

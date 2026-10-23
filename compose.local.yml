@@ -1,0 +1,29 @@
+name: shiwuguan-prototype
+services:
+  development:
+    image: postgres@sha256:6c538e7206ea40ff740ef27883529390a690b6ead6ba96b44c67a9f7c638e8fd
+    env_file: .local/development-db.env
+    ports: ["127.0.0.1:15432:5432"]
+    volumes:
+      - development-data:/var/lib/postgresql
+      - ./scripts/local-db/init.sh:/docker-entrypoint-initdb.d/01-app.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+  test:
+    image: postgres@sha256:6c538e7206ea40ff740ef27883529390a690b6ead6ba96b44c67a9f7c638e8fd
+    env_file: .local/test-db.env
+    ports: ["127.0.0.1:15433:5432"]
+    volumes:
+      - test-data:/var/lib/postgresql
+      - ./scripts/local-db/init.sh:/docker-entrypoint-initdb.d/01-app.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+volumes:
+  development-data:
+  test-data:

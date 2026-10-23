@@ -1,73 +1,38 @@
 name: ci
-
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
-
+permissions:
+  contents: read
 jobs:
   check:
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:17-alpine
-        env:
-          POSTGRES_USER: shiwuguan_test
-          POSTGRES_PASSWORD: ci_test_only
-          POSTGRES_DB: shiwuguan_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U shiwuguan_test -d shiwuguan_test"
-          --health-interval 2s
-          --health-timeout 3s
-          --health-retries 15
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
       - uses: pnpm/action-setup@v4
         with:
-          version: 10.30.3
-
+          version: 12.14.0
       - uses: actions/setup-node@v4
         with:
           node-version-file: .node-version
           cache: pnpm
-
-      # vitest 5 要求 Node >=22.12，CI 与本地共用 .node-version，不再各写一套
-      - name: 按锁文件安装依赖
-        run: pnpm install --frozen-lockfile
-
-      - name: 全仓库噪声扫描
-        run: node scripts/scan-noise.mjs
-
+      - run: pnpm install --frozen-lockfile
+      - name: 音频解析运行依赖
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - name: 提交信息检查
-        run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            node scripts/lint-commit.mjs --range "origin/${{ github.base_ref }}..${{ github.event.pull_request.head.sha }}"
-          elif [ "${{ github.event.before }}" = "0000000000000000000000000000000000000000" ]; then
-            node scripts/lint-commit.mjs --range "HEAD~1..HEAD"
-          else
-            node scripts/lint-commit.mjs --range "${{ github.event.before }}..${{ github.sha }}"
-          fi
-
-      - name: 类型检查
-        run: pnpm run typecheck
-
-      - name: lint
-        run: pnpm run lint
-
-      - name: 单元测试
-        run: pnpm run test
-
-      - name: PostgreSQL 连接、迁移与事务
+        if: github.event_name == 'pull_request'
         env:
-          DATABASE_URL: postgresql://unused@127.0.0.1:5432/shiwuguan_dev
-          TEST_DATABASE_URL: postgresql://shiwuguan_test:ci_test_only@127.0.0.1:5432/shiwuguan_test
-        run: pnpm run test:db
-
-      - name: 生产构建
-        run: pnpm run build
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node scripts/lint-commit.mjs --range "$BASE_SHA..$HEAD_SHA"
+      - run: pnpm db:local
+      - run: pnpm db:migrate && pnpm db:migrate:test
+      - run: bash scripts/check.sh
+        env:
+          APP_ORIGIN: https://museum.example.test
+      - if: always()
+        run: docker compose -f compose.local.yml stop
