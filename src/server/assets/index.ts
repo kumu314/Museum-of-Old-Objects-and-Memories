@@ -1,15 +1,15 @@
-export { AssetError } from "./errors.js";
-export { detectImageFormat, validateAndProcessImage } from "./image.js";
-export { detectAudioFormat, validateAudio } from "./audio.js";
+export { AssetError } from "./errors";
+export { detectImageFormat, validateAndProcessImage } from "./image";
+export { detectAudioFormat, validateAudio } from "./audio";
 export {
   AUDIO_MAX_BYTES,
   IMAGE_MAX_AXIS_PX,
   IMAGE_MAX_BYTES,
   IMAGE_MAX_PIXELS,
-} from "./types.js";
+} from "./types";
 export type {
   AssetErrorCode,
-} from "./errors.js";
+} from "./errors";
 export type {
   AssetInput,
   AudioFormat,
@@ -18,4 +18,4 @@ export type {
   ImageProcessResult,
   ImageVariant,
   ImageVariantKind,
-} from "./types.js";
+} from "./types";

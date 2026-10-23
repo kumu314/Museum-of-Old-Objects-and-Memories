@@ -5,7 +5,7 @@
 ## 用法
 
 ```ts
-import { AiError, CurationInputError, createCurationService } from "./index.js";
+import { AiError, CurationInputError, createCurationService } from "@/server/integrations/ai";
 
 const curation = createCurationService({
   apiKey: process.env.AI_API_KEY ?? "",
@@ -45,7 +45,7 @@ const draft = await curation.generateDraft({
 
 ## C 需要接入的部分
 
-1. 在根 `package.json` 增加 `zod`；在服务端环境配置 `AI_API_KEY`、`AI_MODEL`，可选 `AI_BASE_URL`。启动时校验必填配置，不把密钥写入客户端、Git 或日志。
+1. AI 模块只使用 C 已固定的 `zod`，不需要新增 AI 依赖；在服务端环境配置 `AI_API_KEY`、`AI_MODEL`，可选 `AI_BASE_URL`。启动时校验必填配置，不把密钥写入客户端、Git 或日志。
 2. 在受保护的 AI 路由中读取**已保存**的展品与讲述版本，调用 `generateDraft`，把草稿连同 `sourceVersion`、模型名、生成时间保存为整理草稿（不要覆盖已确认展签）。
 3. 采纳时再次检查当前版本与来源片段；不匹配返回 409 `VERSION_CONFLICT`，不自动覆盖。
 4. 把 `AiError` / `CurationInputError` 映射到共享错误契约；不要把 provider 原始响应透传。
@@ -54,9 +54,9 @@ const draft = await curation.generateDraft({
 ## 依赖与验证
 
 - 运行时：`zod`（代码使用 `z.object(...).strict()`，Zod 3/4 均可用）。
-- 测试：`vitest`，`src/server/integrations/ai/__tests__/ai.test.ts` 共 12 个用例；`real-provider.test.ts` 默认跳过，设置 `AI_API_KEY`、`AI_MODEL`（可选 `AI_BASE_URL`、`AI_JSON_MODE=false`）后运行会发起一次真实调用并产生费用。
+- 测试：`vitest`，`tests/ai/ai.test.ts` 共 12 个用例；`tests/ai/real-provider.test.ts` 默认跳过，设置 `AI_API_KEY`、`AI_MODEL`（可选 `AI_BASE_URL`、`AI_JSON_MODE=false`）后运行会发起一次真实调用并产生费用。
 - 已验证：正常 JSON、代码围栏 JSON、长度越界、追问超过 2 个、未知来源 ID、HTTP 500、非法 JSON、超时、输入上限、缺少密钥、请求体不含密钥。
-- 测试环境：Node.js 20.19.0、Zod 4.6.7、Vitest 2.1.9。
+- 测试环境：Node.js 22.22.2、Zod 4.6.7、TypeScript 5.9.3、Vitest 5.0.5，与 C 的 G0 基线一致。
 - 未执行：真实模型调用（等待可用 key）、流式输出、自动重试、语音转写。首版不需要流式；自动重试会增加重复调用，暂不加入。
-- 真实调用命令：`npx vitest run src/server/integrations/ai/__tests__/real-provider.test.ts`。成功一次后把 A21 的真实调用部分标记为通过。
+- 真实调用命令：`npx vitest run tests/ai/real-provider.test.ts`。成功一次后把 A21 的真实调用部分标记为通过。
 - 模型输出不保证事实正确，E 仍需按内容样例核对事实边界。

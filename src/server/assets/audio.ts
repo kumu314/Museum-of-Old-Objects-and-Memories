@@ -1,12 +1,12 @@
 import { createHash } from "node:crypto";
 import { parseBuffer } from "music-metadata";
-import { AssetError } from "./errors.js";
+import { AssetError } from "./errors";
 import {
   AUDIO_MAX_BYTES,
   type AssetInput,
   type AudioFormat,
   type AudioProcessResult,
-} from "./types.js";
+} from "./types";
 
 const MIME_TO_FORMAT = new Map<string, AudioFormat>([
   ["audio/mpeg", "mp3"],

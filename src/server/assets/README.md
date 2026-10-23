@@ -11,7 +11,7 @@ import {
   IMAGE_MAX_BYTES,
   validateAndProcessImage,
   validateAudio,
-} from "./index.js";
+} from "@/server/assets";
 ```
 
 输入统一为 `{ bytes: Uint8Array, declaredMimeType?: string }`。**不使用客户端文件名判断格式；C 生成存储路径。**
@@ -73,7 +73,7 @@ import {
 
 ## C 需要接入的部分
 
-1. 根依赖增加 `sharp`、`music-metadata`。`sharp` 是原生依赖，部署环境必须实际安装并验证；`music-metadata` 仅服务端使用。
+1. **需要 C 统一变更依赖**：根 `package.json` 增加 `sharp@0.35.5`、`music-metadata@11.16.1` 并重新生成锁文件。`pnpm-workspace.yaml` 已把 `sharp` 列入 `onlyBuiltDependencies`；`sharp` 是原生依赖，部署环境必须实际安装并验证；`music-metadata` 仅服务端使用。
 2. 上传路由在鉴权、展馆归属和大小预检后调用本模块；把返回的变体字节写到服务端持久目录，数据库只引用完整可读的文件。
 3. 文件写入与数据库提交分开：数据库事务失败时，只清理本次新增且确认未被引用/未提交的文件；不能因为响应发送失败就删除已提交素材。
 4. 替换图片/音频时生成新文件和新素材记录，不覆盖旧快照引用的文件；首版不自动物理清理历史素材。
@@ -83,7 +83,8 @@ import {
 ## 依赖与验证
 
 - 运行时：`sharp`、`music-metadata`。
-- 测试：`vitest`，`src/server/assets/__tests__/` 共 29 个用例。
+- 测试：`vitest`，`tests/assets/` 共 29 个用例。
 - 已验证：JPEG/PNG/WebP、alpha、方向校正、GPS/设备元数据清除、动图拒绝、GIF/TIFF 拒绝、MIME 不一致、空文件、10 MiB/8192px/32MP 边界、损坏文件、MP3/M4A(AAC)/WAV(PCM)、ALAC/浮点 WAV/Ogg/带视频轨 MP4 拒绝、20 MiB 边界、损坏 MP3、截断 WAV/M4A。
-- 测试环境：Node.js 20.19.0、sharp 0.35.5、music-metadata 11.16.1、Vitest 2.1.9。
+- 测试环境：Node.js 22.22.2、TypeScript 5.9.3、Vitest 5.0.5、sharp 0.35.5、music-metadata 11.16.1，与 C 的 G0 基线一致。
+- 已用临时 API 路由验证：Next.js 16.4.2 生产构建可直接打包本模块及 `sharp`/`music-metadata`，当前无需增加 `serverExternalPackages`。
 - 未执行：真实手机浏览器播放、C 的存储/数据库接入、真实获准照片的端到端样例、上传中断与数据库回滚联调。素材夹具均为合成数据（正弦音、纯色图、EXIF GPS 测试图），不含真实用户素材。

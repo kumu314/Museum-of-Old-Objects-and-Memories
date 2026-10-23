@@ -1,4 +1,4 @@
-import type { CurationInput } from "./types.js";
+import type { CurationInput } from "./types";
 
 export const CURATION_SYSTEM_PROMPT = `你是旧物纪念展的展签整理助手。你的任务只是整理物主已经讲述的事实，不能替物主补写人生。
 

@@ -5,7 +5,7 @@ import {
   CurationInputError,
   createCurationService,
   type CurationInput,
-} from "../index.js";
+} from "@/server/integrations/ai";
 
 const VALID_LABEL =
   "这只旧茶杯是爷爷当年跑运输时随身带着的物件，杯身有一道细小的磕痕。关于具体购买年份和地点，家里人记不清了，只能确认它大约陪伴了爷爷很多年。";
@@ -236,7 +236,12 @@ describe("AI curation adapter", () => {
     }
     expect(caught.code).toBe("AI_UNAVAILABLE");
     expect(caught.message).not.toContain(privateNarrative);
-    expect(String(caught.cause ?? "")).not.toContain(privateNarrative);
+    if (typeof caught.cause === "string") {
+      expect(caught.cause).not.toContain(privateNarrative);
+    }
+    if (caught.cause instanceof Error) {
+      expect(caught.cause.message).not.toContain(privateNarrative);
+    }
   });
 
   it("maps a slow provider to AI_TIMEOUT", async () => {

@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   AUDIO_MAX_BYTES,
   validateAudio,
-} from "../index.js";
+} from "@/server/assets";
 
 function fixture(name: string): string {
   return fileURLToPath(new URL(`./fixtures/audio/${name}`, import.meta.url));

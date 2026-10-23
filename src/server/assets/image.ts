@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import sharp from "sharp";
-import { AssetError } from "./errors.js";
+import { AssetError } from "./errors";
 import {
   IMAGE_MAX_AXIS_PX,
   IMAGE_MAX_BYTES,
@@ -10,7 +10,7 @@ import {
   type ImageProcessResult,
   type ImageVariant,
   type ImageVariantKind,
-} from "./types.js";
+} from "./types";
 
 const MIME_TO_FORMAT = new Map<string, ImageFormat>([
   ["image/jpeg", "jpeg"],

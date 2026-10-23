@@ -1,11 +1,11 @@
-export { AiError, CurationInputError } from "./errors.js";
+export { AiError, CurationInputError } from "./errors";
 export {
   createCurationService,
-} from "./service.js";
+} from "./service";
 export {
   CURATION_SYSTEM_PROMPT,
   buildCurationUserMessage,
-} from "./prompt.js";
+} from "./prompt";
 export {
   DEFAULT_BASE_URL,
   DEFAULT_MAX_INPUT_CHARS,
@@ -15,11 +15,11 @@ export {
   MAX_QUESTION_CHARS,
   MAX_SEGMENTS,
   MIN_LABEL_CHARS,
-} from "./types.js";
+} from "./types";
 export type {
   CurationDraft,
   CurationInput,
   CurationSegment,
   CurationService,
   CurationServiceConfig,
-} from "./types.js";
+} from "./types";

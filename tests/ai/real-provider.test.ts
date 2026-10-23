@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createCurationService } from "../index.js";
+import { createCurationService } from "@/server/integrations/ai";
 
 const apiKey = process.env.AI_API_KEY;
 const model = process.env.AI_MODEL;

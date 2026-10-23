@@ -1,6 +1,6 @@
 import { z } from "zod";
-import { AiError, CurationInputError } from "./errors.js";
-import { buildCurationUserMessage, CURATION_SYSTEM_PROMPT } from "./prompt.js";
+import { AiError, CurationInputError } from "./errors";
+import { buildCurationUserMessage, CURATION_SYSTEM_PROMPT } from "./prompt";
 import {
   DEFAULT_BASE_URL,
   DEFAULT_MAX_INPUT_CHARS,
@@ -15,7 +15,7 @@ import {
   type CurationSegment,
   type CurationService,
   type CurationServiceConfig,
-} from "./types.js";
+} from "./types";
 
 const modelOutputSchema = z
   .object({
@@ -269,13 +269,17 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function isUnknownArray(value: unknown): value is unknown[] {
+  return Array.isArray(value);
+}
+
 function extractContent(payload: unknown): string | null {
   if (!isRecord(payload)) {
     return null;
   }
 
   const choices = payload.choices;
-  if (!Array.isArray(choices) || choices.length === 0) {
+  if (!isUnknownArray(choices) || choices.length === 0) {
     return null;
   }
 
@@ -289,7 +293,7 @@ function extractContent(payload: unknown): string | null {
     if (typeof content === "string" && content.trim().length > 0) {
       return content;
     }
-    if (Array.isArray(content)) {
+    if (isUnknownArray(content)) {
       const parts: string[] = [];
       for (const part of content) {
         if (isRecord(part) && typeof part.text === "string" && part.text.length > 0) {

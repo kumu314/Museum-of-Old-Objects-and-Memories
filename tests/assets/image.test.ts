@@ -7,7 +7,7 @@ import {
   validateAndProcessImage,
   type ImageProcessResult,
   type ImageVariantKind,
-} from "../index.js";
+} from "@/server/assets";
 
 const TINY_GIF = Buffer.from(
   "R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==",
