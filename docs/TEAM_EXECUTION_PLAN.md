@@ -303,13 +303,13 @@ G1、G2 和不涉及持久化的 AI 适配验证可以并行。G3 不以 AI 成�
 - 需要交接的内容：
 ```
 
-## 10. 文档分工与本轮变化
+## 10. 文档分工
 
-| 文档 | 用途 | 本轮处理 |
+| 文档 | 用途 | 维护范围 |
 | --- | --- | --- |
 | `docs/PROJECT_PLAN.md` | 产品、范围、数据与功能验收 | 更新为方案 A；落实五类主责；用交付依赖替代原排期 |
 | `AGENTS.md` | 编码助手的工程质量、授权与交付行为 | 同步已选模式和团队方案引用，保留原有质量要求 |
 | `docs/TEAM_EXECUTION_PLAN.md` | 谁负责什么、怎样交接与验证 | 明确交付包唯一负责人，补充环境交接；不承担第二套产品规则或时间表 |
 | `docs/提交手册.md` | Git 操作与协作环境 | 补齐提交步骤、合入约定、冲突处理及环境隔离 |
 
-本轮将四份文档同步为同一实施基线，数据库确定为 PostgreSQL。总仓库为 [kumu314/Museum-of-Old-Objects-and-Memories](https://github.com/kumu314/Museum-of-Old-Objects-and-Memories)，旧规范与选题记录按本次清理说明整理；未进行应用编码、调用团队的模型账号或部署系统。成员登记、数据库与工具链实际版本由 C 在 G0 落实，文档中的完成标准仍需在实际项目中验证。
+上述文档共同维护方案 A 与 PostgreSQL 基线。总仓库为 [kumu314/Museum-of-Old-Objects-and-Memories](https://github.com/kumu314/Museum-of-Old-Objects-and-Memories)，当前应用与原型已统一；实际版本及命令见 [运行说明](运行说明.md)，进度见 [实施状态](IMPLEMENTATION_STATUS.md)，逐项结果只维护在 [验收清单](11-验收清单.md)。本方案的完成标准不构成已完成证据。
