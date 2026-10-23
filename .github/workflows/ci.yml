@@ -29,5 +29,6 @@ jobs:
         env:
           APP_ORIGIN: https://museum.example.test
           COMMIT_RANGE: ${{ github.event_name == 'pull_request' && format('{0}..{1}', github.event.pull_request.base.sha, github.event.pull_request.head.sha) || 'HEAD~1..HEAD' }}
+      - run: pnpm test:http
       - if: always()
         run: docker compose -f compose.local.yml stop

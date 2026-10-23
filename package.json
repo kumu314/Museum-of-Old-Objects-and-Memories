@@ -15,6 +15,7 @@
     "lint": "eslint src tests scripts/*.ts",
     "test": "node --env-file-if-exists=.env.local --import tsx --test tests/contracts/*.test.ts tests/server/*.test.ts",
     "test:db": "node --env-file-if-exists=.env.local --import tsx --test tests/db/*.test.ts",
+    "test:http": "node --env-file-if-exists=.env.local --import tsx scripts/test-http.ts",
     "db:migrate": "node --env-file-if-exists=.env.local --import tsx scripts/migrate.ts",
     "db:migrate:test": "node --env-file-if-exists=.env.local --import tsx scripts/migrate.ts --test",
     "check": "pnpm typecheck && pnpm lint && pnpm test && pnpm test:db && pnpm test:scene && pnpm build && pnpm build:scene",
