@@ -169,11 +169,51 @@ describe("AI curation adapter", () => {
     expect(captured.body).toMatchObject({
       model: "test-model",
       temperature: 0.2,
-      max_tokens: 700,
+      max_tokens: 2000,
       stream: false,
       response_format: { type: "json_object" },
     });
     expect(JSON.stringify(captured.body)).not.toContain("test-key");
+  });
+
+  it("uses a bounded configurable output budget", async () => {
+    handle = await startServer(chatReply(validContent()));
+    const service = createCurationService({
+      apiKey: "test-key",
+      baseUrl: handle.baseUrl,
+      model: "test-model",
+      maxOutputTokens: 1234,
+    });
+    await service.generateDraft(INPUT);
+    expect(handle.requests[0]?.body).toMatchObject({ max_tokens: 1234 });
+  });
+
+  it("reports a truncated model response as AI_UNAVAILABLE", async () => {
+    handle = await startServer({
+      status: 200,
+      body: {
+        choices: [
+          {
+            message: { role: "assistant", content: "" },
+            finish_reason: "length",
+          },
+        ],
+      },
+    });
+
+    let caught: unknown;
+    try {
+      await serviceFor(handle.baseUrl).generateDraft(INPUT);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(AiError);
+    if (!(caught instanceof AiError)) {
+      throw new Error("没有捕获 AiError");
+    }
+    expect(caught.code).toBe("AI_UNAVAILABLE");
+    expect(caught.message).toContain("截断");
   });
 
   it("accepts a fenced JSON response", async () => {

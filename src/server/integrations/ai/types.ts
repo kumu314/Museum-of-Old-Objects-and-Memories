@@ -28,6 +28,8 @@ export type CurationServiceConfig = {
   baseUrl?: string;
   timeoutMs?: number;
   maxInputChars?: number;
+  /** Bounded output budget; includes reasoning tokens on some providers. */
+  maxOutputTokens?: number;
   /** Some OpenAI-compatible providers do not implement response_format. */
   jsonMode?: boolean;
 };
@@ -39,6 +41,7 @@ export type CurationService = {
 export const DEFAULT_BASE_URL = "https://api.openai.com/v1";
 export const DEFAULT_TIMEOUT_MS = 20_000;
 export const DEFAULT_MAX_INPUT_CHARS = 6_000;
+export const DEFAULT_MAX_OUTPUT_TOKENS = 2_000;
 export const MIN_LABEL_CHARS = 60;
 export const MAX_LABEL_CHARS = 120;
 export const MAX_QUESTIONS = 2;

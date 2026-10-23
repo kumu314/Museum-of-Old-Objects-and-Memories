@@ -4,6 +4,7 @@ import { buildCurationUserMessage, CURATION_SYSTEM_PROMPT } from "./prompt";
 import {
   DEFAULT_BASE_URL,
   DEFAULT_MAX_INPUT_CHARS,
+  DEFAULT_MAX_OUTPUT_TOKENS,
   DEFAULT_TIMEOUT_MS,
   MAX_LABEL_CHARS,
   MAX_QUESTION_CHARS,
@@ -36,6 +37,7 @@ type ResolvedConfig = {
   baseUrl: string;
   timeoutMs: number;
   maxInputChars: number;
+  maxOutputTokens: number;
   jsonMode: boolean;
 };
 
@@ -65,12 +67,22 @@ function resolveConfig(config: CurationServiceConfig): ResolvedConfig {
     throw new Error("AI 输入上限必须是 1 至 50000 的整数");
   }
 
+  const maxOutputTokens = config.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS;
+  if (
+    !Number.isInteger(maxOutputTokens) ||
+    maxOutputTokens < 256 ||
+    maxOutputTokens > 8_192
+  ) {
+    throw new Error("AI 输出 token 上限必须是 256 至 8192 的整数");
+  }
+
   return {
     apiKey,
     model,
     baseUrl,
     timeoutMs,
     maxInputChars,
+    maxOutputTokens,
     jsonMode: config.jsonMode ?? true,
   };
 }
@@ -313,6 +325,21 @@ function extractContent(payload: unknown): string | null {
   return null;
 }
 
+function extractFinishReason(payload: unknown): string | null {
+  if (!isRecord(payload)) {
+    return null;
+  }
+  const choices = payload.choices;
+  if (!isUnknownArray(choices) || choices.length === 0) {
+    return null;
+  }
+  const first = choices[0];
+  if (!isRecord(first)) {
+    return null;
+  }
+  return typeof first.finish_reason === "string" ? first.finish_reason : null;
+}
+
 export function createCurationService(config: CurationServiceConfig): CurationService {
   const resolved = resolveConfig(config);
   const endpoint = `${resolved.baseUrl}/chat/completions`;
@@ -329,7 +356,7 @@ export function createCurationService(config: CurationServiceConfig): CurationSe
           { role: "user", content: buildCurationUserMessage(validated) },
         ],
         temperature: 0.2,
-        max_tokens: 700,
+        max_tokens: resolved.maxOutputTokens,
         stream: false,
       };
       if (resolved.jsonMode) {
@@ -375,6 +402,14 @@ export function createCurationService(config: CurationServiceConfig): CurationSe
 
         const content = extractContent(payload);
         if (content === null) {
+          const finishReason = extractFinishReason(payload);
+          if (finishReason === "length") {
+            throw new AiError(
+              "AI_UNAVAILABLE",
+              "模型输出被截断（可能推理过长），已保留原文，请重试或手工整理",
+              { cause: new Error("finish_reason=length") },
+            );
+          }
           throw new AiError("AI_UNAVAILABLE", "模型没有返回可用内容，已保留原文，请重试或手工整理");
         }
         if (content.length > MAX_MODEL_CONTENT_CHARS) {
