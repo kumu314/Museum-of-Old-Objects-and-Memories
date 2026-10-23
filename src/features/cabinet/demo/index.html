@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark">
+    <title>拾物馆 · 家人的旧物纪念展</title>
+    <link rel="stylesheet" href="/style.css">
+  </head>
+  <body>
+    <header class="museum-header">
+      <div class="brand">
+        <h1>拾物馆</h1>
+        <span class="brand-dot" aria-hidden="true">·</span>
+        <p>家人的旧物纪念展</p>
+      </div>
+      <nav class="visitor-nav" aria-label="参观操作">
+        <span class="unavailable-action" title="分享服务尚未接入，当前为本地交互原型">
+          <button type="button" disabled>
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m7.5 10.5 9-5m-9 8 9 5"/><circle cx="5" cy="12" r="3"/><circle cx="19" cy="4" r="3"/><circle cx="19" cy="20" r="3"/></svg>
+            <span>分享参观</span>
+          </button>
+        </span>
+        <span class="nav-divider" aria-hidden="true">|</span>
+        <span class="unavailable-action" title="交互原型尚未接入录音与音画设置">
+          <button type="button" disabled>
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2 5h4m4 0h12M2 12h12m4 0h4M2 19h5m4 0h11"/><circle cx="8" cy="5" r="2"/><circle cx="16" cy="12" r="2"/><circle cx="9" cy="19" r="2"/></svg>
+            <span>音画设置</span>
+          </button>
+        </span>
+        <button type="button" id="edit-arrangement" class="edit-arrangement" aria-pressed="false">编辑陈列</button>
+        <details id="catalog" class="catalog">
+          <summary>展品目录 <span aria-hidden="true">⌄</span></summary>
+          <div class="catalog-menu">
+            <p class="catalog-label">展柜中的旧物</p>
+            <button type="button" data-item="camera"><span>01</span> 复古相机</button>
+            <button type="button" data-item="cassette"><span>02</span> 手录磁带</button>
+            <button type="button" data-item="ticket"><span>05</span> 旧车票</button>
+            <p class="prototype">交互原型 · 样例资产<br>实拍、物主故事与录音尚未接入</p>
+          </div>
+        </details>
+      </nav>
+    </header>
+    <main id="exhibition" data-phase="overview">
+      <div class="stage-wrap">
+        <canvas tabindex="0" aria-label="三维展柜；检视时方向键旋转，加减键缩放，Esc 放回"></canvas>
+        <button type="button" id="back" class="back" hidden>← &nbsp; 放回展柜 <span>Esc</span></button>
+        <div id="surface-error" class="surface-error" hidden>
+          <h2>三维展示暂不可用</h2>
+          <p id="surface-message"></p>
+          <button type="button" id="retry">重试三维展示</button>
+          <p>仍可通过右上角的展品目录查看样例说明。</p>
+        </div>
+        <div id="interaction-hint" class="interaction-hint" hidden>拖动旋转 · 滚轮缩放 · 方向键也可操作</div>
+      </div>
+      <aside id="story" class="story" hidden aria-label="当前展品样例">
+        <div class="eyebrow">拾物档案 <span aria-hidden="true">/</span> OBJECT ARCHIVE</div>
+        <h2 id="item-title"></h2>
+        <span id="state-label" class="state-label"></span>
+        <div class="divider" aria-hidden="true"></div>
+        <p id="item-description"></p>
+        <p class="disclosure">当前为交互样例。实拍、物主故事与录音尚未接入，模型来源与状态以此处说明为准。</p>
+        <button type="button" id="retry-model" class="retry-model" hidden>重新载入模型</button>
+        <button type="button" id="reset" class="reset">↺ &nbsp; 重置观察角度</button>
+        <div class="panel-bottom">
+          <span>收藏柜中的第 <b id="slot-label"></b> 格</span>
+          <span id="model-note">示意资产</span>
+        </div>
+      </aside>
+      <aside id="arrangement-panel" class="arrangement-panel" aria-labelledby="arrangement-title" hidden>
+        <div class="arrangement-heading">
+          <h2 id="arrangement-title">陈列工具</h2>
+          <button type="button" id="close-arrangement-panel" aria-label="收起陈列工具">收起</button>
+        </div>
+        <p class="arrangement-note">更改仅保存在此浏览器，不会发布或同步。</p>
+        <label for="arrangement-item">展品</label>
+        <select id="arrangement-item">
+          <option value="camera">复古相机</option>
+          <option value="cassette">手录磁带</option>
+          <option value="ticket">旧车票</option>
+        </select>
+        <form id="arrangement-move-form">
+          <label for="arrangement-slot">移到格位（已有展品时交换）</label>
+          <div class="arrangement-field-row">
+            <select id="arrangement-slot">
+              <option value="0">第 1 格 · 左上</option>
+              <option value="1">第 2 格 · 中上</option>
+              <option value="2">第 3 格 · 右上</option>
+              <option value="3">第 4 格 · 左下</option>
+              <option value="4">第 5 格 · 中下</option>
+              <option value="5">第 6 格 · 右下</option>
+            </select>
+            <button type="submit">移动 / 交换</button>
+          </div>
+        </form>
+        <form id="arrangement-plaque-form">
+          <label for="arrangement-plaque">铭牌文字</label>
+          <input id="arrangement-plaque" type="text" required aria-describedby="plaque-help" autocomplete="off">
+          <div class="arrangement-save-row">
+            <span id="plaque-help">最多 24 个字符</span>
+            <button type="submit">保存铭牌</button>
+          </div>
+        </form>
+      </aside>
+    </main>
+    <footer class="museum-footer">
+      <p id="guide" aria-live="polite">点击展柜中的旧物，取出查看立体细节并倾听物主讲述</p>
+      <button type="button" id="open-arrangement-panel" class="arrangement-tools-toggle" aria-expanded="false" aria-controls="arrangement-panel" hidden>修改铭牌 / 选择格位</button>
+      <p id="arrangement-status" class="arrangement-status" role="status" hidden></p>
+    </footer>
+    <script type="module" src="/main.ts"></script>
+  </body>
+</html>
