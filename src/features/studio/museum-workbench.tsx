@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { z } from 'zod';
 import { museumDraftSchema, updateMuseumInputSchema, type ExhibitDraft, type MuseumDraft } from '../../contracts/museum';
-import { publishResultSchema, shareTokenSchema } from '../../contracts/session';
 import { ApiFailure, apiRequest, describeFailure, jsonRequest } from './api';
 import { ExhibitEditor } from './exhibit-editor';
 import { buttonClass, Field, inputClass, Notice, panelClass, primaryClass } from './ui';
@@ -46,7 +45,6 @@ function MuseumEditor({ initial }: { initial: MuseumDraft }) {
   const [message, setMessage] = useState<string | null>(null);
   const [refreshRequired, setRefreshRequired] = useState(false);
   const [unconfirmed, setUnconfirmed] = useState<string[]>([]);
-  const [token, setToken] = useState<string | null>(null);
   const metadataDirty = title !== metadataBase.title || description !== metadataBase.description;
   const anyDirty = metadataDirty || editorDirty;
   const busy = action !== null || editorBusy;
@@ -66,7 +64,7 @@ function MuseumEditor({ initial }: { initial: MuseumDraft }) {
   }
   async function refreshState() {
     try { setMuseum(await apiRequest(path, museumDraftSchema)); setRefreshRequired(false); }
-    catch (failure) { setRefreshRequired(true); setError(`操作已完成，但展馆状态尚未刷新。请重新读取后再发布。${describeFailure(failure)}`); }
+    catch (failure) { setRefreshRequired(true); setError(`操作已完成，但展馆状态尚未刷新。请重新读取后再继续操作。${describeFailure(failure)}`); }
   }
   async function reload() {
     if (anyDirty && !window.confirm('重新读取会替换本页尚未保存的输入。请先复制要保留的内容，确定重新读取吗？')) return;
@@ -100,26 +98,15 @@ function MuseumEditor({ initial }: { initial: MuseumDraft }) {
       // Other exhibit edits may advance the museum version without changing these fields.
       const version = museum.title === metadataBase.title && museum.description === metadataBase.description ? museum.version : metadataBase.version;
       const result = await apiRequest(path, museumDraftSchema, jsonRequest('PATCH', updateMuseumInputSchema.parse({ title, description, expectedVersion: version })));
-      setMuseum(result); setMetadataBase({ title: result.title, description: result.description, version: result.version }); setTitle(result.title); setDescription(result.description); setMessage('展馆资料已保存；再次发布后参观页才更新。');
+      setMuseum(result); setMetadataBase({ title: result.title, description: result.description, version: result.version }); setTitle(result.title); setDescription(result.description); setMessage('展馆资料已保存。');
     } catch (failure) { fail(failure); }
     finally { setAction(null); }
   }
-  async function share(operation: 'publish' | 'stop' | 'rotate') {
-    if (operation === 'rotate' && !window.confirm('更换后旧链接立即失效。确定生成新链接吗？')) return;
-    setAction(operation); setError(null); setMessage(null); setUnconfirmed([]);
+  async function stopSharing() {
+    setAction('stop'); setError(null); setMessage(null);
     try {
-      const input = { expectedVersion: museum.version };
-      if (operation === 'publish') {
-        const result = await apiRequest(`${path}/publish`, publishResultSchema, jsonRequest('POST', input));
-        if (result.token) setToken(result.token);
-        setMessage('已发布当前确认内容。之后修改草稿不会改变这份参观快照。');
-      } else if (operation === 'rotate') {
-        const result = await apiRequest(`${path}/share`, z.strictObject({ token: shareTokenSchema }), jsonRequest('POST', input));
-        setToken(result.token); setMessage('新链接已生成，旧链接已失效。');
-      } else {
-        await apiRequest(`${path}/share`, z.strictObject({ ok: z.literal(true) }), jsonRequest('DELETE', input));
-        setToken(null); setMessage('已停止分享，旧链接的数据和素材新请求已失效。');
-      }
+      await apiRequest(`${path}/share`, z.strictObject({ ok: z.literal(true) }), jsonRequest('DELETE', { expectedVersion: museum.version }));
+      setMessage('已停止分享，旧链接的数据和素材新请求已失效。');
       await refreshState();
     } catch (failure) { fail(failure); }
     finally { setAction(null); }
@@ -143,9 +130,7 @@ function MuseumEditor({ initial }: { initial: MuseumDraft }) {
           const active = exhibit ? selection === exhibit.id : selection === 'new' && newSlot === index;
           return <button key={index} type="button" aria-pressed={active} disabled={busy} onClick={() => choose(exhibit, index)} className={`min-h-24 rounded-lg border p-2 text-left text-xs leading-5 transition ${active ? 'border-amber-200 bg-amber-100/10' : 'border-stone-700 hover:border-stone-400'} ${exhibit && unconfirmed.includes(exhibit.id) ? 'ring-2 ring-red-300/60' : ''}`}><span className="block text-stone-500">{index < 3 ? '上排' : '下排'} {index % 3 + 1}</span><span className="mt-1 block">{exhibit?.name ?? '＋ 收录旧物'}</span>{exhibit && <span className={`block ${exhibit.confirmedVersion === exhibit.version ? 'text-amber-100/60' : 'text-red-200/70'}`}>{exhibit.confirmedVersion === exhibit.version ? '已确认' : '待确认'}</span>}</button>;
         })}</div>{unconfirmed.length > 0 && <p className="mt-3 text-xs text-red-200">请依次处理红色标记的未确认展品。</p>}</section>
-        <section className={panelClass}><h2 className="text-lg">发布与参观链接</h2><p className="mt-3 text-sm leading-6 text-stone-400">持有链接即可访问。请先保存并确认所有展品，再发布完整快照。</p>{anyDirty && <p className="mt-3 text-sm text-amber-100/70">本页有未保存内容，请先处理后再发布。</p>}<div className="mt-4 flex flex-wrap gap-3"><button className={primaryClass} disabled={busy || anyDirty || refreshRequired} onClick={() => share('publish')}>发布当前版本</button><button className={buttonClass} disabled={busy || anyDirty || refreshRequired || museum.publishedVersion === null} onClick={() => share('rotate')}>更换参观链接</button><button className={buttonClass} disabled={busy || anyDirty || refreshRequired || !museum.shareEnabled} onClick={() => share('stop')}>停止分享</button></div>
-          {token && museum.shareEnabled && <div className="mt-5"><Field label="本次生成的参观链接"><input className={`${inputClass} text-xs`} readOnly value={`${window.location.origin}/share/${token}`} onFocus={(event) => event.target.select()} /></Field><a className="mt-3 inline-block text-sm text-amber-100 underline" href={`/share/${token}`} target="_blank" rel="noreferrer">在新窗口参观</a></div>}
-          {!token && museum.shareEnabled && <p className="mt-4 text-xs leading-5 text-stone-500">已启用的旧链接继续有效。此处不回显历史 token；若未保存链接，可更换链接后重新交付。</p>}
+        <section className={panelClass}><h2 className="text-lg">发布与分享</h2><p className="mt-3 text-sm leading-6 text-stone-400">参观页尚未开放，暂不能发布或交付参观链接。现有分享仍可停止。</p><div className="mt-4 flex flex-wrap gap-3"><button className={primaryClass} disabled>发布当前版本（暂未开放）</button><button className={buttonClass} disabled={busy || anyDirty || refreshRequired || !museum.shareEnabled} onClick={stopSharing}>停止分享</button></div>
         </section>
         <button className={`${buttonClass} text-red-200/70`} disabled={busy || anyDirty || refreshRequired} onClick={removeMuseum}>删除展馆草稿并停止分享</button>
       </aside>
