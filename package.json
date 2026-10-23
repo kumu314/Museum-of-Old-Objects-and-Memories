@@ -2,6 +2,7 @@
   "name": "museum-of-old-objects-and-memories",
   "version": "0.0.0",
   "private": true,
+  "type": "module",
   "packageManager": "pnpm@10.30.3",
   "engines": {
     "node": ">=22.12.0 <23"
@@ -15,6 +16,8 @@
     "lint:fix": "eslint . --fix",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:db": "node --env-file-if-exists=.env.local node_modules/vitest/vitest.mjs run --config vitest.db.config.ts",
+    "db:migrate": "node --conditions=react-server --env-file-if-exists=.env.local scripts/db/migrate.mjs",
     "check": "pnpm run typecheck && pnpm run lint && pnpm run test"
   },
   "dependencies": {

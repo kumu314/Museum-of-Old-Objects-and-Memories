@@ -18,6 +18,21 @@ describe('loadEnv', () => {
     );
   });
 
+  it('不同账号、协议别名和默认端口仍指向同一库时拒绝', () => {
+    expect(() => loadEnv({
+      DATABASE_URL: 'postgresql://dev@localhost/shiwuguan',
+      TEST_DATABASE_URL: 'postgres://test@127.0.0.1:5432/shiwuguan',
+    })).toThrow(/TEST_DATABASE_URL/);
+  });
+
+  it.each(['invalid', 'https://localhost/database', 'postgresql://localhost', 'postgresql://localhost/%invalid', 'postgresql://localhost/dev?dbname=production'])(
+    '拒绝非法连接配置 %s，且不回显取值', (value) => {
+      expect(() => loadEnv({ DATABASE_URL: value, TEST_DATABASE_URL: test })).toThrow(
+        '服务端配置缺失或非法：DATABASE_URL',
+      );
+    },
+  );
+
   it('缺少必填项时指出字段名且不回显取值', () => {
     let message = '';
     try {

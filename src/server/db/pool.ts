@@ -1,6 +1,7 @@
 import 'server-only';
-import { Pool } from 'pg';
+import type { Pool } from 'pg';
 import { getEnv } from '@/server/config/env';
+import { createPool } from '@/server/db/connection';
 
 /**
  * 单例连接池。只在服务端模块里引用，客户端组件 import 本文件会在构建期报错。
@@ -14,7 +15,7 @@ export function getPool(): Pool {
   const existing = globalForPg.__pgPool;
   if (existing) return existing;
 
-  const created = new Pool({ connectionString: getEnv().DATABASE_URL });
+  const created = createPool(getEnv().DATABASE_URL);
   globalForPg.__pgPool = created;
   return created;
 }

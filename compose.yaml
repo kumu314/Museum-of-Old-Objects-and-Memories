@@ -1,0 +1,36 @@
+services:
+  postgres-dev:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: shiwuguan_dev
+      POSTGRES_PASSWORD: local_dev_only
+      POSTGRES_DB: shiwuguan_dev
+    ports:
+      - "127.0.0.1:${SHIWUGUAN_DEV_PORT:-55432}:5432"
+    volumes:
+      - postgres-dev:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shiwuguan_dev -d shiwuguan_dev"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+  postgres-test:
+    image: postgres:17-alpine
+    profiles: [test]
+    environment:
+      POSTGRES_USER: shiwuguan_test
+      POSTGRES_PASSWORD: local_test_only
+      POSTGRES_DB: shiwuguan_test
+    ports:
+      - "127.0.0.1:${SHIWUGUAN_TEST_PORT:-55433}:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shiwuguan_test -d shiwuguan_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+volumes:
+  postgres-dev:
