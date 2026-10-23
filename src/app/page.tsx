@@ -1,22 +1,13 @@
-/**
- * 工程骨架的占位页，不是产品页面。
- * 参观界面与工作台分别由 B、A 在自己的分支实现后替换本文件。
- */
-export default function HomePage() {
+import Link from 'next/link';
+
+export default function Home() {
   return (
-    <main className="mx-auto flex max-w-2xl flex-col gap-6 px-6 py-24">
-      <h1 className="text-3xl font-semibold tracking-tight">拾物馆</h1>
-      <p className="text-stone-600">
-        工程骨架已就位，产品功能尚未实现。这一页只用于确认开发、构建与检查链路可用。
-      </p>
-      <dl className="grid grid-cols-[8rem_1fr] gap-y-2 text-sm">
-        <dt className="text-stone-500">当前阶段</dt>
-        <dd>G0 工程初始化</dd>
-        <dt className="text-stone-500">框架</dt>
-        <dd>Next.js 16 App Router · React 19.3 · TypeScript 5.9</dd>
-        <dt className="text-stone-500">数据</dt>
-        <dd>PostgreSQL（连接与迁移待在各自环境验证）</dd>
-      </dl>
+    <main className="mx-auto max-w-3xl px-8 py-24">
+      <h1 className="font-serif text-5xl">拾物馆</h1>
+      <p className="mt-6 text-xl">家人的旧物纪念展</p>
+      <p className="mt-10 leading-8 text-stone-300">收录旧物，整理讲述，把确认过的记忆放进一座可以分享的收藏柜。</p>
+      <Link className="mt-8 inline-block rounded border border-amber-200/40 px-6 py-3 text-amber-100 hover:bg-amber-100/10" href="/studio">进入团队制作工作台</Link>
+      <p className="mt-8 text-sm text-stone-400">参观者无需账号，打开制作人员交付的参观链接即可查看展馆。</p>
     </main>
   );
 }

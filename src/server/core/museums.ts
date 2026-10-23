@@ -1,0 +1,119 @@
+import { randomUUID } from 'node:crypto';
+import type { PoolClient } from 'pg';
+import { museumDraftSchema, museumSummarySchema, type CreateMuseumInput, type UpdateMuseumInput,
+  type CreateExhibitInput, type UpdateExhibitInput, type ConfirmExhibitInput } from '../../contracts';
+import { withTransaction } from '../db/pool';
+import { assertVersion, dates, exhibitRecord, exhibitRecords, museumRecord, requireActor, validateAssets,
+  bumpMuseum, invalid, assetRecord } from './records';
+
+// The optional client composes writes with an existing transaction, e.g. AI adoption.
+// Callers supplying it own BEGIN/COMMIT/ROLLBACK; ordinary HTTP callers omit it.
+export function inTransaction<T>(work: (db: PoolClient) => Promise<T>, client?: PoolClient): Promise<T> {
+  return client ? work(client) : withTransaction(work);
+}
+export async function museumDraft(client: PoolClient, museumId: string) {
+  const museum = await museumRecord(client, museumId);
+  return museumDraftSchema.parse({ ...museum, exhibits: await exhibitRecords(client, museumId) });
+}
+
+export function listMuseums(actorId: string, client?: PoolClient) {
+  return inTransaction(async (db) => {
+    await requireActor(db, actorId);
+    const result = await db.query<Record<string, unknown>>(`SELECT m.id,m.title,m.description,m.version,p.museum_version AS "publishedVersion",
+      m.share_enabled AS "shareEnabled",m.created_at AS "createdAt",m.updated_at AS "updatedAt"
+      FROM museums m LEFT JOIN published_snapshots p ON p.id=m.current_snapshot_id WHERE m.deleted_at IS NULL ORDER BY m.updated_at DESC`);
+    return result.rows.map((row) => museumSummarySchema.parse(dates(row)));
+  }, client);
+}
+export function getMuseum(actorId: string, museumId: string, client?: PoolClient) {
+  return inTransaction(async (db) => { await requireActor(db, actorId); return museumDraft(db, museumId); }, client);
+}
+export function createMuseum(actorId: string, input: CreateMuseumInput, client?: PoolClient) {
+  return inTransaction(async (db) => {
+    await requireActor(db, actorId);
+    const id = randomUUID();
+    await db.query('INSERT INTO museums(id,title,description,created_by) VALUES($1,$2,$3,$4)', [id, input.title, input.description, actorId]);
+    return museumDraft(db, id);
+  }, client);
+}
+export function updateMuseum(actorId: string, id: string, input: UpdateMuseumInput, client?: PoolClient) {
+  return inTransaction(async (db) => {
+    await requireActor(db, actorId);
+    assertVersion((await museumRecord(db, id, true)).version, input.expectedVersion);
+    await db.query('UPDATE museums SET title=$1,description=$2,version=version+1,updated_at=now() WHERE id=$3', [input.title, input.description, id]);
+    return museumDraft(db, id);
+  }, client);
+}
+export function removeMuseum(actorId: string, id: string, expectedVersion: number, client?: PoolClient) {
+  return inTransaction(async (db) => {
+    await requireActor(db, actorId);
+    assertVersion((await museumRecord(db, id, true)).version, expectedVersion);
+    await db.query('UPDATE museums SET deleted_at=now(),share_enabled=false,share_token_hash=NULL,version=version+1,updated_at=now() WHERE id=$1', [id]);
+    return { id };
+  }, client);
+}
+async function ensureFreeSlot(db: PoolClient, museumId: string, slotIndex: number, exceptId: string | null) {
+  const occupied = await db.query('SELECT id FROM exhibits WHERE museum_id=$1 AND slot_index=$2 AND deleted_at IS NULL AND ($3::uuid IS NULL OR id<>$3)', [museumId, slotIndex, exceptId]);
+  if (occupied.rowCount) invalid('该柜格已有展品，请选择其他位置。');
+}
+function editableValues(input: CreateExhibitInput | UpdateExhibitInput) {
+  return [input.name, input.era, input.slotIndex, input.modelKey, input.caption, input.photoAssetId, input.audioAssetId,
+    input.approximation, input.sourceNotice, input.rawStory, input.transcript, JSON.stringify(input.sourceSegments)];
+}
+export function createExhibit(actorId: string, museumId: string, input: CreateExhibitInput, client?: PoolClient) {
+  return inTransaction(async (db) => {
+    await requireActor(db, actorId);
+    assertVersion((await museumRecord(db, museumId, true)).version, input.expectedMuseumVersion);
+    await ensureFreeSlot(db, museumId, input.slotIndex, null);
+    await validateAssets(db, museumId, input.photoAssetId, input.audioAssetId);
+    const id = randomUUID();
+    await db.query(`INSERT INTO exhibits(name,era,slot_index,model_key,caption,photo_asset_id,audio_asset_id,approximation,source_notice,
+      raw_story,transcript,source_segments,id,museum_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`, [...editableValues(input), id, museumId]);
+    await bumpMuseum(db, museumId);
+    return exhibitRecord(db, museumId, id);
+  }, client);
+}
+export function updateExhibit(actorId: string, museumId: string, id: string, input: UpdateExhibitInput, client?: PoolClient) {
+  return inTransaction(async (db) => {
+    await requireActor(db, actorId);
+    await museumRecord(db, museumId, true);
+    assertVersion((await exhibitRecord(db, museumId, id)).version, input.expectedVersion);
+    await ensureFreeSlot(db, museumId, input.slotIndex, id);
+    await validateAssets(db, museumId, input.photoAssetId, input.audioAssetId);
+    await db.query(`UPDATE exhibits SET name=$1,era=$2,slot_index=$3,model_key=$4,caption=$5,photo_asset_id=$6,audio_asset_id=$7,
+      approximation=$8,source_notice=$9,raw_story=$10,transcript=$11,source_segments=$12,version=version+1,confirmed_version=NULL,
+      confirmed_by=NULL,confirmed_at=NULL,confirmation_note=NULL,updated_at=now() WHERE id=$13 AND museum_id=$14`, [...editableValues(input), id, museumId]);
+    await bumpMuseum(db, museumId);
+    return exhibitRecord(db, museumId, id);
+  }, client);
+}
+export function removeExhibit(actorId: string, museumId: string, id: string, expectedVersion: number, client?: PoolClient) {
+  return inTransaction(async (db) => {
+    await requireActor(db, actorId);
+    await museumRecord(db, museumId, true);
+    assertVersion((await exhibitRecord(db, museumId, id)).version, expectedVersion);
+    await db.query('UPDATE exhibits SET deleted_at=now(),version=version+1,confirmed_version=NULL,confirmed_by=NULL,confirmed_at=NULL,confirmation_note=NULL,updated_at=now() WHERE id=$1 AND museum_id=$2', [id, museumId]);
+    await bumpMuseum(db, museumId);
+    return { id };
+  }, client);
+}
+export function confirmExhibit(actorId: string, museumId: string, id: string, input: ConfirmExhibitInput, client?: PoolClient) {
+  return inTransaction(async (db) => {
+    await requireActor(db, actorId);
+    await museumRecord(db, museumId, true);
+    const exhibit = await exhibitRecord(db, museumId, id);
+    assertVersion(exhibit.version, input.expectedVersion);
+    if (exhibit.confirmedVersion === exhibit.version) return exhibit;
+    if (!exhibit.caption.trim()) invalid('请先填写展签，再记录物主对当前内容的确认。');
+    await db.query('UPDATE exhibits SET confirmed_version=version,confirmed_by=$1,confirmed_at=now(),confirmation_note=$2,updated_at=now() WHERE id=$3 AND museum_id=$4', [actorId, input.confirmationNote, id, museumId]);
+    await bumpMuseum(db, museumId);
+    return exhibitRecord(db, museumId, id);
+  }, client);
+}
+export function getPrivateAsset(actorId: string, museumId: string, assetId: string, client?: PoolClient) {
+  return inTransaction(async (db) => {
+    await requireActor(db, actorId);
+    await museumRecord(db, museumId);
+    return assetRecord(db, museumId, assetId);
+  }, client);
+}
