@@ -1,0 +1,55 @@
+{
+  "_fixture": true,
+  "_note": "结构模板，所有值都是占位符，不是真实素材。复制后逐项填，填完删掉 _fixture 与 _note。字段定义见 docs/12-内容包模板.md。",
+  "id": "EX-__",
+  "name": "",
+  "era": "",
+  "category": "",
+  "facts": {
+    "originalNarrative": "",
+    "narrativeSource": {
+      "who": "",
+      "when": "",
+      "channel": ""
+    },
+    "sourceSegments": [
+      {
+        "id": "S1",
+        "text": ""
+      }
+    ],
+    "photos": [
+      {
+        "file": "",
+        "original": true
+      }
+    ],
+    "audio": null,
+    "knownDoubts": []
+  },
+  "curation": {
+    "aiDraft": null,
+    "humanEdits": [],
+    "questions": [],
+    "currentLabel": ""
+  },
+  "confirmation": {
+    "version": "",
+    "confirmedBy": "",
+    "confirmedAt": "",
+    "channel": "",
+    "scope": "",
+    "visibility": ""
+  },
+  "licenses": [
+    {
+      "file": "",
+      "source": "",
+      "licenseScope": "",
+      "authorizedBy": "",
+      "authorizedAt": "",
+      "approximation": ""
+    }
+  ],
+  "missing": []
+}
