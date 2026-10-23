@@ -2,7 +2,7 @@
 
 以旧物、故事和真实 3D 收藏柜为核心的纪念展产品，首版采用团队协助制作：客户提供素材，团队收录与整理，物主确认具体版本后发布并交付参观链接。
 
-当前处于文档与开工准备阶段。仓库已有文档、提交钩子和零依赖 CI，尚无应用代码、数据库迁移或可运行演示；G0 工程初始化尚未完成。
+当前已有应用工程骨架（Next.js 16 + PostgreSQL）与类型、lint、测试、构建入口，产品功能尚未实现；G0 工程初始化进行中，契约、数据层与身份尚未落地。运行方式见[运行说明](docs/运行说明.md)。
 
 ## 实施文档
 
@@ -17,13 +17,13 @@
 
 ## 当前技术基线
 
-数据库已确定为 **PostgreSQL**。其余建议为 Next.js App Router、TypeScript、React、Three.js / React Three Fiber、Zod；具体版本与驱动在 G0 验证并锁定。首版保持单实例 Node 应用连接 PostgreSQL，上传素材使用服务端持久目录。
+数据库为 **PostgreSQL**（驱动 `pg`，手写 SQL）；应用为 Next.js 16 App Router + React 19.3 + TypeScript 5.9（`strict`、`noUncheckedIndexedAccess`、`exactOptionalPropertyTypes`）、Tailwind CSS 4、Zod 4；三维用 Three.js 0.186 + React Three Fiber 9 + Drei 10。版本一律精确固定，清单与升级理由见[运行说明](docs/运行说明.md)。
+
+工具链为 Node.js 22.22.2（`.node-version`）与 pnpm 10.30.3（`packageManager`），CI 与本地使用同一基线，安装走 `pnpm install --frozen-lockfile`。
 
 开发、测试与生产数据库隔离；`DATABASE_URL`、`TEST_DATABASE_URL` 等真实连接配置不进入 Git。数据库和素材在暂停写入的同一窗口内生成配套备份，恢复要求见开发书。
 
 ## 当前可运行的检查
-
-以下工具只依赖 Git、Bash 和 Node.js，不需要安装应用依赖。现有 CI 使用 Node.js 20；应用所需 Node.js 与 pnpm 版本尚待 G0 固定。
 
 ```sh
 # 克隆后安装一次本地提交钩子
@@ -31,9 +31,13 @@ bash scripts/install-hooks.sh
 
 # 检查仓库文件与最近一条提交信息
 bash scripts/check.sh
+
+# 应用检查（需先 pnpm install --frozen-lockfile）
+pnpm run check   # typecheck + lint + test
+pnpm run build   # 生产构建
 ```
 
-检查目前覆盖仓库噪声和提交信息格式，不代表类型检查、业务测试、生产构建或 PostgreSQL 运行验证已经完成。已移除固定的提交行数和文件体积限制，保留敏感文件、生成物、空壳代码与调试残留检查。
+`bash scripts/check.sh` 只覆盖仓库噪声与提交信息格式；类型检查、lint、单元测试和生产构建由 `pnpm run check` / `pnpm run build` 覆盖，两者都已接入 CI。仍不代表 PostgreSQL 连接、迁移、事务与备份恢复已验证，也不代表部署环境已跑通。已移除固定的提交行数和文件体积限制，保留敏感文件、生成物、空壳代码与调试残留检查。
 
 ## 协作与资料清理
 
