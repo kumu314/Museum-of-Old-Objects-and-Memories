@@ -7,14 +7,15 @@ set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 
 NODE="${NODE:-node}"
+COMMIT_RANGE="${COMMIT_RANGE:-HEAD~1..HEAD}"
 fail=0
 
 echo "== 1/3 全仓库噪声扫描 =="
 if "$NODE" scripts/scan-noise.mjs; then echo "  → 通过"; else echo "  → 失败"; fail=1; fi
 
 echo
-echo "== 2/3 提交信息检查（最近 1 条）=="
-if "$NODE" scripts/lint-commit.mjs --range HEAD~1..HEAD; then
+echo "== 2/3 提交信息检查（$COMMIT_RANGE）=="
+if "$NODE" scripts/lint-commit.mjs --range "$COMMIT_RANGE"; then
   echo "  → 通过"
 else
   echo "  → 失败"

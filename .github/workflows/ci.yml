@@ -23,16 +23,11 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: 音频解析运行依赖
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
-      - name: 提交信息检查
-        if: github.event_name == 'pull_request'
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: node scripts/lint-commit.mjs --range "$BASE_SHA..$HEAD_SHA"
       - run: pnpm db:local
       - run: pnpm db:migrate && pnpm db:migrate:test
       - run: bash scripts/check.sh
         env:
           APP_ORIGIN: https://museum.example.test
+          COMMIT_RANGE: ${{ github.event_name == 'pull_request' && format('{0}..{1}', github.event.pull_request.base.sha, github.event.pull_request.head.sha) || 'HEAD~1..HEAD' }}
       - if: always()
         run: docker compose -f compose.local.yml stop
