@@ -12,7 +12,7 @@ const SKIP_DIRS = new Set([
   '.turbo', '.workbuddy-ai', '.agent',
 ]);
 
-const CODE_DIRS = new Set(['app', 'lib', 'components', 'pages']);
+const CODE_DIRS = new Set(['src', 'app', 'lib', 'components', 'pages', 'tests']);
 const CODE_EXT = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
 
 const errors = [];
@@ -38,7 +38,8 @@ function walk(dir) {
     const full = join(dir, e.name);
     const rel = relative(ROOT, full).replace(/\\/g, '/');
 
-    if (/^\.env(\.|$)/.test(e.name)) {
+    // .env.example 是占位样例，必须能提交；其余 .env* 一律算敏感文件
+    if (/^\.env(?!\.example$)(\.|$)/.test(e.name)) {
       errors.push(`敏感文件在仓库里：${rel}`);
       continue;
     }
@@ -84,7 +85,7 @@ function walk(dir) {
 walk(ROOT);
 
 if (todoCount > 0) notes.push(`TODO/FIXME 共 ${todoCount} 处`);
-notes.push(`代码文件 ${codeFiles} 个 / ${codeLines} 行（仅统计 app、lib、components、pages）`);
+notes.push(`代码文件 ${codeFiles} 个 / ${codeLines} 行（统计 src、app、lib、components、pages、tests）`);
 
 for (const n of notes) console.log(`· ${n}`);
 

@@ -1,0 +1,6 @@
+# pnpm 10 默认不执行依赖的构建脚本；需要构建的原生/打包依赖必须显式列出，
+# 否则 sharp、esbuild 等会静默跳过构建，运行期才报错。
+onlyBuiltDependencies:
+  - esbuild
+  - sharp
+  - unrs-resolver

@@ -16,7 +16,8 @@ import { execFileSync } from 'node:child_process';
 
 const GENERATED_DIRS = ['node_modules/', '.next/', 'dist/', 'build/', 'out/', '.turbo/', 'coverage/'];
 const SENSITIVE = [
-  /(^|\/)\.env(\.|$)/,
+  // .env / .env.local 一律拦下；.env.example 是占位样例，必须能提交
+  /^(?:.*\/)?\.env(?!\.example$)(?:\.[^/]*)?$/,
   /\.pem$/, /\.key$/, /\.p12$/,
   /(^|\/)data\/responses-real\.json$/,
   /(^|\/)data\/responses-raw\.csv$/,
@@ -25,7 +26,7 @@ const SENSITIVE = [
 ];
 
 /** 只在这些目录里拦调试残留——命令行工具本来就该打印东西 */
-const CODE_DIRS = /^(app|lib|components|pages)\//;
+const CODE_DIRS = /^(src|app|lib|components|pages)\//;
 const CODE_EXT = /\.(ts|tsx|js|jsx|mjs|cjs)$/;
 
 // ── 取数据 ────────────────────────────────────────────
