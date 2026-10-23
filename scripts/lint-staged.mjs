@@ -190,7 +190,7 @@ for (const f of files) {
   }
 }
 
-// 3. 巨型提交
+// 3. 巨型提交（Markdown 按语义完整性审查，其他检查仍适用）
 // 只数**新增行**：删除行不算"改动量"。
 // 清理类提交（删掉一整个文件）新增行是 0，但删除行可能上千——按「新增+删除」算
 // 会把正常清理也拦下，反而逼人用 --no-verify，闸门就形同虚设。
@@ -201,6 +201,7 @@ for (const f of files) {
   if (f.binary) continue;
   if (LOCK_FILES.some((l) => f.path.endsWith(l))) continue;
   if (GENERATED_DIRS.some((d) => f.path.includes(d))) continue;
+  if (f.path.endsWith('.md')) continue;
   const n = f.added || 0;
   totalLines += n;
   totalDeleted += f.deleted || 0;
@@ -215,7 +216,7 @@ if (totalLines > MAX_LINES) {
   } else {
     const top = counted.sort((a, b) => b.n - a.n).slice(0, 3);
     errors.push(
-      `本次新增 ${totalLines} 行，超过 ${MAX_LINES} 行上限\n` +
+      `本次非 Markdown、非锁文件新增 ${totalLines} 行，超过 ${MAX_LINES} 行上限\n` +
         `     最大的几个：${top.map((t) => `${t.path}(${t.n})`).join('、')}\n` +
         `     拆成几个提交——理由不是洁癖，是回滚时你只想撤一个`
     );
