@@ -42,8 +42,8 @@ export function HomeCabinetStage() {
   const anyFailed = Object.values(assets).some((status) => status === 'failed');
 
   return <div className="relative" style={{
-    maskImage: 'radial-gradient(122% 116% at 50% 46%, black 58%, transparent 98%)',
-    WebkitMaskImage: 'radial-gradient(122% 116% at 50% 46%, black 58%, transparent 98%)',
+    maskImage: 'radial-gradient(106% 102% at 50% 46%, black 44%, rgba(0,0,0,.5) 66%, transparent 86%)',
+    WebkitMaskImage: 'radial-gradient(106% 102% at 50% 46%, black 44%, rgba(0,0,0,.5) 66%, transparent 86%)',
   }}>
     <canvas ref={canvasRef} className="block w-full" style={{ aspectRatio: '1.06 / 1' }} aria-label="六格木柜三维展柜：陈列相机、磁带、拍立得与信封" />
     {loading && !unavailable && <p role="status" className="absolute inset-x-0 bottom-4 text-center text-sm text-[#B7A994]">正在布置展柜…</p>}

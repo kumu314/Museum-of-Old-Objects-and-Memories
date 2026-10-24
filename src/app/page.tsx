@@ -26,7 +26,7 @@ export default function Home() {
                 <i className="rounded-[2px] border border-[#F3ECE1]/55" /><i className="rounded-[2px] border border-[#F3ECE1]/55" />
               </span>
               <span className="flex flex-col leading-tight">
-                <b className="font-serif text-xl font-semibold tracking-[.14em]">旧物博物馆</b>
+                <b className="font-serif text-xl font-semibold tracking-[.14em]">拾物馆</b>
                 <span className="text-[10px] tracking-[.3em] text-[#7A6C5B]">MEMORIES MUSEUM</span>
               </span>
             </div>
@@ -45,7 +45,7 @@ export default function Home() {
         <div className="relative z-10 mx-auto grid max-w-[1360px] items-center gap-10 px-5 py-16 sm:px-10 lg:grid-cols-[42fr_58fr] lg:py-20">
           <div>
             <p className="text-sm leading-9 tracking-[.42em] text-[#B7A994]">每一件旧物<br />都是一段走过的时光</p>
-            <h1 className="mt-6 font-serif text-[54px] font-semibold leading-[1.26] tracking-[.04em] text-[#F0E8DA] lg:text-[68px]" style={{ textShadow: '0 0 44px rgba(225,197,142,.3), 0 2px 2px rgba(0,0,0,.55)' }}>数字旧物博物馆</h1>
+            <h1 className="mt-6 font-serif text-[54px] font-semibold leading-[1.26] tracking-[.04em] text-[#F0E8DA] lg:text-[68px]" style={{ textShadow: '0 0 44px rgba(225,197,142,.3), 0 2px 2px rgba(0,0,0,.55)' }}>数字拾物馆</h1>
             <p className="mt-6 max-w-[27em] text-base leading-[2.1] text-[#B7A994]">在这里，旧物不再被遗忘。<br />用数字的方式，收藏生活的温度，<br />让时光的痕迹，依然被看见。</p>
             <div className="mt-9 flex flex-wrap items-center gap-4">
               <Link href="/login" className="rounded-full bg-gradient-to-b from-[#E1C58E] to-[#C2A36B] px-8 py-3 font-medium tracking-[.08em] text-[#2B2014] shadow-[inset_0_1px_0_rgba(255,250,235,.5),0_16px_34px_-16px_rgba(200,165,107,.7)] hover:brightness-105">开始收藏 →</Link>
@@ -68,7 +68,7 @@ export default function Home() {
       {/* ── 双栏模式介绍 ── */}
       <section className="border-y border-[#C8A56B]/15 bg-[#19140F]">
         <div className="mx-auto grid max-w-[1360px] gap-6 px-5 py-14 sm:px-10 md:grid-cols-2 lg:py-20">
-          <article className="relative flex min-h-[360px] items-center overflow-hidden rounded-xl border border-[#3A2D20] bg-[#211912]">
+          <article className="relative flex min-h-[360px] items-center overflow-hidden rounded-xl bg-[#211912]" style={{ maskImage: 'radial-gradient(118% 118% at 46% 50%, black 52%, rgba(0,0,0,.6) 74%, transparent 94%)', WebkitMaskImage: 'radial-gradient(118% 118% at 46% 50%, black 52%, rgba(0,0,0,.6) 74%, transparent 94%)' }}>
             <img src={CARD_CAMERA} alt="" className="absolute inset-0 h-full w-full object-cover" style={{ filter: 'sepia(.3) contrast(1.07) brightness(.8)' }} />
             <div className="absolute inset-0" style={{ background: 'linear-gradient(90deg, #17120D 30%, rgba(23,18,13,.4) 78%, rgba(23,18,13,.2) 100%)' }} />
             <div className="relative max-w-[30em] p-8 sm:p-10">
@@ -88,7 +88,7 @@ export default function Home() {
             </div>
           </article>
 
-          <article className="relative flex min-h-[360px] items-center overflow-hidden rounded-xl border border-[#3A2D20] bg-[#211912]">
+          <article className="relative flex min-h-[360px] items-center overflow-hidden rounded-xl bg-[#211912]" style={{ maskImage: 'radial-gradient(118% 118% at 46% 50%, black 52%, rgba(0,0,0,.6) 74%, transparent 94%)', WebkitMaskImage: 'radial-gradient(118% 118% at 46% 50%, black 52%, rgba(0,0,0,.6) 74%, transparent 94%)' }}>
             <img src={CARD_MEMORIES} alt="" className="absolute inset-0 h-full w-full object-cover" style={{ filter: 'sepia(.32) contrast(1.05) brightness(.78)' }} />
             <div className="absolute inset-0" style={{ background: 'linear-gradient(90deg, #17120D 30%, rgba(23,18,13,.42) 78%, rgba(23,18,13,.22) 100%)' }} />
             <div className="relative max-w-[30em] p-8 sm:p-10">
@@ -139,7 +139,7 @@ export default function Home() {
             <blockquote className="relative mt-10 max-w-[34em] rounded-xl border border-[#3A2D20] bg-[#211912]/50 px-7 pb-5 pt-6">
               <span className="absolute -top-7 left-4 font-serif text-7xl leading-none text-[#C8A56B] opacity-80" aria-hidden="true">“</span>
               <p className="text-[15px] leading-[2.1]">旧物的意义，不在于它的价值，<br />而在于它曾陪伴我们走过怎样的时光。</p>
-              <div className="mt-2 text-right text-[13px] text-[#7A6C5B]">—— 旧物博物馆</div>
+              <div className="mt-2 text-right text-[13px] text-[#7A6C5B]">—— 拾物馆</div>
             </blockquote>
           </div>
 
@@ -170,7 +170,7 @@ export default function Home() {
 
       <footer className="border-t border-[#C8A56B]/15 bg-[#100D0A]">
         <div className="mx-auto flex max-w-[1360px] flex-wrap items-center justify-between gap-3 px-5 py-6 text-[12.5px] text-[#7A6C5B] sm:px-10">
-          <span className="font-serif tracking-[.14em] text-[#B7A994]">旧物博物馆 MEMORIES MUSEUM</span>
+          <span className="font-serif tracking-[.14em] text-[#B7A994]">拾物馆 MEMORIES MUSEUM</span>
           <span>收藏平凡的日子 · 也收藏独一无二的你</span>
           <span>首版制作中</span>
         </div>

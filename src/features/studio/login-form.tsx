@@ -46,7 +46,7 @@ export function LoginForm() {
             <i className="rounded-[2px] border border-[#F3ECE1]/55" /><i className="rounded-[2px] border border-[#F3ECE1]/55" />
           </span>
           <span className="flex flex-col leading-tight">
-            <b className="font-serif text-xl font-semibold tracking-[.14em]">旧物博物馆</b>
+            <b className="font-serif text-xl font-semibold tracking-[.14em]">拾物馆</b>
             <span className="text-[10px] tracking-[.3em] text-[#B7A994]">MEMORIES MUSEUM</span>
           </span>
         </div>
@@ -70,7 +70,7 @@ export function LoginForm() {
               <i className="rounded-[2px] border border-[#F3ECE1]/55" /><i className="rounded-[2px] border border-[#F3ECE1]/55" />
               <i className="rounded-[2px] border border-[#F3ECE1]/55" /><i className="rounded-[2px] border border-[#F3ECE1]/55" />
             </span>
-            <b className="font-serif text-lg tracking-[.14em]">旧物博物馆</b>
+            <b className="font-serif text-lg tracking-[.14em]">拾物馆</b>
           </div>
 
           <div className="flex gap-7 border-b border-[#3A2D20]" role="tablist" aria-label="登录或注册">
@@ -80,7 +80,7 @@ export function LoginForm() {
               className={`-mb-px border-b-2 pb-3 font-serif text-[15px] tracking-[.16em] transition ${registering ? 'border-[#C8A56B] text-[#F0E8DA]' : 'border-transparent text-[#B7A994] hover:text-[#F0E8DA]'}`}>注册</button>
           </div>
 
-          <h1 className="mt-8 font-serif text-[34px] font-semibold leading-tight tracking-[.08em] lg:text-[38px]">{registering ? '注册旧物博物馆' : '欢迎回来'}</h1>
+          <h1 className="mt-8 font-serif text-[34px] font-semibold leading-tight tracking-[.08em] lg:text-[38px]">{registering ? '注册拾物馆' : '欢迎回来'}</h1>
           <p className="mt-3 text-sm text-[#B7A994]">{registering ? '几分钟后，你的第一件旧物就能入柜。' : '登录后继续整理你的展馆。'}</p>
 
           <form onSubmit={submit} className="mt-2">
