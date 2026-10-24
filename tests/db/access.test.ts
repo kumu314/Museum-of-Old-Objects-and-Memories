@@ -88,7 +88,11 @@ test('从主线 0007 升级保留有效旧链接与私密状态；访问字段�
     await db.query(`CREATE SCHEMA "${schema}"`);
     await db.query(`SET LOCAL search_path TO "${schema}"`);
     const migrations = await loadMigrations('migrations');
-    for (const migration of migrations.slice(0, 7)) await db.query(migration.sql);
+    // 升级起点是主线 schema，不写死序号：按文件名定位方向一访问迁移。
+    // 先应用主线与方向二迁移（此时还没有访问约束），在此之上构造旧版「分享中」状态。
+    const accessIndex = migrations.findIndex(({ filename }) => filename === '0013_museum_access.sql');
+    assert.ok(accessIndex > 0, '找不到 0013_museum_access.sql，重编号后请同步本文件。');
+    for (const migration of migrations.slice(0, accessIndex)) await db.query(migration.sql);
     await db.query('INSERT INTO team_members(id,username,password_hash) VALUES($1,$2,$3)', [actor, 'legacy-access', 'test-only']);
     const museum = randomUUID(); const snapshot = randomUUID(); const exhibit = randomUUID();
     await db.query('INSERT INTO museums(id,title,created_by) VALUES($1,$2,$3)', [museum, '旧链接馆', actor]);
@@ -99,7 +103,9 @@ test('从主线 0007 升级保留有效旧链接与私密状态；访问字段�
     const token = randomBytes(32).toString('base64url');
     const hash = createHash('sha256').update(token).digest('hex');
     await db.query('UPDATE museums SET current_snapshot_id=$1,share_enabled=true,share_token_hash=$2 WHERE id=$3', [snapshot, hash, museum]);
-    const upgrade = migrations.find(({ version }) => version === 8); assert.ok(upgrade);
+    // 应用方向一访问迁移：旧有效链接转为 link_only，私密馆保持 private。
+    const upgrade = migrations[accessIndex];
+    assert.ok(upgrade);
     await db.query(upgrade.sql);
     assert.deepEqual(await readShare(actor, token, db), data);
     const saved = await getMuseum(actor, museum, db);

@@ -11,6 +11,7 @@ import {
   getMuseum,
   publishMuseum,
   readLeaderboard,
+  rotateShareToken,
   readShare,
   readRegionDistribution,
   recordMuseumView,
@@ -77,9 +78,12 @@ async function publishedMuseum(db: PoolClient, ownerId: string, title: string, r
   const exhibit = await createExhibit(ownerId, museum.id, { ...exhibitInput(version), photoAssetId: image }, db);
   await confirmExhibit(ownerId, museum.id, exhibit.id, { expectedVersion: exhibit.version, confirmationNote: '浏览榜测试确认' }, db);
   const current = (await getMuseum(ownerId, museum.id, db)).version;
+  // 方向一语义：发布只生成快照且不发 token，新馆保持私密；
+  // 榜单口径需要「分享中」的馆，这里显式开启持链接访问并签发参观 token。
   const published = await publishMuseum(ownerId, museum.id, current, db);
-  assert.ok(published.token, '首次发布必须返回参观 token。');
-  return { museumId: museum.id, token: published.token };
+  assert.equal(published.token, null);
+  const link = await rotateShareToken(ownerId, museum.id, published.version, db);
+  return { museumId: museum.id, token: link.token };
 }
 
 async function viewCountOf(db: PoolClient, museumId: string): Promise<number | undefined> {
