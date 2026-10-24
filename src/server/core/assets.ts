@@ -20,9 +20,13 @@ function toOutcome(result: ReadableStreamReadResult<Uint8Array>): ReadOutcome {
   return result.done || !result.value ? { kind: 'done' } : { kind: 'chunk', value: result.value };
 }
 
+/**
+ * 普通上传阶段的读取。**这里绝不能吞掉读流错误**：
+ * 一旦把「异常」当成「正常结束」，已收集的片段会被当成完整文件解析并入库，
+ * 截断的上传就这样变成了合法素材。错误原样抛出，由调用方拒绝整次上传。
+ */
 async function readChunk(reader: ReadableStreamDefaultReader<Uint8Array>): Promise<ReadOutcome> {
-  try { return toOutcome(await reader.read()); }
-  catch { return { kind: 'stopped' }; }
+  return toOutcome(await reader.read());
 }
 
 /**

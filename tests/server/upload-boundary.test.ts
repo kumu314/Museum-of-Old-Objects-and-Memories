@@ -24,8 +24,9 @@ function streamingRequest(stream: ReadableStream<Uint8Array>, declared: number) 
 }
 
 /**
- * 413 之后这个请求体不能再吐出任何字节。
+ * 413 之后这个请求体必须处于「已结束」或「已报错」状态，不允许还能吐出字节。
  * 只要能读出来，就意味着这条连接上的残留数据可以被下一个请求吃掉——正是 ECONNRESET 的成因。
+ * 探测超时同样不允许通过：一直挂着说明流既没结束也没报错，状态未知，不能算安全。
  */
 async function assertBodyUnreadable(request: Request) {
   assert.ok(request.body, '请求体应仍然存在，否则断言本身失去意义');
@@ -33,9 +34,9 @@ async function assertBodyUnreadable(request: Request) {
   try {
     const outcome = await Promise.race([
       probe.read().then((result) => (result.done || !result.value ? 'done' : `chunk:${result.value.byteLength}`)),
-      new Promise<string>((done) => setTimeout(() => done('timeout'), 1_000)),
+      new Promise<string>((done) => setTimeout(() => done('timeout'), 3_000)),
     ]).catch((error: unknown) => `error:${error instanceof Error ? error.message : 'unknown'}`);
-    assert.doesNotMatch(String(outcome), /^chunk:/, `413 之后仍能读到数据: ${String(outcome)}`);
+    assert.match(String(outcome), /^(done|error:)/, `413 之后请求体必须结束或报错，实际: ${String(outcome)}`);
   } finally {
     try { probe.releaseLock(); } catch { /* 挂起的读取已随流终止结束 */ }
   }
@@ -123,6 +124,31 @@ test('流式累加才发现超限：同样按超限处理并终止流', async ()
   await assert.rejects(readAssetUpload(request), tooLarge);
   assert.equal(cancelled, true, '流式超限后同样不能留下未消费的连接');
   await assertBodyUnreadable(request);
+});
+
+test('普通上传阶段读流报错：必须拒绝整次上传，不能把已收集的片段当完整文件', async () => {
+  const boundary = 'boundary-read-error';
+  const payload = Buffer.concat([
+    Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="complete.png"\r\nContent-Type: image/png\r\n\r\n`),
+    Buffer.from([0x89, 0x50, 0x4e, 0x47]),
+    // 内容本身是完整的 multipart：只要错误被吞掉，它就会被解析成合法文件。
+    Buffer.from(`\r\n--${boundary}--\r\n`),
+  ]);
+  let reads = 0;
+  const stream = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (reads++ === 0) { controller.enqueue(new Uint8Array(payload)); return; }
+      controller.error(new Error('read failed mid-upload'));
+    },
+  });
+  const request = new Request('http://127.0.0.1/upload', {
+    method: 'POST',
+    headers: { 'content-type': `multipart/form-data; boundary=${boundary}`, 'content-length': String(payload.length) },
+    body: stream,
+    duplex: 'half',
+  } as RequestInit);
+  // 吞掉读流错误的话，这里会解析成功并返回 AssetInput——截断的上传就变成了合法素材。
+  await assert.rejects(readAssetUpload(request), /read failed mid-upload/);
 });
 
 test('未超限的上传不受影响：正常解析出文件名与 MIME', async () => {
