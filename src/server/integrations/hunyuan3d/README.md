@@ -76,6 +76,58 @@ if (job.status === 'DONE') {
 5. 失败保留原照片、讲述和已有模型；提交结果不明时先查询，不自动重新付费提交。
 6. 与 A 确认模型朝向、陈列 scale、资源预算和目标设备；资源上限在实测后冻结，不预先编造。
 
+## 常见上游错误（2026-10-24 实测）
+
+| 上游码 | 含义 | 处理 |
+| --- | --- | --- |
+| `ResourceUnavailable.NotExist` | 该账号未开通混元生3D（鉴权本身通过） | 在腾讯云控制台开通本服务并领取额度；地域用 `ap-guangzhou` |
+| `UnsupportedRegion` | 地域不支持 | `ap-shanghai`/`ap-beijing`/`ap-chengdu` 均返回此码，只能 `ap-guangzhou` |
+| `AuthFailure.*` | 密钥或子账号权限问题 | 换密钥或补授权 |
+| `FailedOperation.InsufficientBalance` 等 | 额度不足 | 更换凭据或补充额度 |
+| `FailedOperation.JobNotFound` | 查询的 JobId 不存在（鉴权正常） | 可作为“凭据有效”的免费探测 |
+
+任务表 `error_code` 保留上述安全标识；自由文本会丢弃。
+
+## 额度用完后如何替换 API 与凭据
+
+生产通道支持**服务端热替换**，不需要改代码或重启进程：编辑（或新建）
+`.local/model-provider.json`（Git 已忽略，仅本机可读），下一次生成请求即生效：
+
+```json
+{
+  "provider": "hunyuan-cloud",
+  "cloud": {
+    "secretId": "新的 SecretId",
+    "secretKey": "新的 SecretKey",
+    "region": "ap-guangzhou",
+    "endpoint": "https://ai3d.tencentcloudapi.com/",
+    "model": "3.1",
+    "timeoutMs": 60000
+  }
+}
+```
+
+- `endpoint` 可指向兼容同一协议（TC3-HMAC-SHA256 + `SubmitHunyuanTo3DProJob` /
+  `QueryHunyuanTo3DProJob`）的其他网关；生产必须是 HTTPS，且地址不携带凭据或查询串；HTTP 环回地址仅允许 `NODE_ENV=test`。
+- `provider` 可锁定 `hunyuan-cloud` 或 `hunyuan-proxy`（演示反代），便于在额度用完后
+  显式切换；也可省略，按可用性自动选择（配置了云 API 就用云 API）。
+- `HUNYUAN_PROVIDER_CONFIG` 可指定服务端配置文件路径，默认 `.local/model-provider.json`；`HUNYUAN_PROVIDER=cloud|proxy` 可锁定通道，文件中的 `provider` 优先。
+- 配置文件优先于环境变量；只有文件不存在才回退环境变量，路径、权限、语法或字段错误均受控失败，不会静默换通道。
+- 演示反代可在 JSON 中设置 `proxyBaseUrl`，提交和查询均使用该地址，沿用 HTTP(S) 地址校验与测试来源开关限制。
+- 采纳结果要求展品仍处于生成时的来源版本；生成后保存其他改动需重新生成，采纳后旧确认（含确认人）失效。
+- 凭据只存在于服务端文件；不要通过 API 返回、不要写日志、不要提交仓库。
+- 不做自动降级：额度不足会明确提示，由你替换凭据或切换到演示通道，避免在不知情时
+  改用另一条付费/演示链路。
+
+## 真实调用验证（2026-10-24）
+
+使用真实腾讯云账号对 Pro 接口完成一次端到端调用（768×768 合成 JPEG，`Model 3.1`、`EnablePBR`）：
+
+- 提交返回真实 `JobId`；轮询约 **173 秒**后 `DONE`，`ResultCreditConsumed` = **30**。
+- 结果文件含 OBJ 与 GLB；GLB **39,869,948 字节**，1 网格、1 材质、3 张贴图，`extensionsUsed: KHR_materials_specular`，无必需扩展（当前加载链可直接解析）。
+- 本工程 `validateGlb` 二次校验通过；下载经过来源策略与流式字节上限。
+- 注意：近 40 MB 的结果对浏览器与目标设备偏重，入库前仍需按 A/D 实测冻结资源预算（面数/贴图/字节上限），不能直接据此宣称性能可接受。
+
 ## 验证
 
 本地测试覆盖 TC3 请求头形状、提交/查询/下载（含 COS 签名 query 保留）、API 错误、任务失败、超时、输入限制、下载来源策略（HTTPS/COS 域名/公网地址/重定向禁用）、流式大小上限、GLB 引用结构与解码扩展拒绝，并以项目实际 GLTFLoader 冒烟验证基准 fixture；不连接腾讯云，不需要真实 SecretId/SecretKey。真实账号、GLB 质量、耗时、扣费、素材授权和外传仍需单独获得授权后验证。

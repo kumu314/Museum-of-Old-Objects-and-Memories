@@ -1,6 +1,6 @@
 # 方向二共享契约提案
 
-版本：1.1（累计榜与地区已落库）
+版本：1.2（发现收录须明确同意）
 日期：2026年10月24日 22:30
 基线：main `3a6010d`
 提出：方向二实现分支；契约 owner：C
@@ -184,7 +184,9 @@ v1.0 未做（当时明确不声称）：真实浏览计数、真实聚合接口
 
 ### 15.1 上榜范围是一条安全边界
 
-只有 **未删除 + 已发布 + 分享开着**（`deleted_at IS NULL AND share_enabled AND current_snapshot_id IS NOT NULL`）的馆进入榜单与地图聚合。
+只有 **馆主明确同意收录 + 未删除 + 已发布 + 分享开着**（`discovery_listed AND deleted_at IS NULL AND share_enabled AND current_snapshot_id IS NOT NULL`）的馆进入榜单与地图聚合。
+
+迁移 `0012_discovery_consent.sql` 增加 `museums.discovery_listed`，既有和新建展馆均默认 `false`。持链接分享不代表同意被发现；馆主在资料表单明确勾选并保存后，才向所有登录用户展示已发布名称、所选城市及累计浏览次数。取消勾选并保存后立即退出榜单与地图，不关闭现有参观链接。更新字段 `discoveryListed` 可选，旧客户端不传表示保留现值，不能隐式同意或撤回。
 
 理由不是"好看"，是防泄露：少了「已发布」，馆主还没公开的草稿标题会出现在全站榜单上（浏览数当然是 0，但标题已经出去了）；少了「分享开着」，已下架的馆仍被持续公示。这条口径写在 `src/server/core/discovery.ts` 的 `visibleMuseum` 常量里，只此一处。
 

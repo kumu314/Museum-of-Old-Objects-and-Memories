@@ -14,11 +14,11 @@ import { inTransaction } from './museums';
 /**
  * 累计浏览榜与地区分布的真实聚合（方向二 · 第四块）。
  *
- * **上榜范围是一条安全边界，不是可调参数**：只有「未删除 + 已发布 + 分享开着」的馆才计入。
+ * **上榜范围是一条安全边界，不是可调参数**：只有「馆主明确同意收录 + 未删除 + 已发布 + 分享开着」的馆才计入。
  * 少了后两个条件，馆主还没发布的草稿标题就会出现在全站公开榜单上——浏览数当然是 0，
  * 但标题本身已经泄露了。已停止分享的馆同理：链接都失效了，还留在榜上等于继续公示。
  */
-const visibleMuseum = 'm.deleted_at IS NULL AND m.share_enabled AND m.current_snapshot_id IS NOT NULL';
+const visibleMuseum = 'm.discovery_listed AND m.deleted_at IS NULL AND m.share_enabled AND m.current_snapshot_id IS NOT NULL';
 
 /**
  * 榜单条数上限。首版馆数很少，取全量最省事，也让「按城市筛选」与地图聚合口径一致；
