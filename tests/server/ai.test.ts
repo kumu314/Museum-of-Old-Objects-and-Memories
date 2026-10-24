@@ -125,6 +125,24 @@ test('finish_reason=length 时返回受控的 AI_UNAVAILABLE', async (context) =
   await expectAiError(generateDraft(input), 'AI_UNAVAILABLE', 502);
 });
 
+test('content 为 null 且 finish_reason=length 时保留截断提示', async (context) => {
+  await localService(context, (_request, response) => {
+    response.setHeader('Content-Type', 'application/json');
+    response.end(JSON.stringify({
+      choices: [{ finish_reason: 'length', message: { role: 'assistant', content: null } }],
+    }));
+  });
+  let caught: unknown;
+  try {
+    await generateDraft(input);
+  } catch (error) {
+    caught = error;
+  }
+  assert.ok(caught instanceof HttpError);
+  assert.equal(caught.failure.code, 'AI_UNAVAILABLE');
+  assert.match(caught.failure.message, /截断/);
+});
+
 test('AI未配置时明确不可用，不查找其他凭据或生成演示答案', async (context) => {
   preserveEnvironment(context);
   delete process.env.AI_BASE_URL;

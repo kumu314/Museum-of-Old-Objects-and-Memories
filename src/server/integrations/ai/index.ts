@@ -10,7 +10,7 @@ const maximumResponseBytes = 65_536;
 const completionSchema = z.object({
   choices: z.array(z.object({
     finish_reason: z.string(),
-    message: z.object({ role: z.literal('assistant'), content: z.string() }),
+    message: z.object({ role: z.literal('assistant'), content: z.string().nullable() }),
   })).length(1),
 });
 
@@ -83,7 +83,7 @@ export async function generateDraft(input: AiInput): Promise<AiOutput> {
     if (choice.finish_reason === 'length') {
       throw new HttpError({ code: 'AI_UNAVAILABLE', message: 'AI 输出被截断，原文已保留，可以稍后重试或继续人工编辑。' });
     }
-    if (choice.finish_reason !== 'stop' || choice.message.content.length === 0) throw unavailable();
+    if (choice.finish_reason !== 'stop' || choice.message.content === null || choice.message.content.length === 0) throw unavailable();
     const output: unknown = JSON.parse(choice.message.content);
     return aiOutputForSourcesSchema(validated.sourceSegments).parse(output);
   } catch (cause) {
