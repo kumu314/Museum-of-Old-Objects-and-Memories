@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { z } from 'zod';
 import { publicMuseumSchema, type PublicExhibit, type PublicMuseum } from '../../contracts/museum';
+import { sharedContributionsSchema, type SharedContribution } from '../../contracts/contributors';
 import { shareNotFoundMessage } from '../../contracts/errors';
 import type { AssetStatus, SurfaceStatus, mountCabinetStage } from '../cabinet/cabinet-stage';
 import { ApiFailure, apiRequest, jsonRequest } from '../studio/api';
@@ -10,14 +11,19 @@ import { cabinetPageCount, exhibitsOnPage } from '../studio/cabinet-pages';
 import { loginDestination } from '../studio/login-destination';
 import { createInspectionController } from './inspection-controller';
 import { publicStageItems, shareAssetUrl } from './public-stage-items';
+import { groupContributions } from './shared-contributions';
 import { ExhibitStory, InspectionGuide } from './inspection-ui';
 import styles from './shared-museum.module.css';
 import '../cabinet/gallery-backdrop.css';
 
 type ShareState = { status: 'ready'; museum: PublicMuseum } | { status: 'unauthorized' } | { status: 'failed'; message: string };
+type ContributionGroups = ReadonlyMap<string, readonly SharedContribution[]>;
 
-export function SharedMuseum({ token, initialMuseum }: { token: string; initialMuseum: PublicMuseum }) {
+export function SharedMuseum({ token, initialMuseum, initialContributions }: {
+  token: string; initialMuseum: PublicMuseum; initialContributions: readonly SharedContribution[];
+}) {
   const [share, setShare] = useState<ShareState>({ status: 'ready', museum: initialMuseum });
+  const [contributions, setContributions] = useState<ContributionGroups>(() => groupContributions(initialContributions));
   const [checking, setChecking] = useState(false);
   const request = useRef<AbortController | null>(null);
   const refresh = useCallback(async () => {
@@ -25,10 +31,21 @@ export function SharedMuseum({ token, initialMuseum }: { token: string; initialM
     const controller = new AbortController();
     request.current = controller;
     setChecking(true);
+    const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(15_000)]);
     try {
-      const museum = await apiRequest(`/api/share/${encodeURIComponent(token)}`, publicMuseumSchema,
-        { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15_000)]) });
-      if (!controller.signal.aborted) setShare((current) => current.status === 'ready'
+      // 讲述与展馆并行拉，但失败互不牵连：读不到讲述只该少一段内容，不该让整页变成错误页。
+      const [museumSettled, sharedSettled] = await Promise.allSettled([
+        apiRequest(`/api/share/${encodeURIComponent(token)}`, publicMuseumSchema, { signal }),
+        apiRequest(`/api/share/${encodeURIComponent(token)}/contributions`, sharedContributionsSchema, { signal }),
+      ]);
+      if (controller.signal.aborted) return;
+      if (museumSettled.status === 'rejected') throw museumSettled.reason;
+      // 拉取失败时清空而不是保留旧值：作者撤回后访问页会重拉，如果这一次失败还留着旧数据，
+      // 读者就会继续看到已经撤回的内容。宁可这一段暂时不显示，也不能显示一个作者已经收回的讲述。
+      setContributions(sharedSettled.status === 'fulfilled'
+        ? groupContributions(sharedSettled.value.contributions) : new Map());
+      const museum = museumSettled.value;
+      setShare((current) => current.status === 'ready'
         && current.museum.version === museum.version && current.museum.publishedAt === museum.publishedAt
         ? current : { status: 'ready', museum });
     } catch (error: unknown) {
@@ -68,10 +85,12 @@ export function SharedMuseum({ token, initialMuseum }: { token: string; initialM
 
   if (share.status === 'unauthorized') return <main className={styles.unavailable}><p>拾物馆</p><h1>登录已失效</h1><p>请重新登录后继续参观。</p><a href={`/login?next=${encodeURIComponent(loginDestination(`/share/${token}`))}`}>重新登录并返回参观</a></main>;
   if (share.status === 'failed') return <main className={styles.unavailable}><p>拾物馆</p><h1>{share.message}</h1><p>请向制作人员核对当前链接，或重新读取。</p><button disabled={checking} onClick={() => void refresh()}>{checking ? '正在读取…' : '重新读取展馆'}</button></main>;
-  return <MuseumViewer key={`${share.museum.id}:${share.museum.version}:${share.museum.publishedAt}`} museum={share.museum} token={token} checking={checking} onRefresh={() => void refresh()} />;
+  return <MuseumViewer key={`${share.museum.id}:${share.museum.version}:${share.museum.publishedAt}`} museum={share.museum} token={token} checking={checking} contributions={contributions} onRefresh={() => void refresh()} />;
 }
 
-function MuseumViewer({ museum, token, checking, onRefresh }: { museum: PublicMuseum; token: string; checking: boolean; onRefresh: () => void }) {
+function MuseumViewer({ museum, token, checking, contributions, onRefresh }: {
+  museum: PublicMuseum; token: string; checking: boolean; onRefresh: () => void; contributions: ContributionGroups;
+}) {
   const [page, setPage] = useState(0);
   const pageCount = cabinetPageCount(museum.exhibits);
   const exhibits = useMemo(() => exhibitsOnPage(museum.exhibits, page), [museum.exhibits, page]);
@@ -80,7 +99,7 @@ function MuseumViewer({ museum, token, checking, onRefresh }: { museum: PublicMu
     <div className="gallery-backdrop" aria-hidden="true"><div className="gallery-backdrop__vignette" /></div>
     <header className={styles.header}><div><div className={styles.brand}><p className={styles.brandTitle}>拾物馆</p><span aria-hidden="true">·</span><h1>{museum.title}</h1></div>{museum.description && <p className={styles.description}>{museum.description}</p>}</div><button className={styles.refresh} disabled={checking} onClick={onRefresh}>{checking ? '正在核对…' : '重新读取展馆'}</button></header>
     {/* Changing pages unmounts the old audio and stage, then starts a fresh overview. */}
-    <MuseumCabinetPage key={page} exhibits={exhibits} token={token} />
+    <MuseumCabinetPage key={page} exhibits={exhibits} token={token} contributions={contributions} />
     {pageCount > 1 && <nav className={styles.pagination} aria-label="展柜翻页">
       <button type="button" disabled={page === 0} onClick={() => setPage(page - 1)}>← 上一页</button>
       <span aria-live="polite">第 {page + 1} 页 / {pageCount} 页</span>
@@ -90,7 +109,9 @@ function MuseumViewer({ museum, token, checking, onRefresh }: { museum: PublicMu
   </main>;
 }
 
-function MuseumCabinetPage({ exhibits, token }: { exhibits: readonly PublicExhibit[]; token: string }) {
+function MuseumCabinetPage({ exhibits, token, contributions }: {
+  exhibits: readonly PublicExhibit[]; token: string; contributions: ContributionGroups;
+}) {
   const [controller] = useState(() => createInspectionController(exhibits.map(({ id }) => id)));
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
   const items = useMemo(() => publicStageItems(exhibits, token), [exhibits, token]);
@@ -137,7 +158,7 @@ function MuseumCabinetPage({ exhibits, token }: { exhibits: readonly PublicExhib
         {surface !== 'ready' && <div className={styles.surfaceNotice}><h2>{surface === 'loading' ? '正在准备展柜…' : surface === 'context-lost' ? '三维展示已中断' : '三维展示暂不可用'}</h2><p>实拍、展签与原声仍可通过下方展品目录查看。</p>{surface !== 'loading' && <button onClick={() => stage.current ? stage.current.retry() : window.location.reload()}>重试三维展示</button>}</div>}
         <div ref={inspectionGuide} className={styles.inspectionGuide} hidden={state.phase !== 'inspecting' || surface !== 'ready' || selectedStatus !== 'ready'}><InspectionGuide /></div>
       </div>
-      {selected && <aside ref={story} className={`${styles.story} inspection-card`} aria-label="展品故事"><ExhibitStory key={selected.id} exhibit={selected} photoUrl={selected.photoAssetId === null ? null : shareAssetUrl(token, selected.photoAssetId)} audioUrl={selected.audioAssetId === null ? null : shareAssetUrl(token, selected.audioAssetId)} active={state.phase !== 'returning'} />{selectedStatus === 'failed' && <button onClick={() => stage.current?.retryModel(selected.id)}>重新加载模型</button>}</aside>}
+      {selected && <aside ref={story} className={`${styles.story} inspection-card`} aria-label="展品故事"><ExhibitStory key={selected.id} exhibit={selected} photoUrl={selected.photoAssetId === null ? null : shareAssetUrl(token, selected.photoAssetId)} audioUrl={selected.audioAssetId === null ? null : shareAssetUrl(token, selected.audioAssetId)} contributions={contributions.get(selected.id) ?? []} active={state.phase !== 'returning'} />{selectedStatus === 'failed' && <button onClick={() => stage.current?.retryModel(selected.id)}>重新加载模型</button>}</aside>}
     </section>
     <p className={styles.guide} data-inspecting={state.phase === 'inspecting'}>点击展柜中的旧物，取出查看立体细节并倾听物主讲述</p>
     <nav className={styles.catalog} data-fallback={surface !== 'ready'} aria-label="选择展品">{[...exhibits].sort((a, b) => a.slotIndex - b.slotIndex).map((exhibit) => <button key={exhibit.id} aria-pressed={exhibit.id === state.selectedId} onClick={() => controller.select(exhibit.id)}><span className={styles.slot}>{String(exhibit.slotIndex + 1).padStart(2, '0')}</span><span><strong>{exhibit.name}</strong><small>{exhibit.era}</small></span><span aria-hidden="true">↗</span></button>)}</nav>

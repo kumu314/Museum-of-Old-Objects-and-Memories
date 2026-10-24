@@ -4,9 +4,8 @@ import { idSchema, textSchema, timestampSchema } from './primitives';
 /**
  * 共同作者与多人讲述的契约（方向二 · 第三块）。
  *
- * 这一版**只有类型，没有任何表**。仓库里还拿不到迁移编号：`0006` 已被
- * PR #15 占用，而 `migrate.ts` 要求编号从 0001 起连续无缺口。
- * 字段与语义先定下来，是为了让评审能先看规则，避免表建完才发现口径不对。
+ * 表结构落在 `0009_contributions.sql`（署名长度由 `0010` 扩到 80，与账号用户名一致）。
+ * 字段与语义先定、表后建，仍然成立：规则写在这里而不是界面里。
  *
  * 三条不可协商的产品规则，全部落在这里而不是界面里：
  * 1. 邀请粒度是**单件展品**：接受邀请只对这一件展品生效，不扩散到整馆。
@@ -82,8 +81,11 @@ export const contributionSchema = z.strictObject({
 });
 
 /**
- * 公开版本里的一份讲述。**不含** `publishConsent`、`withdrawnAt` 这类内部状态：
- * 读者只需要知道"谁讲的、讲的什么、来源在哪"，不需要知道别人有没有撤回过。
+ * 展馆主视角下的"公开版本预览"里的一份讲述。**不含** `publishConsent`、`withdrawnAt`
+ * 这类内部状态：读者只需要知道"谁讲的、讲的什么、来源在哪",不需要知道别人有没有撤回过。
+ *
+ * 含 `authorId` 是给馆主看的：他要能认出"这条是谁写的"。读者侧不用这一版，
+ * 见下面的 `sharedContributionSchema`。
  */
 export const publicContributionSchema = z.strictObject({
   id: idSchema,
@@ -94,6 +96,41 @@ export const publicContributionSchema = z.strictObject({
   sourceNote: textSchema(1, 200),
 });
 export type PublicContribution = z.infer<typeof publicContributionSchema>;
+
+/**
+ * 参观页上读到的一份讲述（方向二 · 第五块）。
+ *
+ * 与 `publicContributionSchema` 的差别只有一处：**不给 `authorId`**。
+ * 账号主键是最稳的跨馆关联键——拿到它就能把"同一个人在哪些馆讲过"串起来。
+ * 参观者需要的是署名，不是这个人的账号标识。
+ *
+ * 也不给 `exhibitId` 之外的任何定位信息：讲述只跟着它所在的那件展品出现。
+ */
+export const sharedContributionSchema = z.strictObject({
+  id: idSchema,
+  exhibitId: idSchema,
+  authorName: textSchema(1, 80),
+  authorRole: contributorRoleSchema,
+  story: textSchema(1, 4_000),
+  sourceNote: textSchema(1, 200),
+});
+export type SharedContribution = z.infer<typeof sharedContributionSchema>;
+
+/**
+ * 参观页拿到的全部多人讲述。
+ *
+ * 扁平数组而不是按展品嵌套：前端本来就要按 `exhibitId` 分组到展品上，
+ * 嵌套一层只会多一种形状要维护。顺序按创建时间稳定排列，前端不得重排——
+ * 谁先讲的、谁后补的，本身就是这段记忆的一部分。
+ *
+ * **这个列表不在发布快照里**，理由见 `readShareContributions`：快照管的是馆主
+ * 定稿的展品结构，讲述的生命周期属于作者本人，撤回必须立即生效。
+ */
+export const sharedContributionsSchema = z.strictObject({
+  museumId: idSchema,
+  contributions: z.array(sharedContributionSchema),
+});
+export type SharedContributions = z.infer<typeof sharedContributionsSchema>;
 
 /**
  * 一份讲述没有进入公开版本的原因。
