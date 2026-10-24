@@ -37,7 +37,7 @@ export default function Home() {
               <a href="#cabinet" className="hidden pb-1 text-sm text-[#B7A994] hover:text-[#F0E8DA] sm:block">展柜欣赏</a>
               <a href="#stories" className="hidden pb-1 text-sm text-[#B7A994] hover:text-[#F0E8DA] sm:block">故事投稿</a>
               <span className="hidden h-6 w-px bg-[#3A2D20] sm:block" aria-hidden="true" />
-              <Link href="/login" className="rounded-full bg-gradient-to-b from-[#E1C58E] to-[#C2A36B] px-5 py-2 text-sm font-medium text-[#2B2014] shadow-[inset_0_1px_0_rgba(255,250,235,.5)] hover:brightness-105">开始收藏 →</Link>
+              <Link href="/studio" className="rounded-full bg-gradient-to-b from-[#E1C58E] to-[#C2A36B] px-5 py-2 text-sm font-medium text-[#2B2014] shadow-[inset_0_1px_0_rgba(255,250,235,.5)] hover:brightness-105">开始收藏 →</Link>
             </nav>
           </div>
         </header>
@@ -48,7 +48,7 @@ export default function Home() {
             <h1 className="mt-6 font-serif text-[54px] font-semibold leading-[1.26] tracking-[.04em] text-[#F0E8DA] lg:text-[68px]" style={{ textShadow: '0 0 44px rgba(225,197,142,.3), 0 2px 2px rgba(0,0,0,.55)' }}>数字拾物馆</h1>
             <p className="mt-6 max-w-[27em] text-base leading-[2.1] text-[#B7A994]">在这里，旧物不再被遗忘。<br />用数字的方式，收藏生活的温度，<br />让时光的痕迹，依然被看见。</p>
             <div className="mt-9 flex flex-wrap items-center gap-4">
-              <Link href="/login" className="rounded-full bg-gradient-to-b from-[#E1C58E] to-[#C2A36B] px-8 py-3 font-medium tracking-[.08em] text-[#2B2014] shadow-[inset_0_1px_0_rgba(255,250,235,.5),0_16px_34px_-16px_rgba(200,165,107,.7)] hover:brightness-105">开始收藏 →</Link>
+              <Link href="/studio" className="rounded-full bg-gradient-to-b from-[#E1C58E] to-[#C2A36B] px-8 py-3 font-medium tracking-[.08em] text-[#2B2014] shadow-[inset_0_1px_0_rgba(255,250,235,.5),0_16px_34px_-16px_rgba(200,165,107,.7)] hover:brightness-105">开始收藏 →</Link>
               <a href="#cabinet" className="rounded-full border border-[#C8A56B]/55 bg-[#16100B]/60 px-8 py-3 tracking-[.08em] text-[#F0E8DA] hover:border-[#C8A56B]">浏览展柜</a>
             </div>
           </div>
@@ -79,7 +79,7 @@ export default function Home() {
               <h2 className="mt-5 font-serif text-[28px] font-semibold tracking-[.08em] sm:text-3xl">个人展柜</h2>
               <p className="mt-2 text-sm tracking-[.12em] text-[#C8A56B]">安放属于你的旧物故事</p>
               <p className="mt-4 text-[14.5px] leading-[2.05] text-[#B7A994]">为每一件旧物建立专属的数字展柜，<br />记录它的来历、岁月与心情，<br />在这里，你的回忆被温柔保存。</p>
-              <Link href="/login" className="mt-6 inline-flex items-center gap-3 text-[14.5px] tracking-[.1em] text-[#F0E8DA]">
+              <Link href="/studio" className="mt-6 inline-flex items-center gap-3 text-[14.5px] tracking-[.1em] text-[#F0E8DA]">
                 <i className="grid h-9 w-9 place-items-center rounded-full bg-gradient-to-b from-[#E1C58E] to-[#C2A36B] font-serif not-italic text-[#2B2014] shadow-[0_8px_18px_-8px_rgba(200,165,107,.8)] transition-transform hover:translate-x-1">→</i>开始创建展柜
               </Link>
             </div>
@@ -99,7 +99,7 @@ export default function Home() {
               <h2 className="mt-5 font-serif text-[28px] font-semibold tracking-[.08em] sm:text-3xl">共同纪念</h2>
               <p className="mt-2 text-sm tracking-[.12em] text-[#C8A56B]">看见他人的时光，也照见自己的</p>
               <p className="mt-4 text-[14.5px] leading-[2.05] text-[#B7A994]">在这里，遇见别人的旧物与故事，<br />那些看似平凡的物件，<br />也许正承载着与你相似的时光。</p>
-              <Link href="/login" className="mt-6 inline-flex items-center gap-3 text-[14.5px] tracking-[.1em] text-[#F0E8DA]">
+              <Link href="/studio" className="mt-6 inline-flex items-center gap-3 text-[14.5px] tracking-[.1em] text-[#F0E8DA]">
                 <i className="grid h-9 w-9 place-items-center rounded-full bg-gradient-to-b from-[#E1C58E] to-[#C2A36B] font-serif not-italic text-[#2B2014] shadow-[0_8px_18px_-8px_rgba(200,165,107,.8)] transition-transform hover:translate-x-1">→</i>浏览展柜故事
               </Link>
             </div>
@@ -162,7 +162,7 @@ export default function Home() {
             <p className="mt-3 text-[14.5px] text-[#B7A994]">让那些被时光珍藏的瞬间，在这里继续发光。</p>
           </div>
           <div className="grid justify-items-center gap-3 md:justify-self-end">
-            <Link href="/login" className="rounded-full bg-gradient-to-b from-[#E1C58E] to-[#C2A36B] px-8 py-3 font-medium tracking-[.08em] text-[#2B2014] shadow-[inset_0_1px_0_rgba(255,250,235,.5),0_16px_34px_-16px_rgba(200,165,107,.7)] hover:brightness-105">开始收藏 →</Link>
+            <Link href="/studio" className="rounded-full bg-gradient-to-b from-[#E1C58E] to-[#C2A36B] px-8 py-3 font-medium tracking-[.08em] text-[#2B2014] shadow-[inset_0_1px_0_rgba(255,250,235,.5),0_16px_34px_-16px_rgba(200,165,107,.7)] hover:brightness-105">开始收藏 →</Link>
             <small className="text-xs tracking-[.12em] text-[#7A6C5B]">创建你的第一个数字展柜</small>
           </div>
         </div>

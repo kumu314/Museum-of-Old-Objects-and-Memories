@@ -3,7 +3,7 @@ import test from 'node:test';
 import {
   aiInputSchema, aiOutputForSourcesSchema, confirmExhibitInputSchema,
   errorResponseSchema, exhibitDraftSchema, publicExhibitSchema, publicMuseumSchema,
-  toPublicExhibit, updateExhibitInputSchema,
+  toPublicExhibit, toMuseumDisplay, museumDraftSchema, updateExhibitInputSchema,
 } from '../../src/contracts';
 
 const exhibitId = '00000000-0000-4000-8000-000000000001';
@@ -19,6 +19,7 @@ const editableExhibit = {
   caption: '这是一件明确标记的演示模型，尚未提供物主讲述。',
   photoAssetId: null,
   audioAssetId: null,
+  modelInput: { mode: 'single', imageAssetId: null },
   approximation: '近似演示模型，非实物精确复原',
   sourceNotice: '测试样例，不作为真实物主资料',
   rawStory: '  原始输入的空格与换行应保留。\n',
@@ -50,6 +51,15 @@ test('公开投影只含展示字段，公开边界拒绝内部讲述、AI草稿
   }
 });
 
+test('本人预览可展示尚未确认的草稿，但序列化数据不带原始讲述或建模输入', () => {
+  const museum = museumDraftSchema.parse({ id: museumId, title: '私有预览', description: '全馆简介', version: 1, publishedVersion: null, shareEnabled: false,
+    createdAt: timestamp, updatedAt: timestamp, exhibits: [{ ...draft, caption: '', modelKey: 'photo-plane' }] });
+  const display = toMuseumDisplay(museum);
+  assert.equal(display.exhibits[0]?.caption, '');
+  assert.equal(publicMuseumSchema.safeParse({ ...display, publishedAt: timestamp }).success, false);
+  for (const key of ['rawStory', 'sourceSegments', 'modelInput', 'confirmationNote']) assert.equal(key in (display.exhibits[0] ?? {}), false);
+});
+
 test('保存完整白名单与显式版本，缺省不会意外清空素材，原始讲述不被改写', () => {
   const input = { ...editableExhibit, expectedVersion: 3 };
   assert.equal(updateExhibitInputSchema.parse(input).rawStory, editableExhibit.rawStory);
@@ -59,7 +69,9 @@ test('保存完整白名单与显式版本，缺省不会意外清空素材，�
   assert.equal(updateExhibitInputSchema.safeParse({ ...input, expectedVersion: '3' }).success, false);
   assert.equal(updateExhibitInputSchema.safeParse({ ...input, expectedVersion: 0 }).success, false);
   assert.equal(updateExhibitInputSchema.safeParse({ ...input, modelKey: 'https://external/model.glb' }).success, false);
-  assert.equal(updateExhibitInputSchema.safeParse({ ...input, slotIndex: 6 }).success, false);
+  assert.equal(updateExhibitInputSchema.safeParse({ ...input, slotIndex: 6 }).success, true);
+  for (const slotIndex of [-1, 0.5, 2_147_483_648]) assert.equal(updateExhibitInputSchema.safeParse({ ...input, slotIndex }).success, false);
+  assert.equal(updateExhibitInputSchema.safeParse({ ...input, modelInput: undefined }).success, false);
 });
 
 test('人工确认必须含版本和可追溯说明，不能提交自动确认标记', () => {

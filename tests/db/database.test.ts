@@ -55,6 +55,34 @@ test('migration is idempotent under concurrent startup and rejects changes to ap
   }
 });
 
+test('个人展馆迁移遇到旧的多馆账号会整体回滚，处理归属后保留内容并开放第七格', async () => {
+  const db = await pool.connect();
+  const schema = `owner_upgrade_${randomUUID().replaceAll('-', '')}`;
+  try {
+    await db.query('BEGIN');
+    await db.query(`CREATE SCHEMA "${schema}"`);
+    await db.query(`SET LOCAL search_path TO "${schema}"`);
+    for (const file of ['0001_initial.sql', '0002_auth.sql', '0003_self_service_users.sql']) await db.query(await readFile(`migrations/${file}`, 'utf8'));
+    const actor = randomUUID();
+    await db.query('INSERT INTO users(id,username,password_hash) VALUES($1,$2,$3)', [actor, 'legacy-upgrade-test', 'test-only']);
+    await db.query("INSERT INTO museums(title,created_by) VALUES('旧馆一',$1),('旧馆二',$1)", [actor]);
+    const migration = await readFile('migrations/0004_personal_museum_pages.sql', 'utf8');
+    await db.query('SAVEPOINT before_upgrade');
+    await assert.rejects(db.query(migration), /Multiple active museums exist/);
+    await db.query('ROLLBACK TO SAVEPOINT before_upgrade');
+    assert.equal((await db.query('SELECT id FROM museums')).rowCount, 2);
+    await db.query("UPDATE museums SET deleted_at=now() WHERE title='旧馆二'");
+    await db.query(migration);
+    assert.equal((await db.query('SELECT id FROM museums')).rowCount, 2);
+    const museum = (await db.query<{ id: string }>('SELECT id FROM museums WHERE deleted_at IS NULL')).rows[0];
+    assert.ok(museum);
+    await rejectedStatement(db, "INSERT INTO museums(title,created_by) VALUES('重复',$1)", [actor], '23505');
+    await db.query("INSERT INTO exhibits(museum_id,name,slot_index,model_key,approximation,source_notice) VALUES($1,'第七件',6,'camera-01','演示','测试')", [museum.id]);
+    await rejectedStatement(db, "INSERT INTO exhibits(museum_id,name,slot_index,model_key,approximation,source_notice) VALUES($1,'负数',-1,'camera-01','演示','测试')", [museum.id], '23514');
+    assert.equal((await db.query('SELECT slot_index FROM exhibits')).rows[0]?.slot_index, 6);
+  } finally { await db.query('ROLLBACK'); db.release(); }
+});
+
 test('failed transactions leave no committed member or museum', async () => {
   const id = randomUUID();
   await assert.rejects(withTransaction(async (client) => {
@@ -69,8 +97,10 @@ test('failed transactions leave no committed member or museum', async () => {
 test('foreign keys prevent both draft and snapshot references to another museum assets', async () => {
   await rollbackFixture(async (client, memberId, museumId) => {
     const secondMuseum = randomUUID();
-    await client.query('INSERT INTO museums(id,title,created_by) VALUES($1,$2,$3)', [secondMuseum, '另一馆', memberId]);
-    const foreignAsset = await insertImage(client, memberId, secondMuseum);
+    const secondOwner = randomUUID();
+    await client.query('INSERT INTO users(id,username,password_hash) VALUES($1,$2,$3)', [secondOwner, `fk-${secondOwner}`, 'test-only']);
+    await client.query('INSERT INTO museums(id,title,created_by) VALUES($1,$2,$3)', [secondMuseum, '另一馆', secondOwner]);
+    const foreignAsset = await insertImage(client, secondOwner, secondMuseum);
     await rejectedStatement(client, `INSERT INTO exhibits(museum_id,name,slot_index,model_key,approximation,source_notice,photo_asset_id)
       VALUES($1,'测试展品',0,'camera-01','测试','仅测试',$2)`, [museumId, foreignAsset], '23503');
     const snapshot = randomUUID();

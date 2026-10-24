@@ -8,6 +8,8 @@ import { modelKeySchema } from '../../contracts/primitives';
 import { apiRequest, describeFailure, jsonRequest } from './api';
 import { AiDraftPanel } from './ai-draft-panel';
 import { AssetFields } from './asset-fields';
+import { ModelGenerationFields } from './model-generation-fields';
+import { cabinetPage, cabinetPageCount, cabinetPosition, slotsPerPage } from './cabinet-pages';
 import { sourceSegmentsFromText } from './source-segments';
 import { Field, Notice } from './ui';
 
@@ -20,7 +22,7 @@ const tabs: readonly { id: Tab; label: string }[] = [
 function editable(exhibit: ExhibitDraft | null, slotIndex: number): Editable {
   if (!exhibit) return {
     name: '', era: '年代待考', slotIndex, modelKey: 'photo-plane', caption: '',
-    photoAssetId: null, audioAssetId: null,
+    photoAssetId: null, audioAssetId: null, modelInput: { mode: 'single', imageAssetId: null },
     approximation: '当前以实拍照片平面展示，不是三维复原。',
     sourceNotice: '', rawStory: '', transcript: null, sourceSegments: [],
   };
@@ -28,7 +30,7 @@ function editable(exhibit: ExhibitDraft | null, slotIndex: number): Editable {
     name: exhibit.name, era: exhibit.era, slotIndex: exhibit.slotIndex, modelKey: exhibit.modelKey,
     caption: exhibit.caption, photoAssetId: exhibit.photoAssetId, audioAssetId: exhibit.audioAssetId,
     approximation: exhibit.approximation, sourceNotice: exhibit.sourceNotice, rawStory: exhibit.rawStory,
-    transcript: exhibit.transcript, sourceSegments: exhibit.sourceSegments,
+    transcript: exhibit.transcript, sourceSegments: exhibit.sourceSegments, modelInput: exhibit.modelInput,
   };
 }
 
@@ -60,6 +62,8 @@ export function ExhibitEditor({ museum, initial, slotIndex, resetKey, cabinet, p
   const confirmed = saved !== null && saved.confirmedVersion === saved.version;
   const photoMissing = missingDisplayPhoto(fields);
   const path = `/api/museums/${museum.id}/exhibits`;
+  const positionPages = new Set([0, cabinetPage(fields.slotIndex), cabinetPageCount(museum.exhibits), ...museum.exhibits.map(({ slotIndex: slot }) => cabinetPage(slot))]);
+  const availablePositions = [...positionPages].sort((a, b) => a - b).flatMap((page) => Array.from({ length: slotsPerPage }, (_, slot) => page * slotsPerPage + slot));
   let confirmationLabel = '尚未保存';
   if (saved) confirmationLabel = `v${saved.version} · 待确认`;
   if (saved && confirmed && !dirty) confirmationLabel = `v${saved.version} · 已确认`;
@@ -150,7 +154,7 @@ export function ExhibitEditor({ museum, initial, slotIndex, resetKey, cabinet, p
 
   return <>
     <div className="workbench-toolbar">
-      <div><span className="workbench-eyebrow">第 {fields.slotIndex + 1} 格 · {saved ? '旧物记录' : '收录新旧物'}</span>
+      <div><span className="workbench-eyebrow">{cabinetPosition(fields.slotIndex)} · {saved ? '旧物记录' : '收录新旧物'}</span>
         <h1>{fields.name || '给一件旧物，留一个位置'}</h1></div>
       <div className="workbench-save"><span role="status">{saveStatus}</span>
         <button className="wb-primary" type="submit" form={`${id}-form`} disabled={disabled || (!dirty && saved !== null)}>保存草稿</button></div>
@@ -181,12 +185,11 @@ export function ExhibitEditor({ museum, initial, slotIndex, resetKey, cabinet, p
             onAsset={(asset) => change(asset.kind === 'image' ? 'photoAssetId' : 'audioAssetId', asset.id)}
             onBusy={(uploading) => pending(uploading ? '上传素材' : null)} onError={setError} />
           {(fields.photoAssetId || fields.audioAssetId) && <div className="wb-actions">{fields.photoAssetId && <button type="button" className="wb-text-link" onClick={() => change('photoAssetId', null)}>移除图片关联</button>}{fields.audioAssetId && <button type="button" className="wb-text-link" onClick={() => change('audioAssetId', null)}>移除录音关联</button>}</div>}
-          <div className="workbench-model-note"><div className="wb-row"><strong>照片生成 3D</strong><span className="wb-badge">尚未接入</span></div>
-            <p>照片可以先收录。建模服务接入后，再生成和预览模型。</p><button type="button" className="wb-secondary" disabled>生成 3D 模型</button></div>
+          <ModelGenerationFields museumId={museum.id} input={fields.modelInput} photoAssetId={fields.photoAssetId} disabled={disabled} onChange={(input) => change('modelInput', input)} onBusy={(uploading) => pending(uploading ? '上传建模照片' : null)} onError={setError} />
           <Field label="素材来源与使用说明" hint="请据实说明照片、录音的来源及允许的使用范围。保存前需填写，随展品公开。"><textarea required rows={2} value={fields.sourceNotice} placeholder="这些照片和录音由谁提供，允许用于什么用途？" onChange={(event) => change('sourceNotice', event.target.value)} /></Field>
           <details className="workbench-details"><summary>年代、格位与展示说明</summary><div className="workbench-fields">
             <Field label="约略年代" hint="记不清可以保留“年代待考”。"><input required maxLength={80} value={fields.era} onChange={(event) => change('era', event.target.value)} /></Field>
-            <Field label="柜格位置"><select value={fields.slotIndex} onChange={(event) => change('slotIndex', Number(event.target.value))}>{Array.from({ length: 6 }, (_, index) => <option key={index} value={index} disabled={museum.exhibits.some((item) => item.slotIndex === index && item.id !== saved?.id)}>第 {index + 1} 格 · {index < 3 ? '上排' : '下排'}</option>)}</select></Field>
+            <Field label="柜格位置"><select value={fields.slotIndex} onChange={(event) => change('slotIndex', Number(event.target.value))}>{availablePositions.map((index) => <option key={index} value={index} disabled={museum.exhibits.some((item) => item.slotIndex === index && item.id !== saved?.id)}>{cabinetPosition(index)}</option>)}</select></Field>
             <Field label="当前展示方式"><select value={fields.modelKey} onChange={(event) => change('modelKey', modelKeySchema.parse(event.target.value))}><option value="photo-plane">实拍照片平面展示</option><option value="camera-01">复古相机 · 内置演示模型</option><option value="cassette">手录磁带 · 内置演示模型</option><option value="ticket">旧车票 · 内置演示模型</option></select></Field>
             <Field label="展示近似程度" hint="照片平面和演示模型都不是实物的精确复原；请与上面的展示方式保持一致。"><textarea required rows={3} value={fields.approximation} onChange={(event) => change('approximation', event.target.value)} /></Field>
           </div></details>

@@ -4,6 +4,7 @@ import { useEffect, useEffectEvent, useMemo, useRef, useState, useSyncExternalSt
 import type { AssetStatus, SurfaceStatus, mountCabinetStage } from '../cabinet/cabinet-stage';
 import { createInspectionController } from '../viewer/inspection-controller';
 import { cabinetItems, type CabinetExhibit } from './cabinet-items';
+import { cabinetPage, cabinetPageCount, cabinetPosition, exhibitsOnPage, slotsPerPage } from './cabinet-pages';
 
 export function CabinetPreview({ exhibits, selectedSlot, disabled, onSelectSlot, assetBase, mode = 'edit' }: {
   exhibits: readonly CabinetExhibit[]; selectedSlot: number; disabled: boolean;
@@ -13,7 +14,10 @@ export function CabinetPreview({ exhibits, selectedSlot, disabled, onSelectSlot,
   const viewport = useRef<HTMLDivElement>(null);
   const inspectButton = useRef<HTMLButtonElement>(null);
   const stage = useRef<ReturnType<typeof mountCabinetStage> | null>(null);
-  const items = useMemo(() => cabinetItems(exhibits, assetBase), [exhibits, assetBase]);
+  const page = cabinetPage(selectedSlot);
+  const pageCount = Math.max(cabinetPageCount(exhibits), page + 1);
+  const pageExhibits = useMemo(() => exhibitsOnPage(exhibits, page), [exhibits, page]);
+  const items = useMemo(() => cabinetItems(pageExhibits, assetBase), [pageExhibits, assetBase]);
   const controller = useMemo(() => createInspectionController(items.map((item) => item.id)), [items]);
   const inspection = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
   const [surfaceState, setSurface] = useState<{ controller: typeof controller; value: SurfaceStatus | 'loading' }>({ controller, value: 'loading' });
@@ -33,19 +37,19 @@ export function CabinetPreview({ exhibits, selectedSlot, disabled, onSelectSlot,
     import('../cabinet/cabinet-stage').then(({ mountCabinetStage: mount }) => {
       if (cancelled) return;
       const instance = mount(element, items, controller, {
-        onSlotSelect: (slot) => selectSlot(slot), inspectionInset: () => 0,
+        onSlotSelect: (slot) => selectSlot(page * slotsPerPage + slot), inspectionInset: () => 0,
         onSurfaceStatus: (value) => { if (!cancelled) setSurface({ controller, value }); },
         onAssetStatus: (id, status) => {
           if (cancelled) return;
           setAssetStates((current) => ({ controller, values: { ...(current.controller === controller ? current.values : {}), [id]: status } }));
         },
       });
-      instance.setArrangement(exhibits.filter((exhibit) => items.some((item) => item.id === exhibit.id))
+      instance.setArrangement(pageExhibits.filter((exhibit) => items.some((item) => item.id === exhibit.id))
         .map((exhibit) => ({ id: exhibit.id, slot: exhibit.slotIndex, plaqueText: Array.from(exhibit.name).slice(0, 24).join('') })));
       stage.current = instance;
     }).catch(() => { if (!cancelled) setSurface({ controller, value: 'unavailable' }); });
     return () => { cancelled = true; stage.current?.destroy(); stage.current = null; };
-  }, [items, controller, exhibits, sceneRetry]);
+  }, [items, controller, pageExhibits, page, sceneRetry]);
 
   useEffect(() => controller.subscribe(() => {
     if (controller.getSnapshot().phase === 'overview') {
@@ -98,11 +102,14 @@ export function CabinetPreview({ exhibits, selectedSlot, disabled, onSelectSlot,
       {surface !== 'ready' && <div className="workbench-cabinet-status" role="status"><p>{surfaceMessage}</p>
         {surface !== 'loading' && <button type="button" className="wb-secondary" onClick={retrySurface}>重试三维展示</button>}</div>}
     </div>
-    <div className="workbench-slot-grid" role="group" aria-label="选择柜格">{Array.from({ length: 6 }, (_, slot) => {
-      const exhibit = exhibits.find((item) => item.slotIndex === slot);
-      return <button key={slot} type="button" disabled={disabled || expanded || (mode === 'visit' && !exhibit)} aria-pressed={selectedSlot === slot} onClick={() => onSelectSlot(slot)}><span>第 {slot + 1} 格</span>{exhibit?.name ?? (mode === 'edit' ? '＋ 收录旧物' : '尚未收录')}</button>;
+    <div className="workbench-slot-grid" role="group" aria-label="选择柜格">{Array.from({ length: slotsPerPage }, (_, slot) => {
+      const globalSlot = page * slotsPerPage + slot;
+      const exhibit = pageExhibits.find((item) => item.slotIndex === slot);
+      return <button key={slot} type="button" disabled={disabled || expanded || (mode === 'visit' && !exhibit)} aria-pressed={selectedSlot === globalSlot} onClick={() => onSelectSlot(globalSlot)}><span>第 {slot + 1} 格</span>{exhibit?.name ?? (mode === 'edit' ? '＋ 收录旧物' : '尚未收录')}</button>;
     })}</div>
-    <div className="wb-row"><p className="wb-hint">当前选中 · 第 {selectedSlot + 1} 格</p><button ref={inspectButton} type="button" className="wb-text-link" disabled={disabled || !selected || !selectedItem || surface !== 'ready' || assetStates[selected.id] !== 'ready'} onClick={inspect}>检视模型</button></div>
+    <nav className="workbench-pagination" aria-label="展柜翻页"><button type="button" className="wb-text-link" disabled={disabled || expanded || page === 0} onClick={() => onSelectSlot(exhibits.find((item) => cabinetPage(item.slotIndex) === page - 1)?.slotIndex ?? (page - 1) * slotsPerPage)}>← 上一页</button>
+      <span aria-live="polite">第 {page + 1} 页 / {pageCount} 页</span><button type="button" className="wb-text-link" disabled={disabled || expanded || (page === pageCount - 1 && (mode === 'visit' || pageExhibits.length === 0))} onClick={() => onSelectSlot(exhibits.find((item) => cabinetPage(item.slotIndex) === page + 1)?.slotIndex ?? (page + 1) * slotsPerPage)}>{page === pageCount - 1 && mode === 'edit' ? '＋ 新一页' : '下一页 →'}</button></nav>
+    <div className="wb-row"><p className="wb-hint">当前选中 · {cabinetPosition(selectedSlot)}</p><button ref={inspectButton} type="button" className="wb-text-link" disabled={disabled || !selected || !selectedItem || surface !== 'ready' || assetStates[selected.id] !== 'ready'} onClick={inspect}>检视模型</button></div>
     {selected && <p className="wb-hint">{selected.modelKey === 'photo-plane' ? '实拍照片平面展示 · 非三维复原' : '内置演示模型 · 非本次照片生成'}</p>}
     {selected && assetStates[selected.id] === 'failed' && <p className="wb-hint" role="alert">展示素材读取失败，照片与故事仍可使用。<button type="button" className="wb-text-link" onClick={() => stage.current?.retryModel(selected.id)}>重试素材</button></p>}
     {assetStates['cabinet-material'] === 'failed' && <p className="wb-hint">木纹材质读取失败。展品和文字仍可操作，重新读取页面后可重试。</p>}

@@ -79,7 +79,7 @@ export function adoptAiDraft(actorId: string, museumId: string, exhibitId: strin
       name: current.name, era: current.era, slotIndex: current.slotIndex, modelKey: current.modelKey,
       caption: input.caption, photoAssetId: current.photoAssetId, audioAssetId: current.audioAssetId,
       approximation: current.approximation, sourceNotice: current.sourceNotice,
-      rawStory: current.rawStory, transcript: current.transcript, sourceSegments: current.sourceSegments,
+      rawStory: current.rawStory, transcript: current.transcript, sourceSegments: current.sourceSegments, modelInput: current.modelInput,
       expectedVersion: current.version,
     }, db);
   }, client);

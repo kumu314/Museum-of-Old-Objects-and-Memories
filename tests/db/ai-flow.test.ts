@@ -22,11 +22,15 @@ const output = { caption: '这是一件用于测试整理流程的旧物。物�
 async function fixture(context: TestContext) {
   const actor = randomUUID();
   const input: Omit<CreateExhibitInput, 'expectedMuseumVersion'> = { name: '复古相机', era: '年代待考', slotIndex: 0, modelKey: 'camera-01', caption: '人工填写的旧展签。',
-    photoAssetId: null, audioAssetId: null, approximation: '演示模型', sourceNotice: '自动化测试', rawStory: sourceText, transcript: null,
+    photoAssetId: null, audioAssetId: null, modelInput: { mode: 'single', imageAssetId: null }, approximation: '演示模型', sourceNotice: '自动化测试', rawStory: sourceText, transcript: null,
     sourceSegments: [{ id: 'story-1', text: sourceText, source: 'rawStory' }] };
   const result = await withTransaction(async (db) => {
     await db.query('INSERT INTO users(id,username,password_hash) VALUES($1,$2,$3)', [actor, `ai-test-${actor}`, 'test-only']);
     const museum = await createMuseum(actor, { title: 'AI流程测试', description: '' }, db);
+    const photo = randomUUID();
+    await db.query(`INSERT INTO assets(id,museum_id,original_name,kind,mime,byte_size,storage_key,width,height,sha256,created_by)
+      VALUES($1,$2,'model-input.webp','image','image/webp',100,$3,10,10,$4,$5)`, [photo, museum.id, `${photo}.webp`, '0'.repeat(64), actor]);
+    input.modelInput = { mode: 'single', imageAssetId: photo };
     const exhibit = await createExhibit(actor, museum.id, { ...input, expectedMuseumVersion: museum.version }, db);
     await confirmExhibit(actor, museum.id, exhibit.id, { expectedVersion: exhibit.version, confirmationNote: '测试已有人工确认' }, db);
     return { actor, museum, exhibit, input };
@@ -36,6 +40,7 @@ async function fixture(context: TestContext) {
     await withTransaction(async (db) => {
       await db.query('DELETE FROM ai_drafts WHERE museum_id=$1', [result.museum.id]);
       await db.query('DELETE FROM exhibits WHERE museum_id=$1', [result.museum.id]);
+      await db.query('DELETE FROM assets WHERE museum_id=$1', [result.museum.id]);
       await db.query('DELETE FROM museums WHERE id=$1', [result.museum.id]);
       await db.query('DELETE FROM users WHERE id=$1', [actor]);
     }, pool);
@@ -84,6 +89,7 @@ test('AI草稿单独保存并复用；人工采纳才修改展签，原文保留
     const adopted = await adoptAiDraft(setup.actor, setup.museum.id, setup.exhibit.id, { expectedVersion: setup.exhibit.version, draftId: draft.id, caption: draft.output.caption }, db);
     assert.equal(adopted.rawStory, sourceText);
     assert.equal(adopted.transcript, null);
+    assert.deepEqual(adopted.modelInput, setup.input.modelInput);
     assert.equal(adopted.caption, output.caption);
     assert.equal(adopted.version, setup.exhibit.version + 1);
     assert.equal(adopted.confirmedVersion, null);

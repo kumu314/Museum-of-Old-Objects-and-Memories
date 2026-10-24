@@ -14,10 +14,11 @@ if (!['localhost', '127.0.0.1', '[::1]'].includes(new URL(origin).hostname)) thr
 
 test('素材HTTP闭环：真实上传、脱敏、字节边界、快照保护及撤销授权', async () => {
   let cookie = '';
+  let foreignCookie = '';
   const museumIds: string[] = [];
-  async function request(path: string, method = 'GET', data?: unknown, authenticated = true) {
+  async function request(path: string, method = 'GET', data?: unknown, authenticated = true, actorCookie = cookie) {
     return fetch(new URL(path, origin), { method, headers: { Origin: origin,
-      ...(authenticated && cookie ? { Cookie: cookie } : {}), ...(data === undefined ? {} : { 'Content-Type': 'application/json' }) },
+      ...(authenticated && actorCookie ? { Cookie: actorCookie } : {}), ...(data === undefined ? {} : { 'Content-Type': 'application/json' }) },
       ...(data === undefined ? {} : { body: JSON.stringify(data) }), signal: AbortSignal.timeout(30_000) });
   }
   async function error(response: Response, status: number, code: string) {
@@ -28,14 +29,14 @@ test('素材HTTP闭环：真实上传、脱敏、字节边界、快照保护及�
     assert.equal(value.code, code);
     return value;
   }
-  async function museum(id: string) {
-    const response = await request(`/api/museums/${id}`); assert.equal(response.status, 200);
+  async function museum(id: string, actorCookie = cookie) {
+    const response = await request(`/api/museums/${id}`, 'GET', undefined, true, actorCookie); assert.equal(response.status, 200);
     return museumDraftResponseSchema.parse(await response.json()).data;
   }
-  async function upload(id: string, bytes: Buffer, name = 'photo.jpg', mime = 'image/jpeg', fieldCount = 1, authenticated = true): Promise<Response> {
+  async function upload(id: string, bytes: Buffer, name = 'photo.jpg', mime = 'image/jpeg', fieldCount = 1, authenticated = true, actorCookie = cookie): Promise<Response> {
     const form = new FormData();
     for (let i = 0; i < fieldCount; i++) form.append('file', new Blob([new Uint8Array(bytes)], { type: mime }), name);
-    return fetch(new URL(`/api/museums/${id}/assets`, origin), { method: 'POST', headers: { Origin: origin, ...(authenticated && cookie ? { Cookie: cookie } : {}) }, body: form, signal: AbortSignal.timeout(30_000) });
+    return fetch(new URL(`/api/museums/${id}/assets`, origin), { method: 'POST', headers: { Origin: origin, ...(authenticated && actorCookie ? { Cookie: actorCookie } : {}) }, body: form, signal: AbortSignal.timeout(30_000) });
   }
   async function uploaded(response: Response): Promise<Asset> {
     assert.equal(response.status, 201);
@@ -61,7 +62,12 @@ test('素材HTTP闭环：真实上传、脱敏、字节边界、快照保护及�
     assert.equal(login.status, 200); sessionResponseSchema.parse(await login.json());
     cookie = login.headers.getSetCookie().map((value) => value.split(';')[0]).join('; ');
     for (let i = 0; i < 2; i++) {
-      const created = await request('/api/museums', 'POST', { title: `素材验收 ${randomUUID()}`, description: '合成测试素材，不含真实物主资料。' });
+      if (i === 1) {
+        const registration = await request('/api/auth/register', 'POST', { username: `asset-${randomUUID().replaceAll('-', '')}`, password }, false);
+        assert.equal(registration.status, 201);
+        foreignCookie = registration.headers.getSetCookie().map((value) => value.split(';')[0]).join('; ');
+      }
+      const created = await request('/api/museums', 'POST', { title: `素材验收 ${randomUUID()}`, description: '合成测试素材，不含真实物主资料。' }, true, i === 0 ? cookie : foreignCookie);
       assert.equal(created.status, 201); museumIds.push(museumDraftResponseSchema.parse(await created.json()).data.id);
     }
     const museumId = museumIds[0]; const otherId = museumIds[1];
@@ -91,7 +97,7 @@ test('素材HTTP闭环：真实上传、脱敏、字节边界、快照保护及�
       assert.deepEqual(Buffer.from(await response.arrayBuffer()), audioInput);
     }
     const replacement = await uploaded(await upload(museumId, bytes));
-    const foreign = await uploaded(await upload(otherId, bytes));
+    const foreign = await uploaded(await upload(otherId, bytes, 'photo.jpg', 'image/jpeg', 1, true, foreignCookie));
     const privatePath = `/api/museums/${museumId}/assets/${photo.id}`;
     await error(await request(privatePath, 'GET', undefined, false), 401, 'UNAUTHORIZED');
     await error(await request(`/api/museums/${otherId}/assets/${photo.id}`), 404, 'NOT_FOUND');
@@ -108,7 +114,7 @@ test('素材HTTP闭环：真实上传、脱敏、字节边界、快照保护及�
     await error(oversized, 413, 'PAYLOAD_TOO_LARGE');
 
     const fields = { name: '测试票据', era: '年代待考', slotIndex: 0, modelKey: 'photo-plane', caption: '测试生成图片，不代表真实物主经历。',
-      photoAssetId: photo.id, audioAssetId: audio.id, approximation: '合成验收图', sourceNotice: '仅自动化验收用途', rawStory: '', transcript: null, sourceSegments: [] };
+      photoAssetId: photo.id, audioAssetId: audio.id, modelInput: { mode: 'single', imageAssetId: null }, approximation: '合成验收图', sourceNotice: '仅自动化验收用途', rawStory: '', transcript: null, sourceSegments: [] };
     await error(await request(`/api/museums/${museumId}/exhibits`, 'POST', { ...fields, photoAssetId: foreign.id, expectedMuseumVersion: (await museum(museumId)).version }), 404, 'NOT_FOUND');
     const createdExhibit = await request(`/api/museums/${museumId}/exhibits`, 'POST', { ...fields, expectedMuseumVersion: (await museum(museumId)).version });
     assert.equal(createdExhibit.status, 201);
@@ -147,10 +153,12 @@ test('素材HTTP闭环：真实上传、脱敏、字节边界、快照保护及�
     await error(await request(`/api/share/${rotated}/assets/${audio.id}`), 404, 'SHARE_NOT_FOUND');
   } finally {
     for (const id of museumIds) {
-      const current = await museum(id);
-      const removed = await request(`/api/museums/${id}`, 'DELETE', { expectedVersion: current.version });
+      const actorCookie = id === museumIds[0] ? cookie : foreignCookie;
+      const current = await museum(id, actorCookie);
+      const removed = await request(`/api/museums/${id}`, 'DELETE', { expectedVersion: current.version }, true, actorCookie);
       assert.equal(removed.status, 200);
     }
     if (cookie) assert.equal((await request('/api/auth/logout', 'POST')).status, 200);
+    if (foreignCookie) assert.equal((await request('/api/auth/logout', 'POST', undefined, true, foreignCookie)).status, 200);
   }
 });

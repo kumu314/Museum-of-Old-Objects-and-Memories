@@ -1,65 +1,44 @@
 'use client';
 
-import { useEffect, useState, type FormEvent } from 'react';
+import { useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { z } from 'zod';
-import { createMuseumInputSchema, museumDraftSchema, museumSummarySchema, type MuseumSummary } from '../../contracts/museum';
-import { sessionUserSchema, type SessionUser } from '../../contracts/session';
+import { createMuseumInputSchema, museumDraftSchema } from '../../contracts/museum';
 import { ApiFailure, apiRequest, describeFailure, jsonRequest } from './api';
-import { buttonClass, Field, inputClass, Notice, panelClass, primaryClass } from './ui';
+import { Field, Notice } from './ui';
+import './workbench.css';
 
-export function StudioHome() {
+export function StudioHome({ username }: { username: string }) {
   const router = useRouter();
-  const [member, setMember] = useState<SessionUser | null>(null);
-  const [museums, setMuseums] = useState<MuseumSummary[]>([]);
-  const [loaded, setLoaded] = useState(false);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [reload, setReload] = useState(0);
-  useEffect(() => {
-    const controller = new AbortController();
-    Promise.all([
-      apiRequest('/api/auth/session', sessionUserSchema, { signal: controller.signal }),
-      apiRequest('/api/museums', z.array(museumSummarySchema), { signal: controller.signal }),
-    ]).then(([session, data]) => { setMember(session); setMuseums(data); setLoaded(true); setError(null); })
-      .catch((failure: unknown) => {
-        if (controller.signal.aborted) return;
-        if (failure instanceof ApiFailure && failure.failure.code === 'UNAUTHORIZED') router.replace('/login');
-        else setError(describeFailure(failure));
-      });
-    return () => controller.abort();
-  }, [reload, router]);
   async function create(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setPending(true); setError(null);
     try {
       const museum = await apiRequest('/api/museums', museumDraftSchema, jsonRequest('POST', createMuseumInputSchema.parse({ title, description })));
-      router.push(`/studio/${museum.id}`);
-    } catch (failure) { setError(describeFailure(failure)); }
-    finally { setPending(false); }
+      router.replace(`/studio/${museum.id}`);
+    } catch (failure) {
+      if (failure instanceof ApiFailure && failure.failure.code === 'MUSEUM_EXISTS') router.replace('/studio');
+      else setError(describeFailure(failure));
+    } finally { setPending(false); }
   }
   async function logout() {
-    if ((title || description) && !window.confirm('新展馆信息尚未保存，仍要退出登录吗？')) return;
+    if ((title || description) && !window.confirm('展馆信息尚未保存，仍要退出登录吗？')) return;
     setPending(true); setError(null);
     try { await apiRequest('/api/auth/logout', z.strictObject({ ok: z.literal(true) }), { method: 'POST' }); router.replace('/login'); }
     catch (failure) { setError(describeFailure(failure)); }
     finally { setPending(false); }
   }
-  return <main className="mx-auto max-w-6xl px-5 py-10 sm:px-10">
-    <header className="flex flex-wrap items-center justify-between gap-4 border-b border-stone-700 pb-7">
-      <div><Link href="/" className="font-serif text-3xl text-amber-100">拾物馆</Link><h1 className="mt-2 text-sm text-stone-400">我的展馆</h1></div>
-      {member && <div className="flex items-center gap-4 text-sm"><span className="text-stone-400">{member.username}</span><button className={buttonClass} disabled={pending} onClick={logout}>退出登录</button></div>}
-    </header>
-    <Notice error={error} />
-    {!loaded ? <div className="py-12"><p className="text-stone-400">{error ? '未能读取工作台。' : '正在读取工作台…'}</p>{error && <button className={`${buttonClass} mt-4`} onClick={() => setReload((value) => value + 1)}>重新读取</button>}</div> : <div className="mt-9 grid gap-9 lg:grid-cols-[1fr_340px]">
-      <section><h2 className="mb-5 text-xl">我的展馆</h2>{museums.length === 0 && <p className="py-8 text-stone-400">还没有展馆。从右侧创建一个纪念展。</p>}
-        <ul className="grid gap-4 sm:grid-cols-2">{museums.map((museum) => <li key={museum.id}><a href={`/studio/${museum.id}`} className={`${panelClass} block h-full transition hover:border-amber-100/50`}>
-          <span className="text-xs text-amber-100/60">{museum.shareEnabled ? '分享已启用' : '内部草稿'}</span><h3 className="mt-3 text-xl">{museum.title}</h3><p className="mt-3 line-clamp-3 text-sm leading-6 text-stone-400">{museum.description || '尚未填写展馆简介'}</p><p className="mt-5 text-xs text-stone-500">草稿版本 {museum.version}{museum.publishedVersion !== null ? ` · 已发布版本 ${museum.publishedVersion}` : ' · 尚未发布'}</p>
-        </a></li>)}</ul>
-      </section>
-      <form onSubmit={create} className={`${panelClass} h-fit space-y-5`}><h2 className="text-xl">创建展馆</h2><Field label="展馆名称"><input className={inputClass} required maxLength={120} value={title} onChange={(event) => setTitle(event.target.value)} disabled={pending} /></Field><Field label="展馆简介"><textarea className={inputClass} rows={4} maxLength={2000} value={description} onChange={(event) => setDescription(event.target.value)} disabled={pending} /></Field><button className={primaryClass} disabled={pending}>{pending ? '正在创建…' : '创建并收录旧物'}</button></form>
-    </div>}
+  return <main className="memory-workbench">
+    <header className="workbench-brandbar"><Link href="/" className="workbench-brand"><strong>拾物馆</strong></Link><div className="wb-actions"><span>{username}</span><button className="wb-text-link" disabled={pending} onClick={logout}>退出登录</button></div></header>
+    <section className="workbench-onboarding"><p className="workbench-eyebrow">我的展馆 · 开始收录</p><h1>给你们的回忆，取一个名字</h1><p className="wb-hint">每个账号拥有一座展馆，里面可以慢慢收录更多旧物。先填写馆名，再留下第一件旧物和它的故事。</p>
+      <Notice error={error} /><form className="workbench-fields" onSubmit={create}>
+        <Field label="展馆名称"><input required maxLength={120} value={title} onChange={(event) => setTitle(event.target.value)} disabled={pending} placeholder="例如：我们家的旧时光" /></Field>
+        <Field label="展馆简介（可稍后填写）" hint="介绍整座展馆，会显示在馆名下方。每件旧物的回忆在收录时单独填写。"><textarea rows={4} maxLength={2000} value={description} onChange={(event) => setDescription(event.target.value)} disabled={pending} /></Field>
+        <div><button className="wb-primary" disabled={pending}>{pending ? '正在保存…' : '保存馆名，收录第一件旧物'}</button></div>
+      </form></section>
   </main>;
 }

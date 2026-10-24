@@ -55,7 +55,7 @@ test('真实AI正式流程：生成草稿、人工修订采纳、确认和拒绝
     const sourceSegments = [{ id: 'raw-1', source: 'rawStory', text: rawStory }];
     const added = await request(`/api/museums/${museumId}/exhibits`, 'POST', {
       name: '旧茶杯', era: '约八十年代', slotIndex: 0, modelKey: 'camera-01', caption: '待人工整理的验收展签。',
-      photoAssetId: null, audioAssetId: null, approximation: '使用内置演示模型，仅验证故事链路。',
+      photoAssetId: null, audioAssetId: null, modelInput: { mode: 'single', imageAssetId: null }, approximation: '使用内置演示模型，仅验证故事链路。',
       sourceNotice: '合成讲述，无真实物主信息。', rawStory, transcript: null, sourceSegments,
       expectedMuseumVersion: initialMuseum.version,
     });
