@@ -41,7 +41,7 @@ export function DiscoverBoard({ mapKey }: { mapKey: string }) {
         <section className={styles.panel} aria-labelledby="map-heading">
           <div className={styles.panelHead}>
             <h2 className={styles.panelTitle} id="map-heading">河南各市收录</h2>
-            <p className={styles.panelNote}>{hasMapKey ? '点击城市可筛选榜单' : '地图未启用 · 列表可用'}</p>
+            <p className={styles.panelNote}>{hasMapKey ? '点击地图或下方城市筛选榜单' : '地图未启用 · 列表可用'}</p>
           </div>
           <HenanMap
             mapKey={mapKey}
@@ -49,13 +49,11 @@ export function DiscoverBoard({ mapKey }: { mapKey: string }) {
             selected={selectedCity}
             onSelect={(city) => setFilter(city === null ? { kind: 'all' } : { kind: 'city', city })}
           />
-          {hasMapKey ? null : (
-            <CityBars
-              buckets={distribution.cities}
-              selected={selectedCity}
-              onSelect={(city) => setFilter(city === null ? { kind: 'all' } : { kind: 'city', city })}
-            />
-          )}
+          <CityBars
+            buckets={distribution.cities}
+            selected={selectedCity}
+            onSelect={(city) => setFilter(city === null ? { kind: 'all' } : { kind: 'city', city })}
+          />
         </section>
 
         <section className={styles.panel} aria-labelledby="board-heading">

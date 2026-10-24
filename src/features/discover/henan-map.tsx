@@ -4,63 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { RegionBucket, RegionCity } from '../../contracts/discovery';
 import { cityPoint, isRegionCity } from './regions';
 import styles from './discover.module.css';
-
-/**
- * 地图 key 由服务端页面读环境变量后作为 prop 传入：客户端模块不读 process.env。
- * 未配置时整块地图降级为提示文案，页面其余部分照常工作。
- */
-type LatLngCtor = new (latitude: number, longitude: number) => unknown;
-
-type MarkerGeometry = {
-  id: string;
-  styleId: string;
-  position: unknown;
-  properties?: Record<string, string>;
-};
-
-type MarkerLayer = {
-  setGeometries(geometries: MarkerGeometry[]): void;
-  on(event: 'click', handler: (event: { geometry?: { id?: string } }) => void): void;
-};
-
-type MapInstance = { destroy?: () => void };
-
-type Namespace = {
-  Map: new (container: HTMLElement, options: { center: unknown; zoom: number; minZoom?: number; maxZoom?: number }) => MapInstance;
-  LatLng: LatLngCtor;
-  MarkerStyle: new (options: { width: number; height: number; src: string; anchor?: { x: number; y: number } }) => unknown;
-  MultiMarker: new (options: { map: unknown; styles: Record<string, unknown>; geometries: MarkerGeometry[] }) => MarkerLayer;
-};
-
-declare global {
-  interface Window { TMap?: unknown }
-}
-
-let sdkCache: { key: string; promise: Promise<Namespace> } | null = null;
-
-function loadSdk(key: string): Promise<Namespace> {
-  if (sdkCache !== null && sdkCache.key === key) return sdkCache.promise;
-  const promise = new Promise<Namespace>((resolve, reject) => {
-    const registered = window.TMap as Namespace | undefined;
-    if (registered !== undefined) { resolve(registered); return; }
-    const script = document.createElement('script');
-    script.src = `https://map.qq.com/api/gljs?v=1.exp&key=${encodeURIComponent(key)}`;
-    script.async = true;
-    script.onload = () => {
-      const namespace = window.TMap as Namespace | undefined;
-      if (namespace === undefined) reject(new Error('地图脚本已加载，但没有注册 TMap'));
-      else resolve(namespace);
-    };
-    script.onerror = () => reject(new Error('地图脚本加载失败'));
-    document.head.appendChild(script);
-  }).catch((error: unknown) => {
-    // 失败不缓存：换网络或补上域名白名单后，重新挂载应该还能再试一次。
-    sdkCache = null;
-    throw error;
-  });
-  sdkCache = { key, promise };
-  return promise;
-}
+import { loadSdk, type LatLngCtor, type MarkerGeometry, type MarkerLayer, type MapInstance } from './map-sdk';
 
 // 标记图标用内联 SVG，避免引用任何外部图片资源。
 function dot(fill: string): string {
@@ -87,6 +31,10 @@ function geometriesFor(
     });
 }
 
+/**
+ * 地图 key 由服务端页面读环境变量后作为 prop 传入：客户端模块不读 process.env。
+ * 未配置时整块地图降级为提示文案，页面其余部分照常工作。
+ */
 export function HenanMap({ mapKey, buckets, selected, onSelect }: {
   mapKey: string;
   buckets: readonly RegionBucket[];
@@ -152,7 +100,7 @@ export function HenanMap({ mapKey, buckets, selected, onSelect }: {
     return (
       <div className={styles.mapFallback}>
         <p>地图未启用：服务端没有读到 <code>NEXT_PUBLIC_TMAP_KEY</code>。</p>
-        <p>底图与行政边界必须由合规地图服务提供，本页不自绘省界。配置腾讯位置服务的 key 后，这里会显示河南 18 个城市的馆数分布；未配置时右侧城市列表可用，数据与地图走的是同一条聚合路径。</p>
+        <p>底图与行政边界必须由合规地图服务提供，本页不自绘省界。配置腾讯位置服务的 key 后，这里会显示河南各城市的收录位置；下方城市列表始终可用，数据与地图走的是同一条聚合路径。</p>
       </div>
     );
   }
@@ -160,8 +108,8 @@ export function HenanMap({ mapKey, buckets, selected, onSelect }: {
   if (status === 'failed') {
     return (
       <div className={styles.mapFallback}>
-        <p>地图加载失败：腾讯地图脚本未能初始化，常见原因是 key 的域名白名单未包含当前地址。</p>
-        <p>右侧城市分布仍然可读，数据口径与地图完全一致。</p>
+        <p>地图加载失败：地图服务未能初始化，可能是网络超时或 key 的域名白名单未包含当前地址。</p>
+        <p>下方城市分布仍然可读，也可用键盘筛选，数据口径与地图完全一致。</p>
       </div>
     );
   }

@@ -128,13 +128,14 @@
 .bars {
   display: grid;
   gap: 0.45rem;
-  margin: 0;
+  margin: 1rem 0 0;
   padding: 0;
   list-style: none;
 }
 
 .barRow {
   display: grid;
+  width: 100%;
   grid-template-columns: 4.2rem minmax(0, 1fr) 4.5rem;
   align-items: center;
   gap: 0.6rem;
@@ -171,6 +172,7 @@
 }
 
 .barFill {
+  display: block;
   height: 100%;
   border-radius: 999px;
   background: linear-gradient(90deg, rgba(201, 162, 39, 0.75), rgba(201, 162, 39, 0.35));
