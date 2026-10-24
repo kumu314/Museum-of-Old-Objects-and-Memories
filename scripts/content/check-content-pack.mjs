@@ -37,9 +37,30 @@ const CAPTION_MAX = 120;               // src/contracts/primitives.ts captionSch
 const GENERATION_RESULTS = ['排队', '执行中', '成功', '失败'];
 const EXACT_YEAR = /^\d{4}$/;          // 纯 4 位数字 = 补造的精确年份
 const YEAR_WITH_QUALIFIER = /约|可能|记不清|大概|左右|前后|年代|世纪/;
+// src/contracts/museum.ts：rawStory / transcript 都不得超过 12000 字，超了填不进系统
+const NARRATIVE_MAX = 12_000;
 
 const isNonEmptyString = (v) => typeof v === 'string' && v.trim().length > 0;
 const isArray = Array.isArray;
+const isPlainObject = (v) => v !== null && typeof v === 'object' && !isArray(v);
+
+/**
+ * 把值的中文类型名说出来，用于报错。
+ *
+ * 必须显式区分类型，不能靠 String(v) 判断"有没有填"：
+ * String(false) = "false"、String(0) = "0"、String(['成功']) = "成功"，
+ * 这些非法值一旦被字符串化，就会伪装成"非空"，从而零错误通过。
+ */
+function typeName(v) {
+  if (v === undefined) return '缺失';
+  if (v === null) return 'null';
+  if (isArray(v)) return '数组';
+  if (typeof v === 'boolean') return '布尔值';
+  if (typeof v === 'number') return '数字';
+  if (typeof v === 'string') return '字符串';
+  if (typeof v === 'object') return '对象';
+  return typeof v;
+}
 
 /** 校验一个内容包对象，返回 { errors, warnings } */
 export function checkPack(pack) {
@@ -87,14 +108,22 @@ export function checkPack(pack) {
     } else if (nar.trim().length < 10) {
       W('facts.originalNarrative 短于 10 字，确认是否真的只有这些');
     }
+    if (isNonEmptyString(nar) && Array.from(nar).length > NARRATIVE_MAX) {
+      E(`facts.originalNarrative 有 ${Array.from(nar).length} 字，工程契约上限 ${NARRATIVE_MAX} 字（src/contracts/museum.ts）`);
+    }
 
-    // 录音整理文本（v0.7 起与原始讲述并列，对应工程契约 transcript）。
-    // 两者来源不同，不能混为一栏。
+    // 录音整理文本（v0.7 起与原始讲述并列保存，对应工程契约 transcript）。
+    //
+    // 注意：文本与 originalNarrative 一字不差是**合法**的。
+    // 两者是两条独立来源，分别存在 facts.originalNarrative 与 facts.transcript 两个字段里，
+    // 由 sourceSegments[].source（rawStory / transcript）区分归属；
+    // 工程侧 sourceSegmentsFromText 也是按字段逐个切段，不比较文本是否相同。
+    // 因此这里只查类型与长度，不查两者内容差异。
     if (facts.transcript != null) {
       if (!isNonEmptyString(facts.transcript)) {
-        E('facts.transcript 若填就必须是非空字符串（没有录音就整项设 null）');
-      } else if (isNonEmptyString(nar) && facts.transcript.trim() === nar.trim()) {
-        E('facts.transcript 与 originalNarrative 完全相同——录音转写与用户原话是两种来源，不能混为一栏');
+        E(`facts.transcript 若填就必须是非空字符串（当前是 ${typeName(facts.transcript)}；没有录音就整项设 null）`);
+      } else if (Array.from(facts.transcript).length > NARRATIVE_MAX) {
+        E(`facts.transcript 有 ${Array.from(facts.transcript).length} 字，工程契约上限 ${NARRATIVE_MAX} 字（src/contracts/museum.ts）`);
       }
     }
 
@@ -215,21 +244,31 @@ export function checkPack(pack) {
   // ── 模型生成记录（v0.7 §1.5；方案 B 的核心证据） ──
   const gen = pack.generation;
   if (gen != null) {
-    if (gen === null || typeof gen !== 'object' || isArray(gen)) {
-      E('generation 必须是对象或 null（没有生成记录就写 null，不要留空对象）');
+    if (!isPlainObject(gen)) {
+      E(`generation 必须是对象或 null（当前是 ${typeName(gen)}；没有生成记录就写 null，不要留空对象）`);
     } else {
-      for (const k of ['input', 'task', 'status']) {
+      // 先判类型再判取值。顺序不能反：一旦先用 String() 判断"是否为空"，
+      // false / 0 / ["成功"] 都会被洗成非空字符串，非法值就静默通过了。
+      for (const k of ['input', 'task']) {
         const v = gen[k];
-        const emptyObj = v !== null && typeof v === 'object' && !isArray(v) && Object.keys(v).length === 0;
-        if (v == null || (typeof v === 'string' && v.trim() === '') || emptyObj) {
+        if (v == null) {
           E(`generation.${k} 不能为空——模型生成记录要能对上输入、任务与状态`);
+        } else if (isPlainObject(v)) {
+          if (Object.keys(v).length === 0) E(`generation.${k} 不能是空对象——至少写清实际内容`);
+        } else if (!isNonEmptyString(v)) {
+          E(`generation.${k} 必须是非空字符串或对象（当前是 ${typeName(v)}）——${k === 'input' ? '写照片资产 ID、文件哈希及来源版本' : '写任务标识、服务与模型版本、提交与完成时间'}`);
         }
       }
+
       const st = gen.status;
-      if (st && typeof st === 'object' && !isArray(st)) {
+      if (st == null) {
+        E('generation.status 不能为空——排队 / 执行中 / 成功 / 失败必须显式记录');
+      } else if (!isPlainObject(st)) {
+        E(`generation.status 必须是对象（当前是 ${typeName(st)}），要写 result / durationMs / costNote`);
+      } else {
         for (const k of ['result', 'durationMs', 'costNote']) {
-          if (!isNonEmptyString(String(st[k] ?? ''))) {
-            E(`generation.status.${k} 不能为空（真实耗时、费用与结果如实记录，未知就写"未知"）`);
+          if (!isNonEmptyString(st[k])) {
+            E(`generation.status.${k} 必须是非空字符串（当前是 ${typeName(st[k])}；真实耗时、费用与结果如实记录，未知就写"未知"）`);
           }
         }
         if (isNonEmptyString(st.result) && !GENERATION_RESULTS.includes(st.result)) {
@@ -238,10 +277,8 @@ export function checkPack(pack) {
         // 排队、执行中、失败本来就没有输出，不能逼人编一个假资产
         if (st.result === '成功' && !isNonEmptyString(gen.output)) {
           E('generation.status.result 为「成功」时 generation.output 不能为空——成功就得写清资产 ID 与版本、格式、字节数、预算检查和预览结果');
-        } else if (gen.output != null && typeof gen.output !== 'string') {
-          E('generation.output 必须是字符串（未完成就整项设 null）');
-        } else if (typeof gen.output === 'string' && gen.output !== '' && gen.output.trim() === '') {
-          E('generation.output 不能只有空白（未完成就整项设 null）');
+        } else if (gen.output != null && !isNonEmptyString(gen.output)) {
+          E(`generation.output 必须是非空字符串或 null（当前是 ${typeName(gen.output)}）`);
         }
       }
     }
