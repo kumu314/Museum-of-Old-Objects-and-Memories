@@ -85,7 +85,7 @@ try {
   const origin = `http://127.0.0.1:${port}`;
   const environment: NodeJS.ProcessEnv = { ...process.env, NODE_ENV: 'development', DATABASE_URL: databaseUrl.href,
     SESSION_PASSWORD: randomBytes(48).toString('base64url'), APP_ORIGIN: origin, UPLOAD_DIR: join(directory, 'uploads'),
-    AI_API_KEY: '', AI_BASE_URL: '', AI_MODEL: '', NEXT_TELEMETRY_DISABLED: '1',
+    AI_API_KEY: '', AI_BASE_URL: '', AI_MODEL: '', NEXT_TELEMETRY_DISABLED: '1', SELF_REGISTRATION: 'open',
     E2E_BASE_URL: origin, E2E_USERNAME: username, E2E_PASSWORD: password,
     E2E_SECOND_USERNAME: secondUsername, E2E_SECOND_PASSWORD: secondPassword };
   const app = spawn(process.execPath, [join(root, 'node_modules/next/dist/bin/next'), 'dev', '--webpack', '--hostname', '127.0.0.1', '--port', String(port)],
@@ -113,7 +113,8 @@ try {
   if (!ready) throw new Error('HTTP regression server did not become healthy within 90 seconds.');
   console.log('Isolated HTTP regression server ready.');
   const tests = spawn(process.execPath, ['--import', 'tsx', '--test', '--test-concurrency=1', '--test-timeout=180000',
-    'tests/e2e/api-core.test.ts', 'tests/e2e/assets-http.test.ts', 'tests/e2e/ownership-http.test.ts'], { cwd: root, env: environment, stdio: 'inherit' });
+    'tests/e2e/api-core.test.ts', 'tests/e2e/assets-http.test.ts', 'tests/e2e/ownership-http.test.ts',
+    'tests/e2e/registration-http.test.ts'], { cwd: root, env: environment, stdio: 'inherit' });
   const code = await new Promise<number>((done, reject) => { tests.once('error', reject); tests.once('exit', (value) => done(value ?? 1)); });
   if (code !== 0) throw new Error(`HTTP regression failed with exit code ${code}.`);
 } catch (error) {
