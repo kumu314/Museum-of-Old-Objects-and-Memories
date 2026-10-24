@@ -27,3 +27,12 @@ test('自助注册默认开启，可显式关闭，非法取值直接失败', ()
   assert.equal(parseServerConfig({ ...valid, SELF_REGISTRATION: 'closed' }).selfRegistration, false);
   assert.throws(() => parseServerConfig({ ...valid, SELF_REGISTRATION: 'yes' }));
 });
+
+test('HTTP 演示需显式开启，HTTPS 会话始终使用安全 Cookie', () => {
+  const production = { ...valid, NODE_ENV: 'production' };
+  assert.throws(() => parseServerConfig(production));
+  assert.throws(() => parseServerConfig({ ...production, DEMO_ALLOW_HTTP: 'false' }));
+  assert.throws(() => parseServerConfig({ ...production, DEMO_ALLOW_HTTP: 'yes' }));
+  assert.equal(parseServerConfig({ ...production, DEMO_ALLOW_HTTP: 'true' }).secureCookies, false);
+  assert.equal(parseServerConfig({ ...production, APP_ORIGIN: 'https://museum.example.test', DEMO_ALLOW_HTTP: 'true' }).secureCookies, true);
+});

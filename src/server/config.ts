@@ -18,6 +18,7 @@ const environmentSchema = z.object({
   // 方案 B 采用用户名+密码自助注册。生产要临时关闭时设 SELF_REGISTRATION=closed，
   // 归属与权限判断不受这个开关影响。
   SELF_REGISTRATION: z.enum(['open', 'closed']).default('open'),
+  DEMO_ALLOW_HTTP: z.enum(['true', 'false']).default('false'),
 });
 
 export function parseServerConfig(environment: Readonly<Record<string, string | undefined>>) {
@@ -28,7 +29,7 @@ export function parseServerConfig(environment: Readonly<Record<string, string | 
   }
   const value = parsed.data;
   getIsolatedTestDatabaseUrl(environment);
-  if (environment.NODE_ENV === 'production' && !value.APP_ORIGIN.startsWith('https://')) {
+  if (environment.NODE_ENV === 'production' && !value.APP_ORIGIN.startsWith('https://') && value.DEMO_ALLOW_HTTP !== 'true') {
     throw new Error('Production APP_ORIGIN must use HTTPS');
   }
   return {
@@ -36,6 +37,7 @@ export function parseServerConfig(environment: Readonly<Record<string, string | 
     testDatabaseUrl: value.TEST_DATABASE_URL,
     sessionPassword: value.SESSION_PASSWORD,
     appOrigin: value.APP_ORIGIN,
+    secureCookies: value.APP_ORIGIN.startsWith('https://'),
     uploadDir: value.UPLOAD_DIR,
     selfRegistration: value.SELF_REGISTRATION === 'open',
   };

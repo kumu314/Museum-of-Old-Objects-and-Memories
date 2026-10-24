@@ -17,7 +17,7 @@ async function cookieSession() {
     cookieName: 'shiwuguan-session',
     password: getServerConfig().sessionPassword,
     ttl: lifetimeSeconds,
-    cookieOptions: { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', path: '/' },
+    cookieOptions: { httpOnly: true, sameSite: 'lax', secure: getServerConfig().secureCookies, path: '/' },
   });
 }
 function unauthorized() {
