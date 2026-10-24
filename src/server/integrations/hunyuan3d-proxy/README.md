@@ -41,6 +41,13 @@ const client = createHunyuanWebProxyClient({
 3. 真实输出的坐标、正面、原点与尺度仍无保证；入库前按 §9.6 由 D 规范化。
 4. 上传与生成均会消耗网页端积分（concept 与主站积分池独立）。
 
+## 真实协议差异（2026-10-24，实测）
+
+- `image2geometry` **必须带 `requestId`**（格式 `go` + 12 位十六进制），缺失时上游返回 `errNo 200002 输入参数错误`。
+- 提交成功时返回**裸对象** `{requestId, worksId, ...}`，没有 `{errNo,data}` 信封；失败时用 4xx 携带 `{errNo,errMsg}`。客户端因此**先看文档内容再判 HTTP 状态**，不会再把真实错误掩盖成“结构无效”。
+- `get_works_list` 会把**多个 JSON 文档直接拼接**返回（无分隔符），需按括号深度切分；作品失败原因在 `modelInfo.errorCode/errorMsg`（`errorCode` 是数字），执行状态可能只在 `status` 字段而非 `pipelineStatus`。
+- 已用我们自己的客户端对真实反代完成一次 `submitImage`：返回真实 worksId，首次查询为 `WAIT`。
+
 ## 真实上传验证（2026-10-24）
 
 用真实反代的临时凭证执行了一次完整的 `genUploadInfo` → COS PUT：**PUT 返回 200**，证明 PUT 目标推导（bucket/region/location）与临时凭证签名（`x-cos-security-token` 参与 q-header-list）均被 COS 接受。`resourceUrl` 站内下载地址无会话 Cookie 时返回 401，属预期——该地址由混元服务端在任务上下文内解析，不作为公开图片地址；应用侧只在生成请求中引用它，不向客户端暴露。

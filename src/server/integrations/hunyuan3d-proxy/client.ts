@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { Hunyuan3DError } from '../hunyuan3d/errors';
 import { assertValidGenerationImage } from '../hunyuan3d/input';
 import { downloadValidatedGlb } from '../hunyuan3d/http';
@@ -49,6 +50,43 @@ type ResolvedConfig = {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * 上游 concept 接口会把多个 JSON 文档直接拼接返回（同一行内没有分隔符），
+ * JSON.parse 会报 "Extra data"。这里按括号深度切出每个完整文档；无法解析
+ * 的片段忽略，由调用方判断是否拿到了可用内容。
+ */
+export function parseJsonDocuments(text: string): unknown[] {
+  const documents: unknown[] = [];
+  let depth = 0;
+  let start = -1;
+  let inString = false;
+  let escaped = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (char === '\\') escaped = true;
+      else if (char === '"') inString = false;
+      continue;
+    }
+    if (char === '"') { inString = true; continue; }
+    if (char === '{' || char === '[') {
+      if (depth === 0) start = index;
+      depth += 1;
+      continue;
+    }
+    if (char === '}' || char === ']') {
+      depth -= 1;
+      if (depth === 0 && start >= 0) {
+        try { documents.push(JSON.parse(text.slice(start, index + 1))); }
+        catch { /* 跳过不完整或损坏片段 */ }
+        start = -1;
+      }
+    }
+  }
+  return documents;
 }
 
 function configError(message: string): never {
@@ -151,11 +189,24 @@ function dependsOn(item: Record<string, unknown>, worksId: string): boolean {
   return false;
 }
 
+/** 真实作品把失败原因放在 modelInfo.errorCode/errorMsg（如几何阶段 400）。 */
+function failureFromModelInfo(item: Record<string, unknown>): { code: string; message: string } | undefined {
+  const modelInfo = isRecord(item.modelInfo) ? item.modelInfo : undefined;
+  if (modelInfo === undefined) return undefined;
+  // 真实响应里 errorCode 是数字（如 400），这里统一转成字符串。
+  const numeric = (value: unknown) => typeof value === 'number' ? String(value) : asString(value);
+  const code = numeric(modelInfo.errorCode) ?? numeric(item.errorCode);
+  const message = asString(modelInfo.errorMsg) ?? asString(item.errorMsg) ?? asString(item.statusMsg);
+  if (code === undefined && message === undefined) return undefined;
+  return { code: code ?? 'UPSTREAM_STAGE_FAILED', message: message ?? '上游任务执行失败，可重新生成。' };
+}
+
 function failedJob(worksId: string, item: Record<string, unknown>): HunyuanJob {
   const job: HunyuanJob = { jobId: worksId, status: 'FAIL', files: [] };
-  const code = asString(item.errorCode);
+  const failure = failureFromModelInfo(item);
+  const code = failure?.code ?? asString(item.errorCode);
   if (code !== undefined) job.errorCode = code;
-  const message = asString(item.errorMsg) ?? asString(item.statusMsg);
+  const message = failure?.message ?? asString(item.errorMsg) ?? asString(item.statusMsg);
   if (message !== undefined) job.errorMessage = message;
   return job;
 }
@@ -169,7 +220,7 @@ export function createHunyuanWebProxyClient(config: HunyuanProxyConfig): Hunyuan
     method: 'GET' | 'POST',
     path: string,
     body?: string,
-  ): Promise<{ status: number; json: unknown }> {
+  ): Promise<{ status: number; text: string }> {
     const controller = new AbortController();
     let timedOut = false;
     const timer = setTimeout(() => {
@@ -185,15 +236,8 @@ export function createHunyuanWebProxyClient(config: HunyuanProxyConfig): Hunyuan
         ...(body === undefined ? {} : { body }),
       });
       const bytes = await response.arrayBuffer();
-      let json: unknown = undefined;
-      if (bytes.byteLength > 0) {
-        try {
-          json = JSON.parse(new TextDecoder().decode(bytes));
-        } catch {
-          json = undefined;
-        }
-      }
-      return { status: response.status, json };
+      const text = bytes.byteLength > 0 ? new TextDecoder().decode(bytes) : '';
+      return { status: response.status, text };
     } catch (error) {
       if (error instanceof Hunyuan3DError) throw error;
       if (timedOut) timeoutError();
@@ -205,8 +249,9 @@ export function createHunyuanWebProxyClient(config: HunyuanProxyConfig): Hunyuan
 
   /** 反代本地封装端点：{ok, data, error} 信封。 */
   async function proxyLocal(path: string, body?: Record<string, unknown>): Promise<unknown> {
-    const { status, json } = await request(body === undefined ? 'GET' : 'POST', path,
+    const { status, text } = await request(body === undefined ? 'GET' : 'POST', path,
       body === undefined ? undefined : JSON.stringify(body));
+    const json = parseJsonDocuments(text)[0];
     if (status >= 400 || !isRecord(json) || json.ok !== true) {
       const message = isRecord(json) && typeof json.error === 'string' ? json.error : undefined;
       upstreamError(message === undefined ? '混元 3D 反代返回错误。' : `混元 3D 反代返回错误：${message}`);
@@ -214,17 +259,25 @@ export function createHunyuanWebProxyClient(config: HunyuanProxyConfig): Hunyuan
     return json.data;
   }
 
-  /** concept 上游透传端点：{errNo, errMsg, data} 信封，errNo===0 成功。 */
+  /**
+   * concept 上游透传端点。真实响应有三种形状：标准 {errNo,data} 信封、
+   * 成功时直接返回裸对象（如提交返回 {worksId,...}），以及多个文档拼接。
+   * 成功判定优先于 HTTP 状态：上游用 4xx 携带 {errNo,errMsg} 说明拒绝原因。
+   */
   async function conceptUpstream(path: string, body: Record<string, unknown>): Promise<unknown> {
-    const { status, json } = await request('POST', path, JSON.stringify(body));
-    if (status >= 400 || !isRecord(json) || typeof json.errNo !== 'number') {
-      upstreamError('混元 3D 反代返回结构无效。');
+    const { text } = await request('POST', path, JSON.stringify(body));
+    const documents = parseJsonDocuments(text);
+    const success = documents.find((doc): doc is Record<string, unknown> =>
+      isRecord(doc) && (doc.errNo === 0 || typeof doc.worksId === 'string'
+        || (isRecord(doc.data) && Array.isArray(doc.data.list))));
+    if (success !== undefined) return isRecord(success.data) ? success.data : success;
+    const rejection = documents.find((doc): doc is Record<string, unknown> =>
+      isRecord(doc) && typeof doc.errNo === 'number' && doc.errNo !== 0);
+    if (rejection !== undefined) {
+      const message = typeof rejection.errMsg === 'string' && rejection.errMsg.length > 0 ? rejection.errMsg : '上游拒绝请求。';
+      upstreamError(`混元 3D 上游拒绝请求：${message}`, String(rejection.errNo));
     }
-    if (json.errNo !== 0) {
-      const message = typeof json.errMsg === 'string' && json.errMsg.length > 0 ? json.errMsg : '上游拒绝请求。';
-      upstreamError(`混元 3D 上游拒绝请求：${message}`, String(json.errNo));
-    }
-    return json.data;
+    upstreamError('混元 3D 反代返回结构无效。');
   }
 
   async function assertLoggedIn(): Promise<void> {
@@ -237,7 +290,8 @@ export function createHunyuanWebProxyClient(config: HunyuanProxyConfig): Hunyuan
   async function uploadImage(image: HunyuanGenerationInput['image']): Promise<string> {
     const fileName = uploadFileNameFor(image);
     // 此路径由 ProxyMain 透传，不使用反代本地接口的 ok/data 信封。
-    const { status, json } = await request('POST', '/api/3d/resource/genUploadInfo', JSON.stringify({ fileName }));
+    const { status, text } = await request('POST', '/api/3d/resource/genUploadInfo', JSON.stringify({ fileName }));
+    const json = parseJsonDocuments(text)[0];
     if (status < 200 || status >= 300 || !isRecord(json) || json.ok === false) {
       upstreamError('混元 3D 上传凭证请求失败。');
     }
@@ -307,10 +361,13 @@ export function createHunyuanWebProxyClient(config: HunyuanProxyConfig): Hunyuan
       assertValidGenerationImage(input.image);
       await assertLoggedIn();
       const resourceUrl = await uploadImage(input.image);
+      // 真实上游要求 requestId（缺失时返回 errNo 200002 输入参数错误）。
+      const requestId = `go${randomBytes(6).toString('hex')}`;
       const data = await conceptUpstream('/game3d/geometry_generation/image2geometry', {
         singleImage: resourceUrl,
         modelVersion: resolved.modelVersion,
         faceCount: resolved.faceCount,
+        requestId,
       });
       const worksId = isRecord(data) ? asString(data.worksId) : undefined;
       if (worksId === undefined) upstreamError('混元 3D 上游未返回 worksId。');
@@ -326,7 +383,7 @@ export function createHunyuanWebProxyClient(config: HunyuanProxyConfig): Hunyuan
       const geometryItem = geometryList.find((item): item is Record<string, unknown> =>
         isRecord(item) && item.worksId === id);
       if (geometryItem === undefined) upstreamError('混元 3D 上游找不到对应任务。');
-      const geometryStatus = mapPipelineStatus(geometryItem.pipelineStatus);
+      const geometryStatus = mapPipelineStatus(geometryItem.pipelineStatus ?? geometryItem.status);
       if (geometryStatus === undefined) upstreamError('混元 3D 上游返回了未知任务状态。');
       if (!geometryStatus.terminal) return { jobId: id, status: geometryStatus.status, files: [] };
       if (geometryStatus.status === 'FAIL') return failedJob(id, geometryItem);

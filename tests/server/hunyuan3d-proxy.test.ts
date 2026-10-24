@@ -559,3 +559,77 @@ test('真实 genUploadInfo 形状：PUT 目标由 bucket/region/location 推导�
   assert.equal(headers['x-cos-security-token'], 'synthetic-token');
   assert.equal(headers['Content-Type'], 'image/webp');
 });
+
+test('真实上游形状：提交带 requestId、裸对象成功、4xx 错误信封保留消息', async (context) => {
+  let mode: 'raw-success' | 'reject' = 'raw-success';
+  const bodies: string[] = [];
+  const proxy = await fakeServer(context, (request, response, body) => {
+    const url = request.url ?? '';
+    if (request.method === 'PUT') { response.statusCode = 200; response.end(); return; }
+    if (url === '/api/login/status') { response.end(JSON.stringify({ ok: true, data: { loggedIn: true } })); return; }
+    if (url === '/api/3d/resource/genUploadInfo') {
+      response.end(JSON.stringify({ ok: true, data: {
+        encryptTmpSecretId: 'id', encryptTmpSecretKey: 'key', encryptToken: 'tok',
+        resourceUrl: `${cos.origin}/up.png`,
+      } }));
+      return;
+    }
+    if (url === '/game3d/geometry_generation/image2geometry') {
+      bodies.push(body);
+      if (mode === 'reject') {
+        response.statusCode = 400;
+        response.end(JSON.stringify({ errNo: 200002, errMsg: '输入参数错误', data: null }));
+        return;
+      }
+      // 真实成功响应：无 errNo 信封的裸对象。
+      response.end(JSON.stringify({ requestId: 'go1', model: '', worksId: 'real-works-1', userId: '' }));
+      return;
+    }
+    response.end(JSON.stringify({ errNo: 0, errMsg: '', data: { list: [] } }));
+  });
+  const cos = await fakeServer(context, (_request, response) => { response.statusCode = 200; response.end(); });
+  const client = createHunyuanWebProxyClient(makeConfig(proxy.origin, cos.origin));
+  const submitted = await client.submitImage({ image: { bytes: new Uint8Array([1, 2, 3]), mime: 'image/webp', width: 512, height: 512 } });
+  assert.equal(submitted.jobId, 'real-works-1');
+  const payload = JSON.parse(bodies.at(-1) ?? '{}') as Record<string, unknown>;
+  assert.match(String(payload.requestId), /^go[0-9a-f]{12}$/);
+  assert.equal(payload.singleImage, `${cos.origin}/up.png`);
+
+  mode = 'reject';
+  await assert.rejects(client.submitImage({ image: { bytes: new Uint8Array([1, 2, 3]), mime: 'image/webp', width: 512, height: 512 } }),
+    (error: unknown) => {
+      assert.ok(error instanceof Hunyuan3DError);
+      assert.equal(error.code, 'UPSTREAM_ERROR');
+      assert.equal(error.upstreamCode, '200002');
+      assert.match(error.message, /输入参数错误/);
+      return true;
+    });
+});
+
+test('真实上游形状：多个 JSON 文档拼接时仍能取到作品列表与阶段失败原因', async (context) => {
+  const proxy = await fakeServer(context, (request, response, body) => {
+    const url = request.url ?? '';
+    if (url === '/game3d/general_info/get_works_list') {
+      const parsed = JSON.parse(body) as { worksIds?: string[] };
+      if (Array.isArray(parsed.worksIds)) {
+        // 真实返回：一个错误信封 + 一个成功文档，直接拼接。
+        response.end(JSON.stringify({ errNo: 200001, errMsg: '输入参数错误', data: null })
+          + JSON.stringify({ data: { list: [{
+            worksId: 'geo-real-1', worksPipeline: 2, status: 3,
+            modelInfo: { errorCode: 400, errorMsg: 'http client codec StatusCode: Bad Request',
+              geometryGenerationRsp: { viewsData: {} } },
+          }] } }));
+        return;
+      }
+      response.end(JSON.stringify({ errNo: 0, errMsg: '', data: { list: [] } }));
+      return;
+    }
+    response.end(JSON.stringify({ ok: true, data: null }));
+  });
+  const cos = await fakeServer(context, (_request, response) => { response.statusCode = 200; response.end(); });
+  const client = createHunyuanWebProxyClient(makeConfig(proxy.origin, cos.origin));
+  const job = await client.queryJob('geo-real-1');
+  assert.equal(job.status, 'FAIL');
+  assert.equal(job.errorCode, '400');
+  assert.match(job.errorMessage ?? '', /Bad Request/);
+});
