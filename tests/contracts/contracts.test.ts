@@ -28,6 +28,7 @@ const editableExhibit = {
 };
 
 const draft = exhibitDraftSchema.parse({
+  generatedModelAssetId: null,
   ...editableExhibit,
   id: exhibitId,
   museumId,
