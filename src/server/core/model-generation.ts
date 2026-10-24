@@ -13,7 +13,8 @@ import {
 import { getPool, withTransaction } from '../db/pool';
 import { getServerConfig } from '../config';
 import { prepareGeneratedModel, resolveAssetPath } from '../assets/storage';
-import { Hunyuan3DError } from '../integrations/hunyuan3d';
+import { createHunyuan3DClient, Hunyuan3DError } from '../integrations/hunyuan3d';
+import { readHunyuanCloudConfig } from '../integrations/hunyuan3d/config';
 import { createHunyuanWebProxyClient } from '../integrations/hunyuan3d-proxy';
 import { readHunyuanProxyConfig } from '../integrations/hunyuan3d-proxy/config';
 import type { Hunyuan3DClient } from '../integrations/hunyuan3d/types';
@@ -21,7 +22,21 @@ import { HttpError } from '../http';
 import { assertVersion, assetRecord, exhibitRecord, invalid, museumRecord, notFound, requireActor } from './records';
 
 /** 网络调用在事务外；提交结果未知保留 SUBMITTING，核对上游前不再付费提交。 */
-const PROVIDER = 'hunyuan-proxy';
+function selectedProvider(): 'hunyuan-cloud' | 'hunyuan-proxy' {
+  if (readHunyuanCloudConfig()) return 'hunyuan-cloud';
+  readHunyuanProxyConfig();
+  return 'hunyuan-proxy';
+}
+
+function providerForJob(provider: string, pool: Pool, jobId: string): Hunyuan3DClient {
+  if (provider === 'hunyuan-cloud') {
+    const cloud = readHunyuanCloudConfig();
+    if (!cloud) throw new HttpError({ code: 'GENERATION_UNAVAILABLE', message: '该任务的云 API 配置已移除，无法继续查询。' });
+    return createHunyuan3DClient(cloud.config);
+  }
+  if (provider !== 'hunyuan-proxy') throw new Error('Unsupported model generation provider.');
+  return proxyClient(pool, jobId);
+}
 
 function proxyClient(pool: Pool, jobId: string): Hunyuan3DClient {
   return createHunyuanWebProxyClient({
@@ -51,6 +66,7 @@ const jobRowSchema = z.strictObject({
   modelAssetId: idSchema.nullable(),
   externalJobId: z.string().max(200).nullable(),
   inputAssetId: idSchema,
+  provider: z.enum(['hunyuan-cloud', 'hunyuan-proxy']),
   createdAt: z.instanceof(Date),
 });
 
@@ -58,7 +74,7 @@ type JobRow = z.infer<typeof jobRowSchema>;
 
 const jobColumns = `id, exhibit_id AS "exhibitId", source_version AS "sourceVersion", status,
   error_code AS "errorCode", error_message AS "errorMessage", model_asset_id AS "modelAssetId",
-  external_job_id AS "externalJobId", input_asset_id AS "inputAssetId", created_at AS "createdAt"`;
+  external_job_id AS "externalJobId", input_asset_id AS "inputAssetId", provider, created_at AS "createdAt"`;
 
 function rowToJob(row: JobRow, stats: Record<string, number> | null): ModelGenerationJob {
   return modelGenerationJobSchema.parse({
@@ -131,7 +147,7 @@ export async function requestSingleModelGeneration(
   pool: Pool = getPool(),
 ): Promise<ModelGenerationJob> {
   // 配置缺失在任务创建前受控失败，避免留下无意义的失败任务。
-  readHunyuanProxyConfig();
+  const provider = selectedProvider();
   const uploadDir = getServerConfig().uploadDir;
 
   const claim = await withTransaction(async (db) => {
@@ -175,7 +191,7 @@ export async function requestSingleModelGeneration(
     await db.query(
       `INSERT INTO model_generation_jobs(id,museum_id,exhibit_id,source_version,mode,input_asset_id,provider,status,created_by,request_id)
        VALUES($1,$2,$3,$4,'single',$5,$6,'SUBMITTING',$7,$8)`,
-      [id, museumId, exhibitId, exhibit.version, input.imageAssetId, PROVIDER, actorId, input.requestId]);
+      [id, museumId, exhibitId, exhibit.version, input.imageAssetId, provider, actorId, input.requestId]);
     return { jobId: id, stored };
   }, pool);
   if ('existing' in claim) return claim.existing;
@@ -188,8 +204,9 @@ export async function requestSingleModelGeneration(
     if (stored.asset.kind !== 'image') invalid('生成需要图片素材。');
     const bytes = new Uint8Array(await readFile(resolveAssetPath(uploadDir, stored.storageKey)));
     submissionStarted = true;
-    const { jobId } = await proxyClient(pool, claim.jobId).submitImage({
+    const { jobId } = await providerForJob(provider, pool, claim.jobId).submitImage({
       image: { bytes, mime: stored.asset.contentType as 'image/webp', width: stored.asset.width, height: stored.asset.height },
+      enablePbr: true,
     });
     externalAccepted = true;
     await withTransaction(async (db) => {
@@ -257,7 +274,7 @@ async function advanceJob(actorId: string, museumId: string, exhibitId: string, 
   let preparedId: string | undefined;
   try {
     const uploadDir = getServerConfig().uploadDir;
-    const outcome = await generateModelFile(proxyClient(pool, jobId), snapshot.row.externalJobId, uploadDir);
+    const outcome = await generateModelFile(providerForJob(snapshot.row.provider, pool, jobId), snapshot.row.externalJobId, uploadDir);
     if (outcome.kind === 'pending') {
       await withTransaction(async (db) => {
         await db.query(`UPDATE model_generation_jobs SET status=$2, updated_at=now() WHERE id=$1 AND status IN ('SUBMITTING','WAIT','RUN')`,

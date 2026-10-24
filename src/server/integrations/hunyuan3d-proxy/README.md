@@ -77,3 +77,10 @@ const client = createHunyuanWebProxyClient({
 `tests/server/hunyuan3d-proxy.test.ts` 用本地假反代 + 假 COS 覆盖：登录预检、COS PUT 签名与令牌头、几何提交参数、两阶段轮询、自动接续纹理的进程内去重、白模拒绝、未登录、errNo 错误码映射、上传地址来源校验、超时。全部离线，不消耗积分、不访问腾讯。
 
 合入前补充的回归按[反代源码](https://github.com/montezl/hunyuan3d-proxy)区分两种响应：`genUploadInfo` 是主站透明代理，直接解析上传凭证；`/api/text3d/texture` 的 `ok=true` 仅代表本地封装完成，必须继续检查 `data.status` 与 `data.body` 中的上游结果和作品 ID。COS 签名依据[官方规范](https://cloud.tencent.com/document/product/436/7778)编码头部值；HTTP 测试地址必须显式注入策略，默认上传仅允许腾讯 COS 的 HTTPS 地址。无效纹理列表不能被当成空列表触发新提交。
+
+
+### PR 复核后的任务恢复约定（2026-10-24）
+
+应用编排通过数据库抢占纹理提交，在发出请求前持久化标记，并记录取得的纹理 worksId。进程重启或另一实例接管时先查询关联作品；已有提交标记而未查到作品时保持运行状态，不再次提交。几何提交响应丢失时保留 SUBMITTING / SUBMIT_UNKNOWN，须人工核对反代作品记录，不能直接点击重试付费。
+
+`HUNYUAN_PROXY_ALLOW_INSECURE_UPLOAD=1` 仅允许 `NODE_ENV=test`，且上传、下载仅限环回 IP 的 HTTP(S) 地址；生产配置会拒绝该开关。
