@@ -4,7 +4,7 @@ import { idSchema, textSchema } from './primitives';
 export const errorCodeSchema = z.enum([
   'VALIDATION_ERROR', 'UNAUTHORIZED', 'FORBIDDEN', 'NOT_FOUND', 'SHARE_NOT_FOUND',
   'VERSION_CONFLICT', 'MUSEUM_EXISTS', 'NOT_CONFIRMED', 'PAYLOAD_TOO_LARGE', 'UNSUPPORTED_MEDIA_TYPE',
-  'AI_UNAVAILABLE', 'AI_TIMEOUT', 'INTERNAL_ERROR',
+  'AI_UNAVAILABLE', 'AI_TIMEOUT', 'GENERATION_UNAVAILABLE', 'INTERNAL_ERROR',
 ]);
 export type ErrorCode = z.infer<typeof errorCodeSchema>;
 
@@ -21,6 +21,7 @@ export const errorHttpStatus = {
   UNSUPPORTED_MEDIA_TYPE: 415,
   AI_UNAVAILABLE: 502,
   AI_TIMEOUT: 504,
+  GENERATION_UNAVAILABLE: 503,
   INTERNAL_ERROR: 500,
 } as const satisfies Record<ErrorCode, number>;
 

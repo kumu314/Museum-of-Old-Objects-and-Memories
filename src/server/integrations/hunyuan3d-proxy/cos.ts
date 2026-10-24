@@ -4,11 +4,12 @@ import type { HunyuanGenerationInput } from '../hunyuan3d/types';
 
 /**
  * 输入照片上传：反代提供 genUploadInfo 透传，返回腾讯 COS 临时凭证与目标；
- * 本模块用这些凭证直接 PUT 到 COS 拿到可引用的图片地址。
+ * 本模块用这些凭证直接 PUT 到 COS，再把 resourceUrl 交给生成任务引用。
  *
- * ⚠️ 未验证项：凭证字段名（encryptTmpSecretId/Key/Token 等）来自网页 SPA
- * 的逆向记录，还没有真实响应样本。实现按别名容错解析；字段缺失时受控
- * 失败并提示，真实试跑后需要按实际响应核对一次。
+ * 已按 2026-10-24 真实响应核对：resourceUrl 是混元站内的下载代理地址
+ * （3d.hunyuan.tencent.com/api/3d/resource/download?resourceId=...），不是
+ * COS 直链；PUT 目标由 bucketName/region/location 推导。临时凭证字段为
+ * encryptTmpSecretId / encryptTmpSecretKey / encryptToken。
  */
 
 export type CosUploadInfo = {
@@ -37,7 +38,7 @@ export function parseCosUploadInfo(raw: unknown, contentType: string, requireHos
   const data = raw as Record<string, unknown>;
   const secretId = firstString(data, ['tmpSecretId', 'encryptTmpSecretId', 'secretId']);
   const secretKey = firstString(data, ['tmpSecretKey', 'encryptTmpSecretKey', 'secretKey']);
-  const sessionToken = firstString(data, ['sessionToken', 'tmpSessionToken', 'encryptTmpSessionToken', 'Token']);
+  const sessionToken = firstString(data, ['sessionToken', 'encryptToken', 'tmpSessionToken', 'Token']);
   const resourceUrl = firstString(data, ['resourceUrl', 'url']);
   const location = firstString(data, ['location', 'key']);
   const bucketName = firstString(data, ['bucketName', 'bucket']);
@@ -47,8 +48,12 @@ export function parseCosUploadInfo(raw: unknown, contentType: string, requireHos
     cosError('上传凭证缺少临时密钥字段，需要按真实响应核对上传流程。');
   }
 
+  // PUT 目标优先由 bucket/region/location 推导（真实响应的 resourceUrl 是
+  // 站内下载地址，不能当上传目标）；仅当缺失时退回 resourceUrl（旧形状）。
   let uploadUrl: URL | undefined;
-  if (resourceUrl !== undefined) {
+  if (bucketName !== undefined && region !== undefined && location !== undefined) {
+    uploadUrl = new URL(`https://${bucketName}.cos.${region}.myqcloud.com/${location.replace(/^\/+/, '')}`);
+  } else if (resourceUrl !== undefined) {
     try {
       const parsed = new URL(resourceUrl);
       if (parsed.pathname !== '/') uploadUrl = parsed;
@@ -56,16 +61,14 @@ export function parseCosUploadInfo(raw: unknown, contentType: string, requireHos
       uploadUrl = undefined;
     }
   }
-  if (uploadUrl === undefined && location !== undefined && bucketName !== undefined && region !== undefined) {
-    uploadUrl = new URL(`https://${bucketName}.cos.${region}.myqcloud.com/${location.replace(/^\/+/, '')}`);
-  }
   if (uploadUrl === undefined) cosError('上传凭证缺少目标地址字段，需要按真实响应核对上传流程。');
   if (uploadUrl.protocol !== 'https:' && uploadUrl.protocol !== 'http:') cosError('上传地址协议无效。');
   requireHost(uploadUrl);
+  if (resourceUrl === undefined) cosError('上传凭证缺少 resourceUrl，生成任务无法引用已上传的图片。');
 
   return {
     uploadUrl,
-    resourceUrl: resourceUrl ?? uploadUrl.toString(),
+    resourceUrl,
     secretId,
     secretKey,
     sessionToken,
@@ -73,13 +76,16 @@ export function parseCosUploadInfo(raw: unknown, contentType: string, requireHos
   };
 }
 
-/** COS XML API 的 putObject 签名（HMAC-SHA1，对 content-type 与 host 签名）。 */
+/** COS XML API 的 putObject 签名（HMAC-SHA1）。使用临时凭证时
+ * x-cos-security-token 必须随请求发送并参与签名计算。 */
 export function buildCosAuthorization(info: CosUploadInfo, nowMs = Date.now()): string {
   const startSecond = Math.floor(nowMs / 1000);
   const keyTime = `${startSecond};${startSecond + 900}`;
   const signKey = createHmac('sha1', info.secretKey).update(keyTime).digest('hex');
-  const headerList = 'content-type;host';
-  const headerString = `content-type=${encodeURIComponent(info.contentType)}&host=${encodeURIComponent(info.uploadUrl.host.toLowerCase())}`;
+  const tokenSuffix = info.sessionToken !== undefined ? ';x-cos-security-token' : '';
+  const headerList = `content-type;host${tokenSuffix}`;
+  const headerString = `content-type=${encodeURIComponent(info.contentType)}&host=${encodeURIComponent(info.uploadUrl.host.toLowerCase())}` +
+    (info.sessionToken !== undefined ? `&x-cos-security-token=${encodeURIComponent(info.sessionToken)}` : '');
   const httpString = `put\n${decodeURIComponent(info.uploadUrl.pathname)}\n\n${headerString}\n`;
   const httpStringHash = createHash('sha1').update(httpString).digest('hex');
   const stringToSign = `sha1\n${keyTime}\n${httpStringHash}\n`;

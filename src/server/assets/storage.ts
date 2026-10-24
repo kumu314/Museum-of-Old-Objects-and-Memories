@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import type { ProcessedAsset } from './process';
@@ -15,7 +15,7 @@ export interface PreparedAsset {
   storageKey: string;
   thumbnailStorageKey: string | null;
 }
-const storageKeyPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\/(?:display\.(?:webp|mp3|m4a|wav)|thumbnail\.webp)$/;
+const storageKeyPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\/(?:display\.(?:webp|mp3|m4a|wav)|thumbnail\.webp|model\.glb)$/;
 
 /** Resolve only server-generated keys, after the route has authorized this asset. */
 export function resolveAssetPath(uploadDir: string, storageKey: string): string {
@@ -65,6 +65,31 @@ export async function prepareAsset(processed: ProcessedAsset, uploadDir: string)
   return { id, kind: processed.kind, contentType: processed.contentType, originalName: processed.originalName,
     byteSize: processed.bytes.length, sha256: processed.sha256, storageKey, thumbnailStorageKey,
     width: processed.kind === 'image' ? processed.width : null, height: processed.kind === 'image' ? processed.height : null };
+}
+
+/** 生成模型按不可信外部资产处理：适配器已校验 GLB，这里只负责私有落盘。 */
+export interface PreparedModelFile {
+  id: string;
+  storageKey: string;
+  byteSize: number;
+  sha256: string;
+}
+
+export async function prepareGeneratedModel(uploadDir: string, bytes: Uint8Array): Promise<PreparedModelFile> {
+  const root = await privateDirectory(uploadDir);
+  const id = randomUUID();
+  const directory = resolve(root, id);
+  await mkdir(directory, { mode: 0o700 });
+  const storageKey = `${id}/model.glb`;
+  const sha256 = createHash('sha256').update(bytes).digest('hex');
+  try {
+    await writeFile(resolveAssetPath(root, storageKey), bytes, { flag: 'wx', mode: 0o600 });
+  } catch (error) {
+    try { await rm(directory, { recursive: true }); }
+    catch (cleanupError) { throw new AggregateError([error, cleanupError], `Incomplete model ${id} requires cleanup.`); }
+    throw error;
+  }
+  return { id, storageKey, byteSize: bytes.byteLength, sha256 };
 }
 
 /**

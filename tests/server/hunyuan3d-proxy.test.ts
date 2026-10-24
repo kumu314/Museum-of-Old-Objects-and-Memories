@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
+import { readHunyuanProxyConfig } from '../../src/server/integrations/hunyuan3d-proxy/config';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { test, type TestContext } from 'node:test';
 import {
   createHunyuanWebProxyClient,
   buildCosAuthorization,
+  cosUploadHeaders,
   parseCosUploadInfo,
   Hunyuan3DError,
   type HunyuanProxyConfig,
@@ -153,13 +155,12 @@ test('完整链路：登录预检、COS 上传、几何提交、自动接续纹�
       return;
     }
     if (url === '/api/3d/resource/genUploadInfo') {
+      // 旧形状（无 bucket/region/location）：PUT 目标退回 resourceUrl，
+      // 上传落在本地假服务；真实形状的解析有专门单测。
       response.end(JSON.stringify(state.uploadInfo ?? {
         encryptTmpSecretId: 'tmp-id',
         encryptTmpSecretKey: 'tmp-key',
         sessionToken: 'tmp-token',
-        bucketName: 'bucket-1',
-        region: 'ap-guangzhou',
-        location: 'upload/abc.png',
         resourceUrl: `${cos.origin}/upload/abc.png`,
       }));
       return;
@@ -315,7 +316,7 @@ test('上游 errNo 拒绝映射为 UPSTREAM_ERROR 并保留错误码', async (co
         ok: true,
         data: {
           encryptTmpSecretId: 'id', encryptTmpSecretKey: 'key', sessionToken: 'tok',
-          bucketName: 'b', region: 'ap-guangzhou', location: 'u/x.png', resourceUrl: `${cos.origin}/u/x.png`,
+          resourceUrl: `${cos.origin}/u/x.png`,
         },
       }));
       return;
@@ -379,7 +380,7 @@ test('HTTPS 上传地址必须命中腾讯 COS 来源', async (context) => {
   }), 'UPSTREAM_ERROR');
 });
 
-test('几何失败映射为 FAIL；纹理提交失败后按失败上报且进程内不自动重试', async (context) => {
+test('几何失败映射为 FAIL；纹理提交结果未知保持 RUN 且不自动重试', async (context) => {
   const state: ProxyState = {
     loggedIn: true,
     geometryStatus: 3,
@@ -421,13 +422,13 @@ test('几何失败映射为 FAIL；纹理提交失败后按失败上报且进程
   state.geometryStatus = 2;
   state.geometryError = undefined;
   const textureFailure = await client.queryJob('geo-1');
-  assert.equal(textureFailure.status, 'FAIL');
-  assert.equal(textureFailure.errorCode, 'TEXTURE_STAGE_SUBMIT_FAILED');
+  assert.equal(textureFailure.status, 'RUN');
+  assert.equal(textureFailure.errorCode, 'TEXTURE_SUBMIT_UNKNOWN');
   assert.equal(state.textureSubmitCount, 1);
 
   const again = await client.queryJob('geo-1');
-  assert.equal(again.status, 'FAIL');
-  assert.equal(again.errorCode, 'TEXTURE_STAGE_SUBMIT_FAILED');
+  assert.equal(again.status, 'RUN');
+  assert.equal(again.errorCode, 'TEXTURE_SUBMIT_UNKNOWN');
   assert.equal(state.textureSubmitCount, 1, '失败后进程内不得自动重复提交纹理阶段');
 });
 
@@ -487,8 +488,8 @@ test('纹理封装 ok=true 不掩盖内层拒绝', async (context) => {
     } }));
   });
   const client = createHunyuanWebProxyClient({ baseUrl: proxy.origin });
-  assert.equal((await client.queryJob('geo-1')).status, 'FAIL');
-  assert.equal((await client.queryJob('geo-1')).status, 'FAIL');
+  assert.equal((await client.queryJob('geo-1')).errorCode, 'TEXTURE_SUBMIT_UNKNOWN');
+  assert.equal((await client.queryJob('geo-1')).errorCode, 'TEXTURE_SUBMIT_UNKNOWN');
   assert.equal(textureCalls, 1);
 });
 
@@ -532,4 +533,149 @@ test('默认上传策略在发送照片前拒绝 HTTP 回环地址', async (cont
     bytes: new Uint8Array([1]), mime: 'image/png', width: 256, height: 256,
   } }), 'UPSTREAM_ERROR');
   assert.equal(uploadCalls, 0);
+});
+
+test('真实 genUploadInfo 形状：PUT 目标由 bucket/region/location 推导，引用走站内下载地址', () => {
+  // 2026-10-24 真实响应样本（凭据值为合成占位，结构与字段名一致）。
+  const info = parseCosUploadInfo({
+    error: { code: '0', message: '' },
+    bucketName: 'hunyuan-base-prod-1258344703',
+    region: 'ap-guangzhou',
+    location: 'hunyuan3d/default/36cc2492/2026102420464223_sample.png',
+    encryptTmpSecretId: 'synthetic-id',
+    encryptTmpSecretKey: 'synthetic-key',
+    encryptToken: 'synthetic-token',
+    resourceUrl: 'https://3d.hunyuan.tencent.com/api/3d/resource/download?resourceId=sample',
+  }, 'image/webp', (url) => {
+    assert.equal(url.hostname, 'hunyuan-base-prod-1258344703.cos.ap-guangzhou.myqcloud.com');
+  });
+  assert.equal(info.uploadUrl.hostname, 'hunyuan-base-prod-1258344703.cos.ap-guangzhou.myqcloud.com');
+  assert.equal(info.uploadUrl.pathname, '/hunyuan3d/default/36cc2492/2026102420464223_sample.png');
+  assert.equal(info.resourceUrl, 'https://3d.hunyuan.tencent.com/api/3d/resource/download?resourceId=sample');
+  assert.equal(info.sessionToken, 'synthetic-token');
+  const authorization = buildCosAuthorization(info, 1_700_000_000_000);
+  assert.match(authorization, /q-header-list=content-type;host;x-cos-security-token&/);
+  // 临时凭证 token 作为独立请求头发送，其头部名参与签名计算。
+  const headers = cosUploadHeaders(info, 1_700_000_000_000);
+  assert.equal(headers['x-cos-security-token'], 'synthetic-token');
+  assert.equal(headers['Content-Type'], 'image/webp');
+});
+
+test('真实上游形状：提交带 requestId、裸对象成功、4xx 错误信封保留消息', async (context) => {
+  let mode: 'raw-success' | 'reject' = 'raw-success';
+  const bodies: string[] = [];
+  const proxy = await fakeServer(context, (request, response, body) => {
+    const url = request.url ?? '';
+    if (request.method === 'PUT') { response.statusCode = 200; response.end(); return; }
+    if (url === '/api/login/status') { response.end(JSON.stringify({ ok: true, data: { loggedIn: true } })); return; }
+    if (url === '/api/3d/resource/genUploadInfo') {
+      response.end(JSON.stringify({ ok: true, data: {
+        encryptTmpSecretId: 'id', encryptTmpSecretKey: 'key', encryptToken: 'tok',
+        resourceUrl: `${cos.origin}/up.png`,
+      } }));
+      return;
+    }
+    if (url === '/game3d/geometry_generation/image2geometry') {
+      bodies.push(body);
+      if (mode === 'reject') {
+        response.statusCode = 400;
+        response.end(JSON.stringify({ errNo: 200002, errMsg: '输入参数错误', data: null }));
+        return;
+      }
+      // 真实成功响应：无 errNo 信封的裸对象。
+      response.end(JSON.stringify({ requestId: 'go1', model: '', worksId: 'real-works-1', userId: '' }));
+      return;
+    }
+    response.end(JSON.stringify({ errNo: 0, errMsg: '', data: { list: [] } }));
+  });
+  const cos = await fakeServer(context, (_request, response) => { response.statusCode = 200; response.end(); });
+  const client = createHunyuanWebProxyClient(makeConfig(proxy.origin, cos.origin));
+  const submitted = await client.submitImage({ image: { bytes: new Uint8Array([1, 2, 3]), mime: 'image/webp', width: 512, height: 512 } });
+  assert.equal(submitted.jobId, 'real-works-1');
+  const payload = JSON.parse(bodies.at(-1) ?? '{}') as Record<string, unknown>;
+  assert.match(String(payload.requestId), /^go[0-9a-f]{12}$/);
+  assert.equal(payload.singleImage, `${cos.origin}/up.png`);
+
+  mode = 'reject';
+  await assert.rejects(client.submitImage({ image: { bytes: new Uint8Array([1, 2, 3]), mime: 'image/webp', width: 512, height: 512 } }),
+    (error: unknown) => {
+      assert.ok(error instanceof Hunyuan3DError);
+      assert.equal(error.code, 'UPSTREAM_ERROR');
+      assert.equal(error.upstreamCode, '200002');
+      assert.match(error.message, /输入参数错误/);
+      return true;
+    });
+});
+
+test('真实上游形状：多个 JSON 文档拼接时仍能取到作品列表与阶段失败原因', async (context) => {
+  const proxy = await fakeServer(context, (request, response, body) => {
+    const url = request.url ?? '';
+    if (url === '/game3d/general_info/get_works_list') {
+      const parsed = JSON.parse(body) as { worksIds?: string[] };
+      if (Array.isArray(parsed.worksIds)) {
+        // 真实返回：一个错误信封 + 一个成功文档，直接拼接。
+        response.end(JSON.stringify({ errNo: 200001, errMsg: '输入参数错误', data: null })
+          + JSON.stringify({ data: { list: [{
+            worksId: 'geo-real-1', worksPipeline: 2, status: 3,
+            modelInfo: { errorCode: 400, errorMsg: 'http client codec StatusCode: Bad Request',
+              geometryGenerationRsp: { viewsData: {} } },
+          }] } }));
+        return;
+      }
+      response.end(JSON.stringify({ errNo: 0, errMsg: '', data: { list: [] } }));
+      return;
+    }
+    response.end(JSON.stringify({ ok: true, data: null }));
+  });
+  const cos = await fakeServer(context, (_request, response) => { response.statusCode = 200; response.end(); });
+  const client = createHunyuanWebProxyClient(makeConfig(proxy.origin, cos.origin));
+  const job = await client.queryJob('geo-real-1');
+  assert.equal(job.status, 'FAIL');
+  assert.equal(job.errorCode, '400');
+  assert.match(job.errorMessage ?? '', /Bad Request/);
+});
+
+
+test('持久化纹理抢占跨实例防重复，响应丢失后通过列表恢复且兼容 status', async (context) => {
+  let submitted = 0;
+  let visible = false;
+  let claimed = false;
+  const recorded: string[] = [];
+  const proxy = await fakeServer(context, (request, response, body) => {
+    if (request.url === '/api/text3d/texture') {
+      submitted += 1;
+      response.destroy();
+      return;
+    }
+    const parsed: unknown = JSON.parse(body);
+    const geometry = typeof parsed === 'object' && parsed !== null && 'worksIds' in parsed;
+    response.end(JSON.stringify({ errNo: 0, data: { list: geometry ? [
+      { worksId: 'geo-1', status: 2 },
+    ] : visible ? [{ worksId: 'tex-1', status: 1, dependonWorksInfo: { worksId: 'geo-1' } }] : [] } }));
+  });
+  const config: HunyuanProxyConfig = {
+    baseUrl: proxy.origin,
+    claimTextureSubmission: async () => { if (claimed) return false; claimed = true; return true; },
+    recordTextureSubmission: async (geometryId, textureId) => { recorded.push(`${geometryId}:${textureId}`); },
+  };
+  const first = createHunyuanWebProxyClient(config);
+  assert.equal((await first.queryJob('geo-1')).status, 'RUN');
+  const restarted = createHunyuanWebProxyClient(config);
+  assert.equal((await restarted.queryJob('geo-1')).status, 'RUN');
+  assert.equal(submitted, 1);
+  visible = true;
+  assert.equal((await restarted.queryJob('geo-1')).status, 'RUN');
+  assert.deepEqual(recorded, ['geo-1:tex-1']);
+});
+
+test('不安全来源开关仅测试环境可用，且只允许环回 URL', async () => {
+  const environment = { HUNYUAN_PROXY_BASE_URL: 'http://127.0.0.1:8812', HUNYUAN_PROXY_ALLOW_INSECURE_UPLOAD: '1' };
+  assert.throws(() => readHunyuanProxyConfig({ ...environment, NODE_ENV: 'production' }));
+  assert.throws(() => readHunyuanProxyConfig(environment));
+  const config = readHunyuanProxyConfig({ ...environment, NODE_ENV: 'test' });
+  await config.resultUrlPolicy?.(new URL('http://127.0.0.1:1234/model.glb'));
+  for (const value of ['http://169.254.169.254/model.glb', 'https://example.com/model.glb', 'http://user:password@127.0.0.1/model.glb']) {
+    assert.throws(() => config.cosHostPolicy?.(new URL(value)));
+    await assert.rejects(async () => config.resultUrlPolicy?.(new URL(value)));
+  }
 });
