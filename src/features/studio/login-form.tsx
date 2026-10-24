@@ -3,7 +3,7 @@
 import { useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { loginInputSchema, registerInputSchema, sessionUserSchema } from '../../contracts/session';
+import { loginInputSchema, registerInputSchema, teamMemberSchema } from '../../contracts/session';
 import { apiRequest, describeFailure, jsonRequest } from './api';
 
 const AUTH_BG = 'https://images.unsplash.com/photo-1452587925148-ce544e77e70d?auto=format&fit=crop&w=1100&q=70';
@@ -21,11 +21,11 @@ export function LoginForm({ returnTo = '/studio' }: { returnTo?: string }) {
     setPending(true); setError(null);
     try {
       if (mode === 'login') {
-        await apiRequest('/api/auth/login', sessionUserSchema, jsonRequest('POST', loginInputSchema.parse({ username, password })));
+        await apiRequest('/api/auth/login', teamMemberSchema, jsonRequest('POST', loginInputSchema.parse({ username, password })));
         setPassword('');
       } else {
         if (password !== confirm) throw new Error('两次输入的密码不一致。');
-        await apiRequest('/api/auth/register', sessionUserSchema, jsonRequest('POST', registerInputSchema.parse({ username, password })));
+        await apiRequest('/api/auth/register', teamMemberSchema, jsonRequest('POST', registerInputSchema.parse({ username, password })));
         setPassword(''); setConfirm('');
       }
       router.replace(returnTo);
@@ -55,7 +55,7 @@ export function LoginForm({ returnTo = '/studio' }: { returnTo?: string }) {
           <small className="mt-3 block text-[15px] tracking-[.3em] text-[#B7A994]">EVERY OBJECT REMEMBERS</small>
         </p>
         <p className="relative z-10 text-[12.5px] leading-[2.2] text-[#B7A994]">
-          展馆内容只有本人能查看和修改<br />模型与演示内容均如实标注近似<br />发布、换链与停止分享由你操作
+          私有草稿只有本人能查看和修改<br />模型与演示内容均如实标注近似<br />发布、换链与停止分享由你操作
         </p>
         <div className="pointer-events-none absolute bottom-6 left-10 font-serif text-[#F3ECE1]/10" aria-hidden="true">
           <b className="block text-6xl font-semibold leading-none">03</b><span className="text-[11px] tracking-[.32em]">MEMBER</span>
@@ -86,10 +86,10 @@ export function LoginForm({ returnTo = '/studio' }: { returnTo?: string }) {
           <form onSubmit={submit} className="mt-2">
             <label className="mm-auth-field">用户名
               <input className="mm-auth-input" autoComplete="username" required value={username} onChange={(event) => setUsername(event.target.value)} disabled={pending} placeholder={registering ? '例如：lin-jiayi 或 阿澄' : '你的用户名'} />
-              {registering && <span className="mm-auth-hint">2–40 个字符，可用文字、数字、下划线或连字符。</span>}
+              {registering && <span className="mm-auth-hint">3–40 个字符，不能包含空格。</span>}
             </label>
             <label className="mm-auth-field">密码
-              <input className="mm-auth-input" type="password" autoComplete={registering ? 'new-password' : 'current-password'} required value={password} onChange={(event) => setPassword(event.target.value)} disabled={pending} placeholder={registering ? '至少 8 位' : '输入密码'} />
+              <input className="mm-auth-input" type="password" autoComplete={registering ? 'new-password' : 'current-password'} required value={password} onChange={(event) => setPassword(event.target.value)} disabled={pending} placeholder={registering ? '至少 12 个字符' : '输入密码'} />
             </label>
             {registering && <label className="mm-auth-field">确认密码
               <input className="mm-auth-input" type="password" autoComplete="new-password" required value={confirm} onChange={(event) => setConfirm(event.target.value)} disabled={pending} placeholder="再输入一次" />

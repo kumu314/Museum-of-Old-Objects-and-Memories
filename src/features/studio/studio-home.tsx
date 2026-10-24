@@ -5,13 +5,13 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { z } from 'zod';
 import { createMuseumInputSchema, museumDraftSchema, museumSummarySchema, type MuseumSummary } from '../../contracts/museum';
-import { sessionUserSchema, type SessionUser } from '../../contracts/session';
+import { teamMemberSchema, type TeamMember } from '../../contracts/session';
 import { ApiFailure, apiRequest, describeFailure, jsonRequest } from './api';
 import { buttonClass, Field, inputClass, Notice, panelClass, primaryClass } from './ui';
 
 export function StudioHome() {
   const router = useRouter();
-  const [member, setMember] = useState<SessionUser | null>(null);
+  const [member, setMember] = useState<TeamMember | null>(null);
   const [museums, setMuseums] = useState<MuseumSummary[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [title, setTitle] = useState('');
@@ -22,7 +22,7 @@ export function StudioHome() {
   useEffect(() => {
     const controller = new AbortController();
     Promise.all([
-      apiRequest('/api/auth/session', sessionUserSchema, { signal: controller.signal }),
+      apiRequest('/api/auth/session', teamMemberSchema, { signal: controller.signal }),
       apiRequest('/api/museums', z.array(museumSummarySchema), { signal: controller.signal }),
     ]).then(([session, data]) => { setMember(session); setMuseums(data); setLoaded(true); setError(null); })
       .catch((failure: unknown) => {

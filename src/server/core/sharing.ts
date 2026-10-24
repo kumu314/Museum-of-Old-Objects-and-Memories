@@ -17,7 +17,7 @@ function newToken(): string { return randomBytes(32).toString('base64url'); }
 export function publishMuseum(actorId: string, museumId: string, expectedVersion: number, client?: PoolClient) {
   return inTransaction(async (db) => {
     await requireActor(db, actorId);
-    const museum = await museumRecord(db, museumId, actorId, true);
+    const museum = await museumRecord(db, actorId, museumId, true);
     assertVersion(museum.version, expectedVersion);
     const exhibits = await exhibitRecords(db, museumId);
     if (exhibits.length === 0) invalid('请先添加至少一件展品。');
@@ -52,18 +52,18 @@ export function publishMuseum(actorId: string, museumId: string, expectedVersion
 export function stopSharing(actorId: string, museumId: string, expectedVersion: number, client?: PoolClient) {
   return inTransaction(async (db) => {
     await requireActor(db, actorId);
-    const museum = await museumRecord(db, museumId, actorId, true);
+    const museum = await museumRecord(db, actorId, museumId, true);
     assertVersion(museum.version, expectedVersion);
     if (museum.shareEnabled) {
       await db.query('UPDATE museums SET share_enabled=false,share_token_hash=NULL,version=version+1,updated_at=now() WHERE id=$1', [museumId]);
     }
-    return museumDraft(db, museumId, actorId);
+    return museumDraft(db, actorId, museumId);
   }, client);
 }
 export function rotateShareToken(actorId: string, museumId: string, expectedVersion: number, client?: PoolClient) {
   return inTransaction(async (db) => {
     await requireActor(db, actorId);
-    const museum = await museumRecord(db, museumId, actorId, true);
+    const museum = await museumRecord(db, actorId, museumId, true);
     assertVersion(museum.version, expectedVersion);
     if (museum.publishedVersion === null) invalid('请先发布展馆，再生成参观链接。');
     const token = newToken();
@@ -81,11 +81,15 @@ async function shareRecord(db: PoolClient, token: string) {
   if (!result.rows[0]) shareNotFound();
   return shareRecordSchema.parse(result.rows[0]);
 }
-export function readShare(token: string, client?: PoolClient) {
-  return inTransaction(async (db) => (await shareRecord(db, token)).data, client);
-}
-export function getShareAsset(token: string, assetId: string, client?: PoolClient) {
+export function readShare(actorId: string, token: string, client?: PoolClient) {
   return inTransaction(async (db) => {
+    await requireActor(db, actorId);
+    return (await shareRecord(db, token)).data;
+  }, client);
+}
+export function getShareAsset(actorId: string, token: string, assetId: string, client?: PoolClient) {
+  return inTransaction(async (db) => {
+    await requireActor(db, actorId);
     if (!idSchema.safeParse(assetId).success) shareNotFound();
     const share = await shareRecord(db, token);
     const member = await db.query('SELECT asset_id FROM snapshot_assets WHERE snapshot_id=$1 AND museum_id=$2 AND asset_id=$3', [share.snapshotId, share.id, assetId]);

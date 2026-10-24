@@ -21,7 +21,7 @@ async function savedDraft(db: PoolClient, museumId: string, exhibitId: string, s
 async function generateAndSave(actorId: string, museumId: string, exhibitId: string, input: RequestAiInput, pool: Pool): Promise<AiDraft> {
   const source = await withTransaction(async (db) => {
     await requireActor(db, actorId);
-    await museumRecord(db, museumId, actorId, true);
+    await museumRecord(db, actorId, museumId, true);
     const exhibit = await exhibitRecord(db, museumId, exhibitId);
     assertVersion(exhibit.version, input.expectedVersion);
     const previous = await savedDraft(db, museumId, exhibitId, exhibit.version);
@@ -39,7 +39,7 @@ async function generateAndSave(actorId: string, museumId: string, exhibitId: str
   const output = await generateDraft(source.generation);
   return withTransaction(async (db) => {
     await requireActor(db, actorId);
-    await museumRecord(db, museumId, actorId, true);
+    await museumRecord(db, actorId, museumId, true);
     const current = await exhibitRecord(db, museumId, exhibitId);
     assertVersion(current.version, source.generation.sourceVersion);
     const previous = await savedDraft(db, museumId, exhibitId, current.version);
@@ -68,7 +68,7 @@ export function requestAiDraft(actorId: string, museumId: string, exhibitId: str
 export function adoptAiDraft(actorId: string, museumId: string, exhibitId: string, input: AdoptAiInput, client?: PoolClient) {
   return inTransaction(async (db) => {
     await requireActor(db, actorId);
-    await museumRecord(db, museumId, actorId, true);
+    await museumRecord(db, actorId, museumId, true);
     const current = await exhibitRecord(db, museumId, exhibitId);
     assertVersion(current.version, input.expectedVersion);
     const row = await db.query<{ source_version: number }>('SELECT source_version FROM ai_drafts WHERE id=$1 AND museum_id=$2 AND exhibit_id=$3', [input.draftId, museumId, exhibitId]);

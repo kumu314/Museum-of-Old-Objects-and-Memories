@@ -13,7 +13,7 @@
     "start": "next start --hostname 127.0.0.1 --port 17682",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src tests scripts/*.ts",
-    "test": "node --env-file-if-exists=.env.local --import tsx --test tests/contracts/*.test.ts tests/server/*.test.ts",
+    "test": "node --env-file-if-exists=.env.local --import tsx --test tests/contracts/*.test.ts tests/server/*.test.ts tests/content/*.test.mjs",
     "test:db": "node --env-file-if-exists=.env.local --import tsx --test tests/db/*.test.ts",
     "test:http": "node --env-file-if-exists=.env.local --import tsx scripts/test-http.ts",
     "db:migrate": "node --env-file-if-exists=.env.local --import tsx scripts/migrate.ts",
@@ -21,6 +21,7 @@
     "check": "pnpm typecheck && pnpm lint && pnpm test && pnpm test:db && pnpm test:scene && pnpm build && pnpm build:scene",
     "db:local": "node scripts/local-db.mjs",
     "test:scene": "node --import tsx --test src/features/**/*.test.ts",
+    "team:create": "node --env-file-if-exists=.env.local --import tsx scripts/create-member.ts",
     "dev:scene": "vite --config vite.scene.config.mjs",
     "build:scene": "vite build --config vite.scene.config.mjs"
   },

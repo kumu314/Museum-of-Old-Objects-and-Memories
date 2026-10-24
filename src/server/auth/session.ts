@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { getIronSession } from 'iron-session';
 import { cookies } from 'next/headers';
 import { z } from 'zod';
-import { sessionUserSchema, type LoginInput, type RegisterInput } from '../../contracts/session';
+import { teamMemberSchema, type LoginInput, type RegisterInput } from '../../contracts/session';
 import { getServerConfig } from '../config';
 import { getPool, withTransaction } from '../db/pool';
 import { HttpError } from '../http';
@@ -20,82 +20,114 @@ async function cookieSession() {
   });
 }
 function unauthorized() {
-  return new HttpError({ code: 'UNAUTHORIZED', message: '请先登录。' });
+  return new HttpError({ code: 'UNAUTHORIZED', message: '请先登录账号。' });
 }
-export async function requireUser() {
+export async function requireMember() {
   const cookie = await cookieSession();
   const session = cookieSchema.safeParse({ sessionId: cookie.sessionId });
   if (!session.success) throw unauthorized();
   const result = await getPool().query(
-    `SELECT u.id, u.username FROM user_sessions s JOIN users u ON u.id=s.user_id
-     WHERE s.id=$1 AND s.expires_at>now() AND u.active`, [session.data.sessionId],
+    `SELECT m.id, m.username FROM team_sessions s JOIN team_members m ON m.id=s.member_id
+     WHERE s.id=$1 AND s.expires_at>now() AND m.active`, [session.data.sessionId],
   );
   if (result.rowCount !== 1) throw unauthorized();
-  return sessionUserSchema.parse(result.rows[0]);
+  return teamMemberSchema.parse(result.rows[0]);
 }
 export function requireSameOrigin(request: Request) {
   if (request.headers.get('origin') !== getServerConfig().appOrigin) {
     throw new HttpError({ code: 'FORBIDDEN', message: '请求来源无效，请从制作页面重新操作。' });
   }
 }
-// One throttled attempt window per username; unknown usernames never insert rows.
-async function throttle(username: string) {
-  const limit = await getPool().query<{ attempts: number }>(
-    `INSERT INTO login_attempts(username,attempts,window_started_at) VALUES($1,1,now())
-     ON CONFLICT(username) DO UPDATE SET
+const throttleLimit = 10;
+type ThrottleScope = 'login' | 'register';
+
+/**
+ * 按 (用途, 用户名) 计数。用途放在独立的列而不是拼进键里，
+ * 否则名为 "register:alice" 的账号会与 alice 的注册计数共用同一行。
+ */
+async function countAttempt(scope: ThrottleScope, username: string): Promise<number> {
+  const result = await getPool().query<{ attempts: number }>(
+    `INSERT INTO login_attempts(scope,username,attempts,window_started_at) VALUES($1,$2,1,now())
+     ON CONFLICT(scope,username) DO UPDATE SET
        attempts=CASE WHEN login_attempts.window_started_at<now()-interval '5 minutes' THEN 1 ELSE login_attempts.attempts+1 END,
        window_started_at=CASE WHEN login_attempts.window_started_at<now()-interval '5 minutes' THEN now() ELSE login_attempts.window_started_at END
-     RETURNING attempts`, [username],
+     RETURNING attempts`, [scope, username],
   );
-  if ((limit.rows[0]?.attempts ?? 11) > 10) throw new HttpError({ code: 'UNAUTHORIZED', message: '尝试过多，请五分钟后重试。' });
+  return result.rows[0]?.attempts ?? throttleLimit + 1;
 }
-async function startSession(userId: string) {
-  const session = await cookieSession();
-  const sessionId = randomUUID();
-  await withTransaction(async (db) => {
-    if (session.sessionId) await db.query('DELETE FROM user_sessions WHERE id=$1', [session.sessionId]);
-    await db.query('DELETE FROM user_sessions WHERE expires_at <= now()');
-    await db.query("INSERT INTO user_sessions(id,user_id,expires_at) VALUES($1,$2,now()+$3::integer*interval '1 second')", [sessionId, userId, lifetimeSeconds]);
-  });
-  session.sessionId = sessionId;
-  await session.save();
-}
-export async function loginUser(input: LoginInput) {
+
+export async function loginMember(input: LoginInput) {
   const pool = getPool();
-  const result = await pool.query('SELECT id,username,password_hash FROM users WHERE username=$1 AND active', [input.username]);
-  const user = z.object({ id: z.uuid(), username: z.string(), password_hash: z.string() }).optional().parse(result.rows[0]);
+  const result = await pool.query('SELECT id,username,password_hash FROM team_members WHERE username=$1 AND active', [input.username]);
+  const member = z.object({ id: z.uuid(), username: z.string(), password_hash: z.string() }).optional().parse(result.rows[0]);
   // Unknown usernames must not create unbounded rows in the throttle table.
-  if (!user) {
+  if (!member) {
     await verifyPassword(input.password, `scrypt:${'0'.repeat(48)}:${'0'.repeat(128)}`);
     throw new HttpError({ code: 'UNAUTHORIZED', message: '账号或密码不正确。' });
   }
-  await throttle(input.username);
-  const accepted = await verifyPassword(input.password, user.password_hash);
+  const attempts = await countAttempt('login', input.username);
+  if (attempts > throttleLimit) throw new HttpError({ code: 'UNAUTHORIZED', message: '登录尝试过多，请五分钟后重试。' });
+  const accepted = await verifyPassword(input.password, member.password_hash);
   if (!accepted) throw new HttpError({ code: 'UNAUTHORIZED', message: '账号或密码不正确。' });
-  await startSession(user.id);
-  await pool.query('DELETE FROM login_attempts WHERE username=$1', [input.username]);
-  return sessionUserSchema.parse({ id: user.id, username: user.username });
-}
-export async function registerUser(input: RegisterInput) {
-  const pool = getPool();
-  await throttle(input.username);
-  const passwordHash = await hashPassword(input.password);
-  const inserted = await pool.query<{ id: string }>('INSERT INTO users(username,password_hash) VALUES($1,$2) RETURNING id',
-    [input.username, passwordHash]).catch((error: unknown) => {
-    // A concurrent registration with the same name hits the unique constraint.
-    if (error instanceof Error && 'code' in error && error.code === '23505') {
-      throw new HttpError({ code: 'VALIDATION_ERROR', message: '用户名已被注册，请换一个。' });
-    }
-    throw error;
-  });
-  const userId = inserted.rows[0]?.id;
-  if (!userId) throw new Error('Registered user could not be read back.');
-  await startSession(userId);
-  await pool.query('DELETE FROM login_attempts WHERE username=$1', [input.username]);
-  return sessionUserSchema.parse({ id: userId, username: input.username });
-}
-export async function logoutUser() {
   const session = await cookieSession();
-  if (session.sessionId) await getPool().query('DELETE FROM user_sessions WHERE id=$1', [session.sessionId]);
+  const sessionId = randomUUID();
+  await withTransaction(async (db) => {
+    if (session.sessionId) await db.query('DELETE FROM team_sessions WHERE id=$1', [session.sessionId]);
+    await db.query('DELETE FROM team_sessions WHERE expires_at <= now()');
+    await db.query("INSERT INTO team_sessions(id,member_id,expires_at) VALUES($1,$2,now()+$3::integer*interval '1 second')", [sessionId, member.id, lifetimeSeconds]);
+    // 只清登录计数。清全表会顺带放行同名账号的注册节流，等于开了一个绕过口子。
+    await db.query("DELETE FROM login_attempts WHERE scope='login' AND username=$1", [input.username]);
+  });
+  session.sessionId = sessionId;
+  await session.save();
+  return teamMemberSchema.parse({ id: member.id, username: member.username });
+}
+export async function logoutMember() {
+  const session = await cookieSession();
+  if (session.sessionId) await getPool().query('DELETE FROM team_sessions WHERE id=$1', [session.sessionId]);
   session.destroy();
+}
+
+function isUniqueViolation(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && (error as { code?: unknown }).code === '23505';
+}
+
+/**
+ * 用户名+密码自助注册（方案 B 选定的账号接入方式）。
+ * 注册成功即建立会话，省去用户再登录一次；role 只记来源，不参与授权。
+ */
+export async function registerUser(input: RegisterInput) {
+  if (!getServerConfig().selfRegistration) {
+    throw new HttpError({ code: 'FORBIDDEN', message: '当前未开放自助注册，请联系管理员开通账号。' });
+  }
+  const attempts = await countAttempt('register', input.username);
+  if (attempts > throttleLimit) throw new HttpError({ code: 'UNAUTHORIZED', message: '注册尝试过多，请五分钟后重试。' });
+
+  const passwordHash = await hashPassword(input.password);
+  const session = await cookieSession();
+  const sessionId = randomUUID();
+  let memberId: string;
+  try {
+    memberId = await withTransaction(async (db) => {
+      const created = await db.query<{ id: string }>(
+        "INSERT INTO team_members(username,password_hash,role) VALUES($1,$2,'user') RETURNING id",
+        [input.username, passwordHash],
+      );
+      const id = created.rows[0]?.id;
+      if (!id) throw new Error('Registered member could not be read back.');
+      if (session.sessionId) await db.query('DELETE FROM team_sessions WHERE id=$1', [session.sessionId]);
+      await db.query('DELETE FROM team_sessions WHERE expires_at <= now()');
+      await db.query("INSERT INTO team_sessions(id,member_id,expires_at) VALUES($1,$2,now()+$3::integer*interval '1 second')",
+        [sessionId, id, lifetimeSeconds]);
+      await db.query("DELETE FROM login_attempts WHERE scope='register' AND username=$1", [input.username]);
+      return id;
+    });
+  } catch (error) {
+    // 并发注册同一用户名时唯一约束是最终裁决，不靠先查后插。
+    if (isUniqueViolation(error)) throw new HttpError({ code: 'VALIDATION_ERROR', message: '该用户名已被占用，请换一个。' });
+    throw error;
+  }
+  session.sessionId = sessionId;
+  await session.save();
+  return teamMemberSchema.parse({ id: memberId, username: input.username });
 }

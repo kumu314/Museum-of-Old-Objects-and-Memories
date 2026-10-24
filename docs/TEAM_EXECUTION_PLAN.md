@@ -107,7 +107,7 @@ C、D 按实际服务选择最小充分的异步执行方式。任务必须持�
 | `src/features/cabinet/**`、检视控制器、模型展示适配 | A | 动态模型展示和三维状态；不直接访问数据库或生成服务 |
 | `src/features/studio/**`、登录与个人页面、参观页故事和媒体界面 | B | 用户自助操作；与 A 的共享展示文件由一位明确作者修改 |
 | `src/contracts/**`、`src/server/core/**`、`src/server/db/**`、`src/server/auth/**`、迁移和 API 路由 | C | 用户归属、任务与资产业务编排、事务和发布；新模块按实际工程建立 |
-| `src/server/integrations/ai/**`、三维生成适配器、`src/server/assets/**` | D | 外部协议、结果获取、模型及媒体处理；生成适配器为待实现模块 |
+| `src/server/integrations/ai/**`、三维生成适配器、`src/server/assets/**` | D | 外部协议、结果获取、模型及媒体处理；混元 3D Pro 适配器已实现（假上游验证），真实账号验证与编排接入待完成 |
 | `scripts/content/**`、`tests/e2e/**`、`tests/fixtures/**`、内容和验收材料 | E | 测试与证据；真实素材和凭据不入 Git，各作者仍负责局部测试 |
 | 依赖、锁文件、构建、CI、根布局和公共配置 | C 统筹 | 由明确的一位作者修改，使用者核对影响 |
 | 全局样式和界面约定 | B | 涉及场景容器与 A 共同核对 |

@@ -119,10 +119,10 @@ test('素材HTTP闭环：真实上传、脱敏、字节边界、快照保护及�
     assert.equal(publication.status, 200); const token = publishResponseSchema.parse(await publication.json()).data.token; assert.ok(token);
     const sharePath = `/api/share/${token}/assets/${photo.id}`;
     const audioPath = `/api/share/${token}/assets/${audio.id}`;
-    await audioBody(audioPath);
     await error(await request(sharePath, 'GET', undefined, false), 401, 'UNAUTHORIZED');
-    await error(await request(`${sharePath}?variant=thumbnail`, 'GET', undefined, false), 401, 'UNAUTHORIZED');
     await error(await request(audioPath, 'GET', undefined, false), 401, 'UNAUTHORIZED');
+    await error(await request(`/api/share/invalid/assets/${photo.id}`, 'GET', undefined, false), 401, 'UNAUTHORIZED');
+    await audioBody(audioPath);
     assert.deepEqual(await imageBody(await request(sharePath)), displayed);
     await imageBody(await request(`${sharePath}?variant=thumbnail`));
     const badVariant = await error(await request(`${sharePath}?variant=original`), 404, 'SHARE_NOT_FOUND');

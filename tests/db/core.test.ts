@@ -18,7 +18,7 @@ async function fixture(work: (db: PoolClient, actorId: string) => Promise<void>)
   try {
     await db.query('BEGIN');
     const actorId = randomUUID();
-    await db.query('INSERT INTO users(id,username,password_hash) VALUES($1,$2,$3)', [actorId, `core-test-${actorId}`, 'test-only']);
+    await db.query('INSERT INTO team_members(id,username,password_hash) VALUES($1,$2,$3)', [actorId, `core-test-${actorId}`, 'test-only']);
     await work(db, actorId);
   } finally { await db.query('ROLLBACK'); db.release(); }
 }
@@ -27,7 +27,7 @@ test('用户间隔离：非创建者读取、修改和列举他人展馆均不�
     const museum = await createMuseum(actor, { title: '私人展馆', description: '' }, db);
     await createExhibit(actor, museum.id, exhibitInput(museum.version), db);
     const outsider = randomUUID();
-    await db.query('INSERT INTO users(id,username,password_hash) VALUES($1,$2,$3)', [outsider, `outsider-${outsider}`, 'test-only']);
+    await db.query('INSERT INTO team_members(id,username,password_hash) VALUES($1,$2,$3)', [outsider, `outsider-${outsider}`, 'test-only']);
     await rejected(getMuseum(outsider, museum.id, db), 'NOT_FOUND');
     await rejected(updateMuseum(outsider, museum.id, { title: '篡改', description: '', expectedVersion: museum.version }, db), 'NOT_FOUND');
     await rejected(getPrivateAsset(outsider, museum.id, randomUUID(), db), 'NOT_FOUND');
@@ -94,7 +94,7 @@ test('缺图照片平面可保存草稿，确认和发布明确拒绝；补图�
     await confirmExhibit(actor, museum.id, updated.id, { expectedVersion: updated.version, confirmationNote: '补图并核对当前版本。' }, db);
     const published = await publishMuseum(actor, museum.id, await currentVersion(db, actor, museum.id), db);
     assert.ok(published.token);
-    assert.equal((await readShare(published.token, db)).exhibits[0]?.photoAssetId, image);
+    assert.equal((await readShare(actor, published.token, db)).exhibits[0]?.photoAssetId, image);
   });
 });
 
@@ -116,7 +116,7 @@ test('制作确认发布：完整未确认清单、旧快照隔离、替换素�
     const published = await publishMuseum(actor, museum.id, await currentVersion(db, actor, museum.id), db);
     assert.ok(published.token);
     const token = published.token;
-    const before = await readShare(token, db);
+    const before = await readShare(actor, token, db);
     assert.equal(before.exhibits.length, 2);
     assert.equal(JSON.stringify(before).includes('内部原文不可公开'), false);
     assert.equal('rawStory' in (before.exhibits[0] ?? {}), false);
@@ -125,20 +125,20 @@ test('制作确认发布：完整未确认清单、旧快照隔离、替换素�
     assert.equal(changed.version, first.version + 1);
     assert.equal(changed.confirmedVersion, null);
     assert.equal(changed.confirmationNote, null);
-    assert.deepEqual(await readShare(token, db), before);
-    assert.equal((await getShareAsset(token, oldImage, db)).asset.id, oldImage);
-    assert.equal((await getShareAsset(token, oldAudio, db)).asset.id, oldAudio);
-    await rejected(getShareAsset(token, newImage, db), 'SHARE_NOT_FOUND');
+    assert.deepEqual(await readShare(actor, token, db), before);
+    assert.equal((await getShareAsset(actor, token, oldImage, db)).asset.id, oldImage);
+    assert.equal((await getShareAsset(actor, token, oldAudio, db)).asset.id, oldAudio);
+    await rejected(getShareAsset(actor, token, newImage, db), 'SHARE_NOT_FOUND');
     await rejected(publishMuseum(actor, museum.id, await currentVersion(db, actor, museum.id), db), 'NOT_CONFIRMED');
     await removeExhibit(actor, museum.id, second.id, second.version, db);
-    assert.deepEqual(await readShare(token, db), before);
+    assert.deepEqual(await readShare(actor, token, db), before);
     await confirmExhibit(actor, museum.id, changed.id, { expectedVersion: changed.version, confirmationNote: '再次确认变更后的内容。' }, db);
     const again = await publishMuseum(actor, museum.id, await currentVersion(db, actor, museum.id), db);
     assert.equal(again.token, null);
-    const after = await readShare(token, db);
+    const after = await readShare(actor, token, db);
     assert.equal(after.exhibits.length, 1);
     assert.equal(after.exhibits[0]?.photoAssetId, newImage);
-    await rejected(getShareAsset(token, oldImage, db), 'SHARE_NOT_FOUND');
+    await rejected(getShareAsset(actor, token, oldImage, db), 'SHARE_NOT_FOUND');
     assert.equal((await getPrivateAsset(actor, museum.id, oldImage, db)).asset.id, oldImage);
     const repeated = await publishMuseum(actor, museum.id, await currentVersion(db, actor, museum.id), db);
     assert.equal(repeated.snapshotId, again.snapshotId);
@@ -177,14 +177,14 @@ test('停止分享和换链立即撤销旧数据与素材入口，所有不可�
     const token = published.token;
     const rotated = await rotateShareToken(actor, museum.id, await currentVersion(db, actor, museum.id), db);
     assert.notEqual(rotated.token, token);
-    await rejected(readShare(token, db), 'SHARE_NOT_FOUND');
-    await rejected(getShareAsset(token, image, db), 'SHARE_NOT_FOUND');
-    assert.equal((await readShare(rotated.token, db)).id, museum.id);
-    assert.equal((await getShareAsset(rotated.token, image, db)).asset.id, image);
+    await rejected(readShare(actor, token, db), 'SHARE_NOT_FOUND');
+    await rejected(getShareAsset(actor, token, image, db), 'SHARE_NOT_FOUND');
+    assert.equal((await readShare(actor, rotated.token, db)).id, museum.id);
+    assert.equal((await getShareAsset(actor, rotated.token, image, db)).asset.id, image);
     await stopSharing(actor, museum.id, await currentVersion(db, actor, museum.id), db);
-    await rejected(readShare(rotated.token, db), 'SHARE_NOT_FOUND');
-    await rejected(getShareAsset(rotated.token, image, db), 'SHARE_NOT_FOUND');
-    await rejected(getShareAsset('invalid', randomUUID(), db), 'SHARE_NOT_FOUND');
+    await rejected(readShare(actor, rotated.token, db), 'SHARE_NOT_FOUND');
+    await rejected(getShareAsset(actor, rotated.token, image, db), 'SHARE_NOT_FOUND');
+    await rejected(getShareAsset(actor, 'invalid', randomUUID(), db), 'SHARE_NOT_FOUND');
     const row = await db.query<{ share_token_hash: string | null }>('SELECT share_token_hash FROM museums WHERE id=$1', [museum.id]);
     assert.equal(row.rows[0]?.share_token_hash, null);
   });

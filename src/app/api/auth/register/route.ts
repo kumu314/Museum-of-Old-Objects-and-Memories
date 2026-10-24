@@ -2,6 +2,7 @@ import { registerInputSchema } from '@/contracts/session';
 import { registerUser, requireSameOrigin } from '@/server/auth/session';
 import { dataResponse, errorResponse, readJsonRequest } from '@/server/http';
 
+export const dynamic = 'force-dynamic';
 export async function POST(request: Request) {
   try {
     requireSameOrigin(request);

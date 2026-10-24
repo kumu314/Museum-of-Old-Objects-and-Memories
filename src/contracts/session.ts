@@ -7,18 +7,22 @@ export const loginInputSchema = z.strictObject({
   // Passwords are not trimmed; spaces can be part of the credential.
   password: z.string().min(1).max(256),
 });
-// Registration is the self-service entry (方案 B): users create their own
-// accounts, so the name rules here are stricter than the legacy 1–80 column.
+
+/**
+ * 自助注册比登录更严：登录要兼容历史账号，注册只约束新账号。
+ * 用户名不允许空白，避免出现肉眼无法区分、也无法可靠输入的账号。
+ */
+export const registerUsernameSchema = textSchema(3, 40)
+  .refine((value) => !/\s/.test(value), '用户名不能包含空格。');
 export const registerInputSchema = z.strictObject({
-  username: z.string().trim().min(2, '用户名至少 2 个字符。').max(40)
-    .regex(/^[\p{L}\p{N}_-]+$/u, '用户名只能包含文字、数字、下划线或连字符。'),
-  password: z.string().min(8, '密码至少 8 位。').max(256),
+  username: registerUsernameSchema,
+  password: z.string().min(12, '密码至少 12 个字符。').max(256),
 });
-export const sessionUserSchema = z.strictObject({
+export const teamMemberSchema = z.strictObject({
   id: idSchema,
   username: textSchema(1, 80),
 });
-export const sessionResponseSchema = successResponseSchema(sessionUserSchema);
+export const sessionResponseSchema = successResponseSchema(teamMemberSchema);
 export const mutationSuccessSchema = successResponseSchema(z.strictObject({ ok: z.literal(true) }));
 
 export const shareTokenSchema = z.string().regex(/^[A-Za-z0-9_-]{43}$/, '分享标识无效。');
@@ -38,5 +42,5 @@ export const healthResponseSchema = successResponseSchema(z.strictObject({
 
 export type LoginInput = z.infer<typeof loginInputSchema>;
 export type RegisterInput = z.infer<typeof registerInputSchema>;
-export type SessionUser = z.infer<typeof sessionUserSchema>;
+export type TeamMember = z.infer<typeof teamMemberSchema>;
 export type PublishResult = z.infer<typeof publishResultSchema>;

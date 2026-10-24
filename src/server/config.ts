@@ -15,6 +15,9 @@ const environmentSchema = z.object({
     const fromPublic = relative(resolve('public'), resolve(value));
     return isAbsolute(value) && (fromPublic === '..' || fromPublic.startsWith(`..${sep}`));
   }),
+  // 方案 B 采用用户名+密码自助注册。生产要临时关闭时设 SELF_REGISTRATION=closed，
+  // 归属与权限判断不受这个开关影响。
+  SELF_REGISTRATION: z.enum(['open', 'closed']).default('open'),
 });
 
 export function parseServerConfig(environment: Readonly<Record<string, string | undefined>>) {
@@ -34,6 +37,7 @@ export function parseServerConfig(environment: Readonly<Record<string, string | 
     sessionPassword: value.SESSION_PASSWORD,
     appOrigin: value.APP_ORIGIN,
     uploadDir: value.UPLOAD_DIR,
+    selfRegistration: value.SELF_REGISTRATION === 'open',
   };
 }
 

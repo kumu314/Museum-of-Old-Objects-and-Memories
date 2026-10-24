@@ -115,9 +115,9 @@ export async function uploadAsset(actorId: string, museumId: string, input: Asse
   try {
     client = await pool.connect();
     await client.query('BEGIN'); begun = true;
-    const actor = await client.query('SELECT id FROM users WHERE id=$1 AND active FOR SHARE', [actorId]);
-    if (actor.rowCount !== 1) throw new HttpError({ code: 'UNAUTHORIZED', message: '请重新登录。' });
-    await museumRecord(client, museumId, actorId, true);
+    const actor = await client.query('SELECT id FROM team_members WHERE id=$1 AND active FOR SHARE', [actorId]);
+    if (actor.rowCount !== 1) throw new HttpError({ code: 'UNAUTHORIZED', message: '请重新登录制作入口。' });
+    await museumRecord(client, actorId, museumId, true);
     await client.query(`INSERT INTO assets(id,museum_id,original_name,kind,mime,byte_size,storage_key,thumbnail_storage_key,width,height,sha256,created_by)
       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`, [prepared.id, museumId, prepared.originalName, prepared.kind,
       prepared.contentType, prepared.byteSize, prepared.storageKey, prepared.thumbnailStorageKey, prepared.width, prepared.height, prepared.sha256, actorId]);
