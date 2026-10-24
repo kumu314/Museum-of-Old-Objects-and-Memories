@@ -214,3 +214,19 @@ test('数据库层拒绝白名单外的城市名', async () => {
     await assert.rejects(db.query('UPDATE museums SET region_city=$1 WHERE id=$2', ['洛阳市涧西区', museum.id]), { code: '23514' });
   });
 });
+
+
+test('发布后修改草稿标题不会泄露到榜单，重新发布后才更新', async () => {
+  await inRollback(async (db) => {
+    const owner = await account(db, 'snapshot-title');
+    const museum = await publishedMuseum(db, owner.id, '已发布标题', null);
+    const current = await getMuseum(owner.id, museum.museumId, db);
+    const draft = await updateMuseum(owner.id, museum.museumId, {
+      title: '尚未公开的私密标题', description: '', expectedVersion: current.version,
+    }, db);
+    const title = async () => (await readLeaderboard(db)).entries.find((entry) => entry.museumId === museum.museumId)?.title;
+    assert.equal(await title(), '已发布标题');
+    await publishMuseum(owner.id, museum.museumId, draft.version, db);
+    assert.equal(await title(), '尚未公开的私密标题');
+  });
+});
