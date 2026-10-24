@@ -5,7 +5,7 @@ import {
 } from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { createBrassPlaque } from './brass-plaque.ts';
-import { CELL_SIZE, slotRestPosition, slotFloorSlope, slotFloorHeight } from './cabinet-layout.ts';
+import { CELL_SIZE, slotRestPosition, slotPlaquePosition, slotFloorSlope, slotFloorHeight } from './cabinet-layout.ts';
 
 interface CabinetMaterials {
   readonly wood: MeshStandardMaterial;
@@ -84,9 +84,9 @@ function glassHighlightTexture() {
   return canvasTexture(128, 512, (context) => {
     const glint = context.createLinearGradient(0, 0, 128, 0);
     glint.addColorStop(0, 'rgba(200, 138, 75, 0)');
-    glint.addColorStop(0.22, 'rgba(255, 214, 153, 0.18)');
-    glint.addColorStop(0.38, 'rgba(255, 222, 173, 0.7)');
-    glint.addColorStop(0.5, 'rgba(225, 165, 92, 0.3)');
+    glint.addColorStop(0.22, 'rgba(242, 228, 206, 0.2)');
+    glint.addColorStop(0.38, 'rgba(255, 246, 228, 0.64)');
+    glint.addColorStop(0.5, 'rgba(225, 213, 192, 0.28)');
     glint.addColorStop(1, 'rgba(200, 138, 75, 0)');
     context.fillStyle = glint; context.fillRect(0, 0, 128, 512);
     context.globalCompositeOperation = 'destination-in';
@@ -187,7 +187,7 @@ export function buildCabinetBody(materials: CabinetMaterials, labels: ReadonlyMa
 
   for (let slot = 0; slot < 6; slot++) {
     const [x, floorY] = slotRestPosition(slot);
-    const railY = slot < 3 ? -0.065 : floorY - 0.16;
+    const [, railY] = slotPlaquePosition(slot);
     box(3.43, slot < 3 ? 0.24 : 0.32, 0.09, x, railY, 0.825, materials.wood);
     if (slot < 3) {
       const shelf = box(3.43, 0.055, 1.46, x, slotFloorHeight(slot, 0.01) - 0.028, 0.01, materials.interior);
@@ -203,18 +203,16 @@ export function buildCabinetBody(materials: CabinetMaterials, labels: ReadonlyMa
     color: '#ffffff', metalness: 0, roughness: 0, transmission: 1,
     opacity: 1, ior: 1.5, thickness: 0.014, depthWrite: false, envMapIntensity: 0.7,
   });
-  const glassEdge = new MeshStandardMaterial({ color: '#d8a263', metalness: 0, roughness: 0.25, transparent: true, opacity: 0.18, depthWrite: false });
+  const glassEdge = new MeshStandardMaterial({ color: '#ded2ba', metalness: 0, roughness: 0.25, transparent: true, opacity: 0.14, depthWrite: false });
   const liner = new MeshStandardMaterial({ color: '#0c0806', roughness: 0.56, metalness: 0 });
-  const sideGlass = new MeshPhysicalMaterial({ color: '#ffd699', transparent: true, opacity: 0.18,
-    roughness: 0.035, metalness: 0.18, clearcoat: 1, clearcoatRoughness: 0.03, side: DoubleSide, depthWrite: false, envMapIntensity: 1.1 });
-  const glintMaterial = new MeshBasicMaterial({ map: glassHighlightTexture(), transparent: true, opacity: 0.8,
+  const sideGlass = new MeshPhysicalMaterial({ color: '#eee4d3', transparent: true, opacity: 0.12,
+    roughness: 0.09, metalness: 0.05, clearcoat: 1, clearcoatRoughness: 0.07, side: DoubleSide, depthWrite: false, envMapIntensity: 1.1 });
+  const glintMaterial = new MeshBasicMaterial({ map: glassHighlightTexture(), transparent: true, opacity: 0.72,
     blending: AdditiveBlending, depthWrite: false, toneMapped: false, side: DoubleSide });
   const haloMaterial = new MeshBasicMaterial({ map: lampHaloTexture(), transparent: true,
     blending: AdditiveBlending, depthWrite: false, toneMapped: false, side: DoubleSide });
   const wallHaloMaterial = haloMaterial.clone();
   wallHaloMaterial.opacity = 0.5;
-  const bronze = new MeshStandardMaterial({ color: '#c88a4b', roughness: 0.3, metalness: 0.7,
-    emissive: '#c88a4b', emissiveIntensity: 0.1 });
   const floorGlowMaterial = haloMaterial.clone();
   floorGlowMaterial.opacity = 0.22;
 
@@ -244,17 +242,15 @@ export function buildCabinetBody(materials: CabinetMaterials, labels: ReadonlyMa
     const openingHeight = ceilingY - openingFloor;
     for (const edgeY of [openingFloor + 0.018, ceilingY - 0.018]) {
       box(3.36, 0.035, 0.045, x, edgeY, 0.735, liner);
-      box(3.31, 0.009, 0.012, x, edgeY, 0.765, bronze);
     }
     for (const side of [-1, 1]) {
       box(0.035, openingHeight, 0.045, x + side * 1.665, (ceilingY + openingFloor) / 2, 0.735, liner);
-      box(0.009, openingHeight - 0.035, 0.012, x + side * 1.653, (ceilingY + openingFloor) / 2, 0.765, bronze);
       const glass = new Mesh(new PlaneGeometry(0.9, openingHeight - 0.07), sideGlass);
       glass.rotation.y = Math.PI / 2;
       glass.position.set(x + side * 1.64, (ceilingY + openingFloor) / 2, 0.24);
       glass.name = `cabinet-side-glass:${slot}:${side}`;
       cabinet.add(glass);
-      const glint = overlay(side < 0 ? 0.21 : 0.14, openingHeight - 0.08, x + side * 1.60, (ceilingY + openingFloor) / 2, 0.747, glintMaterial);
+      const glint = overlay(side < 0 ? 0.27 : 0.19, openingHeight - 0.08, x + side * 1.59, (ceilingY + openingFloor) / 2, 0.747, glintMaterial);
       glint.name = `cabinet-glass-glint:${slot}:${side}`;
     }
     for (const side of [-1, 1]) {
@@ -297,7 +293,7 @@ export function buildCabinetBody(materials: CabinetMaterials, labels: ReadonlyMa
       const marker = new Line(new BufferGeometry().setFromPoints([
         new Vector3(-0.96, 0, -0.48), new Vector3(0.96, 0, -0.48),
         new Vector3(0.96, 0, 0.48), new Vector3(-0.96, 0, 0.48), new Vector3(-0.96, 0, -0.48),
-      ]), new LineDashedMaterial({ color: '#eed9b5', transparent: true, opacity: 0.66, dashSize: 0.09, gapSize: 0.06, toneMapped: false }));
+      ]), new LineDashedMaterial({ color: '#cfbea6', transparent: true, opacity: 0.38, dashSize: 0.07, gapSize: 0.055, toneMapped: false }));
       marker.position.set(x, floorY + 0.018, z);
       marker.rotation.x = Math.atan(slotFloorSlope(slot));
       marker.computeLineDistances();
@@ -308,9 +304,8 @@ export function buildCabinetBody(materials: CabinetMaterials, labels: ReadonlyMa
   }
 
   for (let slot = 0; slot < 6; slot++) {
-    const [x, floorY] = slotRestPosition(slot);
     const plaque = createBrassPlaque(labels.get(slot) ?? '', slot);
-    plaque.position.set(x, slot < 3 ? -0.065 : floorY - 0.16, 0.91);
+    plaque.position.set(...slotPlaquePosition(slot));
     if (slot < 3) plaque.scale.y = 0.9;
     plaque.visible = labels.has(slot);
     cabinet.add(plaque);

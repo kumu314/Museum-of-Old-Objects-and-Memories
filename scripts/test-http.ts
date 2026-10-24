@@ -111,7 +111,14 @@ try {
     await delay(250);
   }
   if (!ready) throw new Error('HTTP regression server did not become healthy within 90 seconds.');
-  console.log('Isolated HTTP regression server ready.');
+  // Health does not compile the authenticated API or the large viewer bundle.
+  // Keep cold compilation in fixture setup, outside the unchanged request deadlines.
+  for (const [path, status] of [['/api/museums', 401], ['/share/invalid', 307]] as const) {
+    const response = await fetch(`${origin}${path}`, { redirect: 'manual', signal: AbortSignal.timeout(90_000) });
+    await response.arrayBuffer();
+    if (response.status !== status) throw new Error(`Route preparation ${path} returned HTTP ${response.status}, expected ${status}.`);
+  }
+  console.log('Isolated HTTP regression server ready; API and share route compiled.');
   const tests = spawn(process.execPath, ['--import', 'tsx', '--test', '--test-concurrency=1', '--test-timeout=180000',
     'tests/e2e/api-core.test.ts', 'tests/e2e/assets-http.test.ts', 'tests/e2e/ownership-http.test.ts',
     'tests/e2e/registration-http.test.ts'], { cwd: root, env: environment, stdio: 'inherit' });

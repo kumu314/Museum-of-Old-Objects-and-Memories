@@ -7,7 +7,7 @@ import { loginInputSchema, teamMemberSchema } from '../../contracts/session';
 import { apiRequest, describeFailure, jsonRequest } from './api';
 import { Field, inputClass, Notice, panelClass, primaryClass } from './ui';
 
-export function LoginForm() {
+export function LoginForm({ returnTo = '/studio' }: { returnTo?: string }) {
   const router = useRouter();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -19,7 +19,7 @@ export function LoginForm() {
     try {
       await apiRequest('/api/auth/login', teamMemberSchema, jsonRequest('POST', loginInputSchema.parse({ username, password })));
       setPassword('');
-      router.replace('/studio');
+      router.replace(returnTo);
     } catch (failure) { setError(describeFailure(failure)); }
     finally { setPending(false); }
   }

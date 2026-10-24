@@ -1,0 +1,6 @@
+.gallery-backdrop { position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; background: #21180f url('./assets/gallery-environment.png') center center / cover no-repeat; }
+.gallery-backdrop__vignette { position: absolute; inset: 0; background: linear-gradient(#0c090530, transparent 24% 68%, #0c09053d), radial-gradient(ellipse at 50% 42%, transparent 45%, #0b080526 100%); }
+@media (max-aspect-ratio: 1 / 1) {
+  /* The width-fitted cabinet sits higher on portrait screens; bring the tabletop up with it. */
+  .gallery-backdrop { background-size: auto 170%; background-position: center bottom; }
+}

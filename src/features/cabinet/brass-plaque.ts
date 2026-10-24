@@ -10,7 +10,7 @@ function texture(paint: (context: CanvasRenderingContext2D) => void) {
 
 function paintText(context: CanvasRenderingContext2D, text: string) {
   context.clearRect(0, 0, 1600, 192);
-  context.fillStyle = '#30271e'; context.textAlign = 'center'; context.textBaseline = 'middle';
+  context.fillStyle = '#21190f'; context.textAlign = 'center'; context.textBaseline = 'middle';
   const family = '"Noto Sans CJK SC", "Microsoft YaHei", sans-serif';
   context.font = `400 94px ${family}`;
   const fontSize = Math.min(94, Math.floor(94 * 1260 / Math.max(1, context.measureText(text).width)));
@@ -40,8 +40,9 @@ export function createBrassPlaque(text: string, slot: number) {
     }
   });
   const patina = texture((c) => {
-    const gradient = c.createLinearGradient(0, 0, 1600, 192);
-    gradient.addColorStop(0, '#a48d68'); gradient.addColorStop(0.45, '#c4ac82'); gradient.addColorStop(1, '#a28a65');
+    const gradient = c.createLinearGradient(0, 0, 0, 192);
+    gradient.addColorStop(0, '#d1b987'); gradient.addColorStop(0.24, '#c3a16c');
+    gradient.addColorStop(0.52, '#b69663'); gradient.addColorStop(1, '#947344');
     c.fillStyle = gradient; c.fillRect(0, 0, 1600, 192);
     c.strokeStyle = '#c6b18b'; c.lineWidth = 6; c.strokeRect(3, 3, 1594, 186);
   });

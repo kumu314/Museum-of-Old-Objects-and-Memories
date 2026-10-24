@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { z } from 'zod';
 import { museumDraftSchema, updateMuseumInputSchema, type ExhibitDraft, type MuseumDraft } from '../../contracts/museum';
+import { publishResultSchema, shareLinkResponseSchema } from '../../contracts/session';
 import { ApiFailure, apiRequest, describeFailure, jsonRequest } from './api';
 import { ExhibitEditor } from './exhibit-editor';
 import { buttonClass, Field, inputClass, Notice, panelClass, primaryClass } from './ui';
@@ -45,6 +46,8 @@ function MuseumEditor({ initial }: { initial: MuseumDraft }) {
   const [message, setMessage] = useState<string | null>(null);
   const [refreshRequired, setRefreshRequired] = useState(false);
   const [unconfirmed, setUnconfirmed] = useState<string[]>([]);
+  const [shareLink, setShareLink] = useState<string | null>(null);
+  const [confirmRotation, setConfirmRotation] = useState(false);
   const metadataDirty = title !== metadataBase.title || description !== metadataBase.description;
   const anyDirty = metadataDirty || editorDirty;
   const busy = action !== null || editorBusy;
@@ -106,10 +109,37 @@ function MuseumEditor({ initial }: { initial: MuseumDraft }) {
     setAction('stop'); setError(null); setMessage(null);
     try {
       await apiRequest(`${path}/share`, z.strictObject({ ok: z.literal(true) }), jsonRequest('DELETE', { expectedVersion: museum.version }));
+      setShareLink(null);
       setMessage('已停止分享，旧链接的数据和素材新请求已失效。');
       await refreshState();
     } catch (failure) { fail(failure); }
     finally { setAction(null); }
+  }
+  async function publish() {
+    setAction('publish'); setError(null); setMessage(null); setUnconfirmed([]);
+    try {
+      const result = await apiRequest(`${path}/publish`, publishResultSchema, jsonRequest('POST', { expectedVersion: museum.version }));
+      if (result.token !== null) setShareLink(new URL(`/share/${result.token}`, window.location.origin).href);
+      setMessage(result.token !== null ? '当前版本已发布，请打开参观链接核对后再交付。' : '当前版本已发布，原参观链接继续有效。');
+      await refreshState();
+    } catch (failure) { fail(failure); }
+    finally { setAction(null); }
+  }
+  async function rotateLink() {
+    setConfirmRotation(false);
+    setAction('rotate'); setError(null); setMessage(null);
+    try {
+      const result = await apiRequest(`${path}/share`, shareLinkResponseSchema.shape.data, jsonRequest('POST', { expectedVersion: museum.version }));
+      setShareLink(new URL(`/share/${result.token}`, window.location.origin).href);
+      setMessage('已生成新链接，旧链接已失效。');
+      await refreshState();
+    } catch (failure) { fail(failure); }
+    finally { setAction(null); }
+  }
+  async function copyLink() {
+    if (shareLink === null) return;
+    try { await navigator.clipboard.writeText(shareLink); setMessage('参观链接已复制。'); }
+    catch { setError('无法自动复制，请选中链接文本手动复制。'); }
   }
   async function removeMuseum() {
     if (!window.confirm(`删除展馆“${museum.title}”的草稿并停止分享？历史素材和快照不会物理清除。`)) return;
@@ -130,7 +160,10 @@ function MuseumEditor({ initial }: { initial: MuseumDraft }) {
           const active = exhibit ? selection === exhibit.id : selection === 'new' && newSlot === index;
           return <button key={index} type="button" aria-pressed={active} disabled={busy} onClick={() => choose(exhibit, index)} className={`min-h-24 rounded-lg border p-2 text-left text-xs leading-5 transition ${active ? 'border-amber-200 bg-amber-100/10' : 'border-stone-700 hover:border-stone-400'} ${exhibit && unconfirmed.includes(exhibit.id) ? 'ring-2 ring-red-300/60' : ''}`}><span className="block text-stone-500">{index < 3 ? '上排' : '下排'} {index % 3 + 1}</span><span className="mt-1 block">{exhibit?.name ?? '＋ 收录旧物'}</span>{exhibit && <span className={`block ${exhibit.confirmedVersion === exhibit.version ? 'text-amber-100/60' : 'text-red-200/70'}`}>{exhibit.confirmedVersion === exhibit.version ? '已确认' : '待确认'}</span>}</button>;
         })}</div>{unconfirmed.length > 0 && <p className="mt-3 text-xs text-red-200">请依次处理红色标记的未确认展品。</p>}</section>
-        <section className={panelClass}><h2 className="text-lg">发布与分享</h2><p className="mt-3 text-sm leading-6 text-stone-400">参观页尚未开放，暂不能发布或交付参观链接。现有分享仍可停止。</p><div className="mt-4 flex flex-wrap gap-3"><button className={primaryClass} disabled>发布当前版本（暂未开放）</button><button className={buttonClass} disabled={busy || anyDirty || refreshRequired || !museum.shareEnabled} onClick={stopSharing}>停止分享</button></div>
+        <section className={panelClass}><h2 className="text-lg">发布与分享</h2><p className="mt-3 text-sm leading-6 text-stone-400">发布前请保存全部输入，并取得物主对当前版本的确认。参观者只会看到已发布版本。</p><div className="mt-4 flex flex-wrap gap-3"><button className={primaryClass} disabled={busy || anyDirty || refreshRequired || museum.exhibits.length === 0} onClick={publish}>{action === 'publish' ? '正在发布…' : '发布当前版本'}</button><button className={buttonClass} disabled={busy || anyDirty || refreshRequired || museum.publishedVersion === null} onClick={() => setConfirmRotation(true)}>生成新参观链接</button><button className={buttonClass} disabled={busy || anyDirty || refreshRequired || !museum.shareEnabled} onClick={stopSharing}>停止分享</button></div>
+          {confirmRotation && <div className="mt-4 rounded-lg border border-amber-200/30 p-3" role="group" aria-label="确认更换参观链接"><p className="text-sm leading-6">生成新链接后，旧链接的数据和素材新请求将立即失效。</p><div className="mt-3 flex gap-3"><button className={primaryClass} disabled={busy || anyDirty || refreshRequired} onClick={rotateLink}>确定更换链接</button><button className={buttonClass} disabled={busy} onClick={() => setConfirmRotation(false)}>取消</button></div></div>}
+          {shareLink && museum.shareEnabled && <div className="mt-4 space-y-3"><Field label="参观链接"><input className={`${inputClass} text-xs`} readOnly value={shareLink} onFocus={(event) => event.target.select()} /></Field><div className="flex flex-wrap gap-3"><a className={buttonClass} href={shareLink} target="_blank" rel="noreferrer">打开参观页</a><button className={buttonClass} onClick={() => void copyLink()}>复制链接</button></div></div>}
+          <p className="mt-3 text-xs leading-5 text-stone-500">持有链接即可访问。链接仅在生成后显示，请及时复制保存；再次生成会使旧链接失效。停止分享不能撤回已下载的副本。</p>
         </section>
         <button className={`${buttonClass} text-red-200/70`} disabled={busy || anyDirty || refreshRequired} onClick={removeMuseum}>删除展馆草稿并停止分享</button>
       </aside>
