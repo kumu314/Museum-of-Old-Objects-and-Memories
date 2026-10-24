@@ -86,7 +86,7 @@ test('本地兼容服务收到隔离的system/user消息，返回经来源校验
       z.object({ role: z.literal('user'), content: z.string() }),
     ]),
     response_format: z.object({ type: z.literal('json_object') }),
-    max_completion_tokens: z.literal(1_024),
+    max_tokens: z.literal(2_000),
     stream: z.literal(false),
   }).parse(JSON.parse(request.body));
   assert.deepEqual(JSON.parse(sent.messages[1].content), input);
@@ -113,6 +113,64 @@ test('无效JSON、伪造来源与过大响应均为502，未自动重试且输�
   await expectAiError(generateDraft(input), 'AI_UNAVAILABLE', 502);
   assert.equal(count, 3);
   assert.deepEqual(input, original);
+});
+
+test('上游拒绝、限流、故障和连接中断均为502，不泄露响应或自动重试', async (context) => {
+  let mode: number | 'disconnect' = 401;
+  let requests = 0;
+  const privateProviderMessage = 'provider-private-diagnostic';
+  await localService(context, (request, response) => {
+    requests += 1;
+    request.resume();
+    if (mode === 'disconnect') {
+      request.socket.destroy();
+      return;
+    }
+    response.statusCode = mode;
+    response.end(JSON.stringify({ error: privateProviderMessage }));
+  });
+  const original = structuredClone(input);
+  for (const failure of [401, 429, 503, 'disconnect'] as const) {
+    mode = failure;
+    await assert.rejects(generateDraft(input), (error: unknown) => {
+      assert.ok(error instanceof HttpError);
+      assert.equal(error.failure.code, 'AI_UNAVAILABLE');
+      const response = errorResponse(error, '00000000-0000-4000-8000-000000000001');
+      assert.equal(response.status, 502);
+      assert.ok(!error.failure.message.includes(privateProviderMessage));
+      return true;
+    });
+    assert.deepEqual(input, original);
+  }
+  assert.equal(requests, 4);
+});
+
+test('finish_reason=length 时返回受控的 AI_UNAVAILABLE', async (context) => {
+  await localService(context, (_request, response) => {
+    response.setHeader('Content-Type', 'application/json');
+    response.end(JSON.stringify({
+      choices: [{ finish_reason: 'length', message: { role: 'assistant', content: '' } }],
+    }));
+  });
+  await expectAiError(generateDraft(input), 'AI_UNAVAILABLE', 502);
+});
+
+test('content 为 null 且 finish_reason=length 时保留截断提示', async (context) => {
+  await localService(context, (_request, response) => {
+    response.setHeader('Content-Type', 'application/json');
+    response.end(JSON.stringify({
+      choices: [{ finish_reason: 'length', message: { role: 'assistant', content: null } }],
+    }));
+  });
+  let caught: unknown;
+  try {
+    await generateDraft(input);
+  } catch (error) {
+    caught = error;
+  }
+  assert.ok(caught instanceof HttpError);
+  assert.equal(caught.failure.code, 'AI_UNAVAILABLE');
+  assert.match(caught.failure.message, /截断/);
 });
 
 test('AI未配置时明确不可用，不查找其他凭据或生成演示答案', async (context) => {

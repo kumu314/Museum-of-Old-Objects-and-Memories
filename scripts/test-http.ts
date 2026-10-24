@@ -46,8 +46,17 @@ async function freePort() {
 async function stopServer() {
   if (!server?.pid || server.exitCode !== null || server.signalCode !== null) return;
   const pid = server.pid;
-  process.kill(-pid, 'SIGTERM');
-  const force = setTimeout(() => process.kill(-pid, 'SIGKILL'), 5000);
+  // Windows 没有进程组语义，负 pid 会抛 ESRCH 并盖住真正的失败原因。
+  const signal = (value: NodeJS.Signals) => {
+    try {
+      if (process.platform === 'win32') server?.kill(value);
+      else process.kill(-pid, value);
+    } catch (error) {
+      if (!(error instanceof Error && 'code' in error && error.code === 'ESRCH')) throw error;
+    }
+  };
+  signal('SIGTERM');
+  const force = setTimeout(() => signal('SIGKILL'), 5000);
   try { await serverExited; } finally { clearTimeout(force); }
 }
 
