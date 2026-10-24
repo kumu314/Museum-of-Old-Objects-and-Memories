@@ -3,6 +3,7 @@ import type { PoolClient } from 'pg';
 import { z } from 'zod';
 import { cabinetPosition, displayPhotoRequiredMessage, idSchema, missingDisplayPhoto, publicMuseumSchema, publishResultSchema, shareNotFoundMessage, shareTokenSchema, toPublicExhibit } from '../../contracts';
 import { sharedContributionsSchema } from '../../contracts/contributors';
+import { sharedVisitSchema } from '../../contracts/shared-visit';
 import { HttpError } from '../http';
 import { inTransaction, museumDraft } from './museums';
 import { assertVersion, assetRecord, exhibitRecords, invalid, museumRecord, requireActor, validateAssets } from './records';
@@ -131,16 +132,31 @@ export function readShareContributions(actorId: string, token: string, client?: 
   return inTransaction(async (db) => {
     await requireActor(db, actorId);
     const share = await shareRecord(db, token);
-    const exhibitIds = share.data.exhibits.map((exhibit) => exhibit.id);
-    if (exhibitIds.length === 0) return sharedContributionsSchema.parse({ museumId: share.id, contributions: [] });
-    const result = await db.query<Record<string, unknown>>(`SELECT c.id,c.exhibit_id AS "exhibitId",
-      c.author_name AS "authorName",c.author_role AS "authorRole",c.story,c.source_note AS "sourceNote"
-      FROM contributions c
-      WHERE c.museum_id=$1 AND c.exhibit_id=ANY($2::uuid[]) AND c.publish_consent AND c.withdrawn_at IS NULL
-      ORDER BY c.created_at,c.id`, [share.id, exhibitIds]);
-    return sharedContributionsSchema.parse({ museumId: share.id, contributions: result.rows });
+    return contributionsForShare(db, share);
   }, client);
 }
+
+async function contributionsForShare(db: PoolClient, share: z.infer<typeof shareRecordSchema>) {
+  const exhibitIds = share.data.exhibits.map((exhibit) => exhibit.id);
+  if (exhibitIds.length === 0) return sharedContributionsSchema.parse({ museumId: share.id, contributions: [] });
+  const result = await db.query<Record<string, unknown>>(`SELECT c.id,c.exhibit_id AS "exhibitId",
+    c.author_name AS "authorName",c.author_role AS "authorRole",c.story,c.source_note AS "sourceNote"
+    FROM contributions c
+    WHERE c.museum_id=$1 AND c.exhibit_id=ANY($2::uuid[]) AND c.publish_consent AND c.withdrawn_at IS NULL
+    ORDER BY c.created_at,c.id`, [share.id, exhibitIds]);
+  return sharedContributionsSchema.parse({ museumId: share.id, contributions: result.rows });
+}
+
+/** 展馆与实时讲述共用一次快照读取，避免重新发布时拼接两个版本的展品范围。 */
+export function readSharedVisit(actorId: string, token: string, client?: PoolClient) {
+  return inTransaction(async (db) => {
+    await requireActor(db, actorId);
+    const share = await shareRecord(db, token);
+    const shared = await contributionsForShare(db, share);
+    return sharedVisitSchema.parse({ museum: share.data, contributions: shared.contributions });
+  }, client);
+}
+
 export function getShareAsset(actorId: string, token: string, assetId: string, client?: PoolClient) {
   return inTransaction(async (db) => {
     await requireActor(db, actorId);

@@ -97,7 +97,7 @@ export function ExhibitStory({ exhibit, photoUrl, audioUrl, active, contribution
           <p className="exhibit-contributions__source">来源 · {item.sourceNote}</p>
         </li>)}
       </ol>
-      <p className="exhibit-contributions__note">每份讲述各自署名、各自授权，不做合并，也不生成共同摘要；作者撤回后即从这里消失。</p>
+      <p className="exhibit-contributions__note">每份讲述各自署名、各自授权，不做合并，也不生成共同摘要；作者撤回后，重新读取时不再显示。</p>
     </details>}
     <div className="exhibit-photos">
       {photoUrl !== null && !photoFailed ? <>
