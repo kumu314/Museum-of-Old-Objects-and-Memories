@@ -19,12 +19,20 @@ const pool = new Pool({ connectionString: getIsolatedTestDatabaseUrl(), max: 1, 
 // getServerConfig 是进程级单例：整个文件共享一个上传根目录，用例内以
 // uuid 存储键隔离，避免目录切换被缓存吞掉。
 const uploadRoot = resolve('.local', `model-jobs-${randomUUID()}`);
+const providerEnv = ['HUNYUAN_PROVIDER', 'HUNYUAN_SECRET_ID', 'HUNYUAN_SECRET_KEY', 'HUNYUAN_REGION'] as const;
+const previousProviderEnv = providerEnv.map((name) => [name, process.env[name]] as const);
 before(async () => {
   await mkdir(uploadRoot, { recursive: true });
   process.env.UPLOAD_DIR = uploadRoot;
+  // 默认隔离本机真实云密钥：本文件的反代用例必须走假反代。
+  process.env.HUNYUAN_PROVIDER = 'proxy';
+  delete process.env.HUNYUAN_SECRET_ID;
+  delete process.env.HUNYUAN_SECRET_KEY;
+  delete process.env.HUNYUAN_REGION;
   await migrate(pool);
 });
 after(async () => {
+  for (const [name, value] of previousProviderEnv) { if (value === undefined) delete process.env[name]; else process.env[name] = value; }
   await pool.end();
   await rm(uploadRoot, { recursive: true, force: true });
 });
@@ -354,7 +362,7 @@ test('历史未知任务即使不是最新任务也阻止新付费提交', async
 
 test('云 API 通道：配置齐全时走官方 Pro 协议，任务记录 provider 并完成落盘', async (context) => {
   const setup = await fixture(context);
-  const names = ['HUNYUAN_SECRET_ID', 'HUNYUAN_SECRET_KEY', 'HUNYUAN_REGION', 'HUNYUAN_3D_ENDPOINT', 'HUNYUAN_CLOUD_ALLOW_INSECURE_RESULT'] as const;
+  const names = ['HUNYUAN_PROVIDER', 'HUNYUAN_SECRET_ID', 'HUNYUAN_SECRET_KEY', 'HUNYUAN_REGION', 'HUNYUAN_3D_ENDPOINT', 'HUNYUAN_CLOUD_ALLOW_INSECURE_RESULT'] as const;
   const previous = names.map((name) => [name, process.env[name]] as const);
   let submitAction: string | undefined;
   const actions: string[] = [];
@@ -391,6 +399,7 @@ test('云 API 通道：配置齐全时走官方 Pro 协议，任务记录 provid
     server.closeAllConnections();
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   });
+  process.env.HUNYUAN_PROVIDER = 'cloud';
   process.env.HUNYUAN_SECRET_ID = 'synthetic-id';
   process.env.HUNYUAN_SECRET_KEY = 'synthetic-key';
   process.env.HUNYUAN_REGION = 'ap-guangzhou';
