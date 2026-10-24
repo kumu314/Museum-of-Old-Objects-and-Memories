@@ -57,7 +57,7 @@ try {
   const pool = new Pool({ connectionString: databaseUrl.href, connectionTimeoutMillis: 5000 });
   try {
     await migrate(pool);
-    await pool.query('INSERT INTO team_members(username,password_hash) VALUES($1,$2)', [username, await hashPassword(password)]);
+    await pool.query('INSERT INTO users(username,password_hash) VALUES($1,$2)', [username, await hashPassword(password)]);
   } finally { await pool.end(); }
 
   // Separate source/build/upload directories keep existing development servers intact.

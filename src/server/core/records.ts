@@ -31,14 +31,16 @@ export const exhibitColumns = `id, museum_id AS "museumId", name, era, slot_inde
   confirmation_note AS "confirmationNote", confirmed_at AS "confirmedAt", created_at AS "createdAt", updated_at AS "updatedAt"`;
 
 export async function requireActor(client: PoolClient, actorId: string): Promise<void> {
-  const result = await client.query('SELECT id FROM team_members WHERE id=$1 AND active', [actorId]);
-  if (result.rowCount !== 1) throw new HttpError({ code: 'UNAUTHORIZED', message: '请重新登录制作入口。' });
+  const result = await client.query('SELECT id FROM users WHERE id=$1 AND active', [actorId]);
+  if (result.rowCount !== 1) throw new HttpError({ code: 'UNAUTHORIZED', message: '请重新登录。' });
 }
-export async function museumRecord(client: PoolClient, id: string, lock = false) {
+// Ownership check: only the account that created the museum may reach it.
+// Another user's museum and a nonexistent one are indistinguishable (NOT_FOUND).
+export async function museumRecord(client: PoolClient, id: string, actorId: string, lock = false) {
   const result = await client.query<Record<string, unknown>>(`SELECT m.id,m.title,m.description,m.version,
     p.museum_version AS "publishedVersion", m.share_enabled AS "shareEnabled",m.created_at AS "createdAt",m.updated_at AS "updatedAt"
     FROM museums m LEFT JOIN published_snapshots p ON p.id=m.current_snapshot_id
-    WHERE m.id=$1 AND m.deleted_at IS NULL ${lock ? 'FOR UPDATE OF m' : ''}`, [id]);
+    WHERE m.id=$1 AND m.created_by=$2 AND m.deleted_at IS NULL ${lock ? 'FOR UPDATE OF m' : ''}`, [id, actorId]);
   const row = result.rows[0];
   if (!row) notFound();
   return museumSummarySchema.parse(dates(row));

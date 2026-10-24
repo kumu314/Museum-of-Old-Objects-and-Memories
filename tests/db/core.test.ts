@@ -6,7 +6,7 @@ import type { CreateExhibitInput, ExhibitDraft, UpdateExhibitInput } from '../..
 import { migrate } from '../../src/server/db/migrate';
 import { getIsolatedTestDatabaseUrl } from '../../src/server/db/test-database';
 import { HttpError } from '../../src/server/http';
-import { createMuseum, getMuseum, updateMuseum, createExhibit, updateExhibit, removeExhibit, confirmExhibit,
+import { createMuseum, getMuseum, listMuseums, updateMuseum, createExhibit, updateExhibit, removeExhibit, confirmExhibit,
   publishMuseum, readShare, getShareAsset, stopSharing, rotateShareToken, getPrivateAsset } from '../../src/server/core';
 
 const pool = new Pool({ connectionString: getIsolatedTestDatabaseUrl(), max: 2 });
@@ -18,10 +18,25 @@ async function fixture(work: (db: PoolClient, actorId: string) => Promise<void>)
   try {
     await db.query('BEGIN');
     const actorId = randomUUID();
-    await db.query('INSERT INTO team_members(id,username,password_hash) VALUES($1,$2,$3)', [actorId, `core-test-${actorId}`, 'test-only']);
+    await db.query('INSERT INTO users(id,username,password_hash) VALUES($1,$2,$3)', [actorId, `core-test-${actorId}`, 'test-only']);
     await work(db, actorId);
   } finally { await db.query('ROLLBACK'); db.release(); }
 }
+test('用户间隔离：非创建者读取、修改和列举他人展馆均不可见', async () => {
+  await fixture(async (db, actor) => {
+    const museum = await createMuseum(actor, { title: '私人展馆', description: '' }, db);
+    await createExhibit(actor, museum.id, exhibitInput(museum.version), db);
+    const outsider = randomUUID();
+    await db.query('INSERT INTO users(id,username,password_hash) VALUES($1,$2,$3)', [outsider, `outsider-${outsider}`, 'test-only']);
+    await rejected(getMuseum(outsider, museum.id, db), 'NOT_FOUND');
+    await rejected(updateMuseum(outsider, museum.id, { title: '篡改', description: '', expectedVersion: museum.version }, db), 'NOT_FOUND');
+    await rejected(getPrivateAsset(outsider, museum.id, randomUUID(), db), 'NOT_FOUND');
+    assert.deepEqual(await listMuseums(outsider, db), []);
+    const own = await listMuseums(actor, db);
+    assert.equal(own.length, 1);
+    assert.equal(own[0]?.id, museum.id);
+  });
+});
 function exhibitInput(expectedMuseumVersion: number, slotIndex = 0): CreateExhibitInput {
   return { name: '复古相机', era: '年代待考', slotIndex, modelKey: 'camera-01', caption: '演示展品，不代表真实物主记录。',
     photoAssetId: null, audioAssetId: null, approximation: '候选演示模型', sourceNotice: '仅作流程测试',

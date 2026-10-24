@@ -17,7 +17,7 @@ function newToken(): string { return randomBytes(32).toString('base64url'); }
 export function publishMuseum(actorId: string, museumId: string, expectedVersion: number, client?: PoolClient) {
   return inTransaction(async (db) => {
     await requireActor(db, actorId);
-    const museum = await museumRecord(db, museumId, true);
+    const museum = await museumRecord(db, museumId, actorId, true);
     assertVersion(museum.version, expectedVersion);
     const exhibits = await exhibitRecords(db, museumId);
     if (exhibits.length === 0) invalid('请先添加至少一件展品。');
@@ -50,18 +50,18 @@ export function publishMuseum(actorId: string, museumId: string, expectedVersion
 export function stopSharing(actorId: string, museumId: string, expectedVersion: number, client?: PoolClient) {
   return inTransaction(async (db) => {
     await requireActor(db, actorId);
-    const museum = await museumRecord(db, museumId, true);
+    const museum = await museumRecord(db, museumId, actorId, true);
     assertVersion(museum.version, expectedVersion);
     if (museum.shareEnabled) {
       await db.query('UPDATE museums SET share_enabled=false,share_token_hash=NULL,version=version+1,updated_at=now() WHERE id=$1', [museumId]);
     }
-    return museumDraft(db, museumId);
+    return museumDraft(db, museumId, actorId);
   }, client);
 }
 export function rotateShareToken(actorId: string, museumId: string, expectedVersion: number, client?: PoolClient) {
   return inTransaction(async (db) => {
     await requireActor(db, actorId);
-    const museum = await museumRecord(db, museumId, true);
+    const museum = await museumRecord(db, museumId, actorId, true);
     assertVersion(museum.version, expectedVersion);
     if (museum.publishedVersion === null) invalid('请先发布展馆，再生成参观链接。');
     const token = newToken();

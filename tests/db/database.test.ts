@@ -19,7 +19,7 @@ async function rollbackFixture(work: (client: PoolClient, memberId: string, muse
     await client.query('BEGIN');
     const memberId = randomUUID();
     const museumId = randomUUID();
-    await client.query('INSERT INTO team_members(id, username, password_hash) VALUES ($1,$2,$3)', [memberId, `test-${memberId}`, 'test-only-not-a-password']);
+    await client.query('INSERT INTO users(id, username, password_hash) VALUES ($1,$2,$3)', [memberId, `test-${memberId}`, 'test-only-not-a-password']);
     await client.query('INSERT INTO museums(id,title,created_by) VALUES ($1,$2,$3)', [museumId, '约束测试展馆', memberId]);
     await work(client, memberId, museumId);
   } finally {
@@ -58,11 +58,11 @@ test('migration is idempotent under concurrent startup and rejects changes to ap
 test('failed transactions leave no committed member or museum', async () => {
   const id = randomUUID();
   await assert.rejects(withTransaction(async (client) => {
-    await client.query('INSERT INTO team_members(id, username, password_hash) VALUES($1,$2,$3)', [id, `test-${id}`, 'test-only']);
+    await client.query('INSERT INTO users(id, username, password_hash) VALUES($1,$2,$3)', [id, `test-${id}`, 'test-only']);
     await client.query('INSERT INTO museums(title,created_by) VALUES($1,$2)', ['应回滚', id]);
     throw new Error('intentional transaction failure');
   }, pool), /intentional transaction failure/);
-  const result = await pool.query('SELECT id FROM team_members WHERE id=$1', [id]);
+  const result = await pool.query('SELECT id FROM users WHERE id=$1', [id]);
   assert.equal(result.rowCount, 0);
 });
 

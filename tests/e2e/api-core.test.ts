@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
-import { errorResponseSchema, exhibitDraftResponseSchema, museumDraftResponseSchema, mutationSuccessSchema,
-  publicMuseumResponseSchema, publishResponseSchema, sessionResponseSchema, shareLinkResponseSchema } from '../../src/contracts';
+import { z } from 'zod';
+import { errorResponseSchema, exhibitDraftResponseSchema, museumDraftResponseSchema, museumSummarySchema, mutationSuccessSchema,
+  publicMuseumResponseSchema, publishResponseSchema, sessionResponseSchema, shareLinkResponseSchema, successResponseSchema } from '../../src/contracts';
 
-// Run against an explicitly prepared local test server, using a provisioned team account.
+// Run against an explicitly prepared local test server. The main flow logs in with a
+// provisioned account; the self-service test below registers its own users through the API.
 // The test creates its own museum and soft-removes it through the application API.
 const baseUrl = process.env.E2E_BASE_URL;
 const username = process.env.E2E_USERNAME;
@@ -104,6 +106,64 @@ test('HTTP制作发布与分享撤销：会话、CAS、确认、快照和统一�
       const logout = await request('/api/auth/logout', 'POST');
       assert.equal(logout.status, 200);
       await expectError(await request('/api/museums'), 401, 'UNAUTHORIZED');
+    }
+  }
+});
+
+test('自助注册与用户间隔离：注册、重复用户名、跨用户不可见', async () => {
+  let firstCookie = '';
+  let secondCookie = '';
+  let museumId: string | undefined;
+  async function request(path: string, method = 'GET', body?: unknown, cookie = '') {
+    return fetch(new URL(path, origin), {
+      method,
+      headers: { ...(cookie ? { Cookie: cookie } : {}), Origin: origin,
+        ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      signal: AbortSignal.timeout(15000),
+    });
+  }
+  async function expectError(response: Response, status: number, code: string) {
+    assert.equal(response.status, status);
+    const result = errorResponseSchema.parse(await response.json());
+    assert.equal(result.error.code, code);
+    return result.error;
+  }
+  const first = `e2e-${randomUUID().slice(0, 30)}`;
+  const second = `e2e-${randomUUID().slice(0, 30)}`;
+  const password = 'registration-only-password';
+  try {
+    await expectError(await request('/api/auth/register', 'POST', { username: first, password: 'short' }), 400, 'VALIDATION_ERROR');
+    await expectError(await request('/api/auth/register', 'POST', { username: '无效 用户名!', password }), 400, 'VALIDATION_ERROR');
+    const registration = await request('/api/auth/register', 'POST', { username: first, password });
+    assert.equal(registration.status, 201);
+    sessionResponseSchema.parse(await registration.json());
+    firstCookie = registration.headers.getSetCookie().map((value) => value.split(';')[0]).join('; ');
+    assert.ok(firstCookie);
+    await expectError(await request('/api/auth/register', 'POST', { username: first, password }), 400, 'VALIDATION_ERROR');
+    const created = await request('/api/museums', 'POST', { title: `自助验收 ${randomUUID()}`, description: '' }, firstCookie);
+    assert.equal(created.status, 201);
+    museumId = museumDraftResponseSchema.parse(await created.json()).data.id;
+
+    const other = await request('/api/auth/register', 'POST', { username: second, password });
+    assert.equal(other.status, 201);
+    secondCookie = other.headers.getSetCookie().map((value) => value.split(';')[0]).join('; ');
+    await expectError(await request(`/api/museums/${museumId}`, 'GET', undefined, secondCookie), 404, 'NOT_FOUND');
+    const listResponse = await request('/api/museums', 'GET', undefined, secondCookie);
+    const list = successResponseSchema(z.array(museumSummarySchema)).safeParse(await listResponse.json());
+    assert.ok(list.success);
+    assert.equal(list.data.data.some((item) => item.id === museumId), false);
+  } finally {
+    for (const [cookie, id] of [[firstCookie, museumId], [secondCookie, undefined]] as const) {
+      if (!cookie) continue;
+      if (id) {
+        const detail = await request(`/api/museums/${id}`, 'GET', undefined, cookie);
+        const draft = museumDraftResponseSchema.parse(await detail.json()).data;
+        const removed = await request(`/api/museums/${id}`, 'DELETE', { expectedVersion: draft.version }, cookie);
+        assert.equal(removed.status, 200);
+      }
+      const logout = await request('/api/auth/logout', 'POST', undefined, cookie);
+      assert.equal(logout.status, 200);
     }
   }
 });

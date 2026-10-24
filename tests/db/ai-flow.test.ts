@@ -25,7 +25,7 @@ async function fixture(context: TestContext) {
     photoAssetId: null, audioAssetId: null, approximation: '演示模型', sourceNotice: '自动化测试', rawStory: sourceText, transcript: null,
     sourceSegments: [{ id: 'story-1', text: sourceText, source: 'rawStory' }] };
   const result = await withTransaction(async (db) => {
-    await db.query('INSERT INTO team_members(id,username,password_hash) VALUES($1,$2,$3)', [actor, `ai-test-${actor}`, 'test-only']);
+    await db.query('INSERT INTO users(id,username,password_hash) VALUES($1,$2,$3)', [actor, `ai-test-${actor}`, 'test-only']);
     const museum = await createMuseum(actor, { title: 'AI流程测试', description: '' }, db);
     const exhibit = await createExhibit(actor, museum.id, { ...input, expectedMuseumVersion: museum.version }, db);
     await confirmExhibit(actor, museum.id, exhibit.id, { expectedVersion: exhibit.version, confirmationNote: '测试已有人工确认' }, db);
@@ -37,7 +37,7 @@ async function fixture(context: TestContext) {
       await db.query('DELETE FROM ai_drafts WHERE museum_id=$1', [result.museum.id]);
       await db.query('DELETE FROM exhibits WHERE museum_id=$1', [result.museum.id]);
       await db.query('DELETE FROM museums WHERE id=$1', [result.museum.id]);
-      await db.query('DELETE FROM team_members WHERE id=$1', [actor]);
+      await db.query('DELETE FROM users WHERE id=$1', [actor]);
     }, pool);
   });
   return result;
