@@ -21,7 +21,7 @@ export function CabinetPreview({ exhibits, selectedSlot, disabled, onSelectSlot,
   const pageCount = Math.max(cabinetPageCount(exhibits), page + 1);
   const pageExhibits = useMemo(() => exhibitsOnPage(exhibits, page), [exhibits, page]);
   const modelAssetBase = assetBase.replace(/\/assets$/, '/model-assets');
-  // 模型加载失败的展品自动回退为照片展示；回退保持到用户点“重试模型”。
+  // 按模型素材记录失败；替换模型后自动尝试加载新模型。
   const [modelFallback, setModelFallback] = useState<ReadonlySet<string>>(new Set());
   const items = useMemo(
     () => cabinetItems(pageExhibits, assetBase, modelAssetBase, modelFallback),
@@ -38,10 +38,10 @@ export function CabinetPreview({ exhibits, selectedSlot, disabled, onSelectSlot,
   const [sceneRetry, setSceneRetry] = useState(0);
   const selected = exhibits.find((exhibit) => exhibit.slotIndex === selectedSlot);
   const selectedItem = items.find((item) => item.id === selected?.id);
-  const adoptedId = (selected as { generatedModelAssetId?: string | null } | undefined)?.generatedModelAssetId ?? null;
+  const adoptedId = selected?.generatedModelAssetId ?? null;
   const generatedSelected = adoptedId !== null;
-  const modelLoadFailed = generatedSelected && selected !== undefined && assetStates[selected.id] === 'failed';
-  const modelLoading = generatedSelected && selected !== undefined && assetStates[selected.id] === 'loading';
+  const modelLoadFailed = adoptedId !== null && modelFallback.has(adoptedId);
+  const modelLoading = generatedSelected && !modelLoadFailed && selected !== undefined && assetStates[selected.id] === 'loading';
 
   const selectSlot = useEffectEvent((slot: number) => { if (!disabled) onSelectSlot(slot); });
 
@@ -57,9 +57,10 @@ export function CabinetPreview({ exhibits, selectedSlot, disabled, onSelectSlot,
         onAssetStatus: (id, status) => {
           if (cancelled) return;
           setAssetStates((current) => ({ controller, values: { ...(current.controller === controller ? current.values : {}), [id]: status } }));
-          if (status === 'failed') {
-            // 模型加载失败立即回退为照片，柜格不留空位（见 items 构造）。
-            setModelFallback((current) => current.has(id) ? current : new Set([...current, id]));
+          const item = items.find((candidate) => candidate.id === id);
+          if (status === 'failed' && item?.modelKey === 'glb') {
+            const assetId = item.source.assetId;
+            setModelFallback((current) => current.has(assetId) ? current : new Set([...current, assetId]));
           }
         },
       });
@@ -156,10 +157,10 @@ export function CabinetPreview({ exhibits, selectedSlot, disabled, onSelectSlot,
       <span aria-live="polite">第 {page + 1} 页 / {pageCount} 页</span><button type="button" className="wb-text-link" disabled={disabled || expanded || (page === pageCount - 1 && (mode === 'visit' || pageExhibits.length === 0))} onClick={() => onSelectSlot(exhibits.find((item) => cabinetPage(item.slotIndex) === page + 1)?.slotIndex ?? (page + 1) * slotsPerPage)}>{page === pageCount - 1 && mode === 'edit' ? '＋ 新一页' : '下一页 →'}</button></nav>
     <div className="wb-row"><p className="wb-hint">当前选中 · {cabinetPosition(selectedSlot)}</p>{mode === 'visit' && <button ref={inspectButton} type="button" className="wb-text-link" disabled={disabled || !selected || !selectedItem || surface !== 'ready' || assetStates[selected.id] !== 'ready'} onClick={() => inspect()}>检视模型</button>}</div>
     {selected && generatedSelected && modelLoading && <p className="wb-hint" role="status">正在加载生成的三维模型，文件较大，首次可能需要数十秒…</p>}
-    {selected && <p className="wb-hint">{generatedSelected && !modelFallback.has(selected.id) ? '已采纳本次照片生成的模型 · 近似复原' : selected.modelKey === 'photo-plane' ? '实拍照片平面展示 · 非三维复原' : '内置演示模型 · 非本次照片生成'}</p>}
-    {selected && assetStates[selected.id] === 'failed' && !generatedSelected && <p className="wb-hint" role="alert">展示素材读取失败，照片与故事仍可使用。<button type="button" className="wb-text-link" onClick={() => stage.current?.retryModel(selected.id)}>重试素材</button></p>}
-    {selected && modelLoadFailed && adoptedId && <p className="wb-hint" role="alert">生成模型加载失败，已回退为照片展示。<button type="button" className="wb-text-link" onClick={() => {
-      setModelFallback((current) => { const next = new Set(current); next.delete(selected.id); return next; });
+    {selected && <p className="wb-hint">{generatedSelected && !modelLoadFailed ? '已采纳本次照片生成的模型 · 近似复原' : selectedItem?.modelKey === 'photo-plane' ? '实拍照片平面展示 · 非三维复原' : '内置演示模型 · 非本次照片生成'}</p>}
+    {selected && assetStates[selected.id] === 'failed' && selectedItem?.modelKey !== 'glb' && <p className="wb-hint" role="alert">展示素材读取失败，照片与故事仍可使用。<button type="button" className="wb-text-link" onClick={() => stage.current?.retryModel(selected.id)}>重试素材</button></p>}
+    {selected && modelLoadFailed && adoptedId && <p className="wb-hint" role="alert">生成模型加载失败，{selectedItem?.modelKey === 'photo-plane' ? '已回退为照片展示。' : '暂时使用原有展示。'}<button type="button" className="wb-text-link" onClick={() => {
+      setModelFallback((current) => { const next = new Set(current); next.delete(adoptedId); return next; });
       setAssetStates((current) => ({ controller, values: { ...current.values, [selected.id]: 'loading' } }));
     }}>重试模型</button></p>}
 

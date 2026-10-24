@@ -31,6 +31,15 @@ test('已采纳生成模型默认渲染 GLB；该模型加载失败时回退为�
     assert.equal(withModel[0].source.assetId, 'model-asset-1');
     assert.equal(withModel[0].source.url, '/api/museums/owner-museum/model-assets/model-asset-1');
   }
-  const fallback = cabinetItems([adopted], '/api/museums/owner-museum/assets', '/api/museums/owner-museum/model-assets', new Set([adopted.id]));
+  const fallback = cabinetItems([adopted], '/api/museums/owner-museum/assets', '/api/museums/owner-museum/model-assets', new Set(['model-asset-1']));
   assert.ok(fallback[0] && fallback[0].modelKey === 'photo-plane');
+});
+
+test('生成模型失败优先使用实拍；替换模型不继承旧模型的失败状态', () => {
+  const adopted: CabinetExhibit = { ...photo, modelKey: 'camera-01', generatedModelAssetId: 'failed-model' };
+  const failures = new Set(['failed-model']);
+  const fallback = cabinetItems([adopted], '/assets', '/models', failures);
+  assert.deepEqual(fallback, [{ id: photo.id, slot: photo.slotIndex, modelKey: 'photo-plane', photoUrl: '/assets/owned-photo' }]);
+  const replacement = cabinetItems([{ ...adopted, generatedModelAssetId: 'new-model' }], '/assets', '/models', failures);
+  assert.deepEqual(replacement, [{ id: photo.id, slot: photo.slotIndex, modelKey: 'glb', source: { assetId: 'new-model', version: 'new-model', url: '/models/new-model' } }]);
 });

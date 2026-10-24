@@ -431,6 +431,9 @@ test('生成完成即自动入柜：模型挂到展品、版本递增、旧确�
   const setup = await fixture(context);
   const state: ProxyState = { geometryStatus: 2, textureStatus: 2, glbWithMaterial: true };
   await fakeProxy(context, state);
+  await pool.query('UPDATE exhibits SET confirmed_version=version,confirmed_by=$2,confirmed_at=now(),confirmation_note=$3 WHERE id=$1', [setup.exhibit.id, setup.actor, '合成确认']);
+  const museumBefore = (await pool.query<{ version: number }>('SELECT version FROM museums WHERE id=$1', [setup.museum.id])).rows[0]?.version;
+  assert.ok(museumBefore);
   const job = await requestSingleModelGeneration(setup.actor, setup.museum.id, setup.exhibit.id, request(setup), pool);
   const done = await getModelGenerationJob(setup.actor, setup.museum.id, setup.exhibit.id, job.id, pool);
   assert.equal(done.status, 'DONE');
@@ -440,6 +443,8 @@ test('生成完成即自动入柜：模型挂到展品、版本递增、旧确�
   assert.equal(row.rows[0]?.generated_model_asset_id, done.modelAssetId);
   assert.equal(row.rows[0]?.version, (setup.exhibit.version ?? 0) + 1);
   assert.equal(row.rows[0]?.confirmed_version, null);
+  assert.equal((await pool.query('SELECT confirmed_by,confirmation_note,confirmed_at FROM exhibits WHERE id=$1', [setup.exhibit.id])).rows[0]?.confirmed_by, null);
+  assert.equal((await pool.query<{ version: number }>('SELECT version FROM museums WHERE id=$1', [setup.museum.id])).rows[0]?.version, museumBefore + 1);
   // 幂等：重复采纳（即使带旧版本号）返回当前展品，不撞版本冲突。
   const { adoptGeneratedModel } = await import('../../src/server/core/model-generation');
   const repeated = await adoptGeneratedModel(setup.actor, setup.museum.id, setup.exhibit.id, done.id, setup.exhibit.version, pool);
@@ -493,4 +498,22 @@ test('JSON 反代配置实际用于提交与查询，并保留测试来源策略
     else process.env.HUNYUAN_PROVIDER_CONFIG = previousPath;
     await rm(file);
   }
+});
+
+test('来源版本已变但照片未变：过期任务不得自动入柜或覆盖新确认', async (context) => {
+  const setup = await fixture(context);
+  await fakeProxy(context, { geometryStatus: 2, textureStatus: 2, glbWithMaterial: true });
+  const job = await requestSingleModelGeneration(setup.actor, setup.museum.id, setup.exhibit.id, request(setup), pool);
+  await pool.query('UPDATE exhibits SET version=version+1,confirmed_version=version+1,confirmed_by=$2,confirmed_at=now(),confirmation_note=$3 WHERE id=$1', [setup.exhibit.id, setup.actor, '新版本合成确认']);
+  const museumBefore = (await pool.query<{ version: number }>('SELECT version FROM museums WHERE id=$1', [setup.museum.id])).rows[0]?.version;
+  const done = await getModelGenerationJob(setup.actor, setup.museum.id, setup.exhibit.id, job.id, pool);
+  assert.equal(done.status, 'DONE');
+  const row = (await pool.query('SELECT generated_model_asset_id,version,confirmed_version FROM exhibits WHERE id=$1', [setup.exhibit.id])).rows[0];
+  assert.equal(row?.generated_model_asset_id, null);
+  assert.equal(row?.version, setup.exhibit.version + 1);
+  assert.equal(row?.confirmed_version, setup.exhibit.version + 1);
+  assert.equal((await pool.query<{ version: number }>('SELECT version FROM museums WHERE id=$1', [setup.museum.id])).rows[0]?.version, museumBefore);
+  const { adoptGeneratedModel } = await import('../../src/server/core/model-generation');
+  await assert.rejects(adoptGeneratedModel(setup.actor, setup.museum.id, setup.exhibit.id, job.id, setup.exhibit.version + 1, pool),
+    (error: unknown) => error instanceof HttpError && error.failure.code === 'VERSION_CONFLICT');
 });

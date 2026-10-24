@@ -1,7 +1,7 @@
 'use client';
 
 import Image from 'next/image';
-import { useEffect, useState } from 'react';
+import { useEffect, useEffectEvent, useState } from 'react';
 import { assetSchema } from '../../contracts/assets';
 import {
   modelAssetPath, modelGenerationJobSchema, modelGenerationPaths,
@@ -40,6 +40,13 @@ export function ModelGenerationFields({ museumId, exhibitId, exhibitVersion, dir
     return () => controller.abort();
   }, [museumId, exhibitId, onError]);
 
+  const refreshCompletedModel = useEffectEvent(async (completedJob: ModelGenerationJob) => {
+    // 使用最新编辑状态；刷新工作台不能覆盖正在编辑或上传的内容。
+    if (dirty || disabled || completedJob.exhibitId !== exhibitId) return;
+    try { await onAdopt(completedJob.id); }
+    catch (error) { onError(describeFailure(error)); }
+  });
+
   const jobId = job?.id;
   // 一次请求完成后再安排下一次，慢响应不会叠加；切换展品或任务后丢弃旧结果。
   useEffect(() => {
@@ -59,7 +66,7 @@ export function ModelGenerationFields({ museumId, exhibitId, exhibitVersion, dir
         // 生成完成即已自动入柜；触发一次幂等采纳以刷新工作台，
         // 让展柜立即改为展示生成的模型。
         if (next.status === 'DONE' && next.modelAssetId !== null && exhibitId !== null) {
-          void onAdopt(next.id);
+          await refreshCompletedModel(next);
         }
       } catch (error) {
         if (controller.signal.aborted) return;
