@@ -1,6 +1,23 @@
 @import 'tailwindcss';
 
-:root { color-scheme: dark; background: #17130f; color: #eadfc8; }
-body { margin: 0; font-family: system-ui, sans-serif; }
+@theme {
+  --font-serif: 'Noto Serif SC', 'Source Han Serif SC', 'Songti SC', 'STZhongsong', 'SimSun', serif;
+}
+
+:root { color-scheme: dark; background: #100D0A; color: #F0E8DA; }
+body { margin: 0; font-family: 'Noto Sans SC', 'Microsoft YaHei', system-ui, sans-serif; }
 button, input, textarea { font: inherit; }
-:focus-visible { outline: 2px solid #cfb477; outline-offset: 4px; }
+:focus-visible { outline: 2px solid #C8A56B; outline-offset: 3px; }
+
+/* 登录/注册页右侧表单的独立作用域样式（左侧品牌面板不受影响） */
+.mm-auth-field { display: block; margin-top: 24px; font-size: 13px; color: #B7A994; }
+.mm-auth-input {
+  display: block; width: 100%; margin-top: 8px;
+  background: #19140F; border: 1px solid #3A2D20; border-radius: 6px;
+  padding: 12px 15px; min-height: 50px; font-size: 15px; color: #F0E8DA; outline: none;
+  transition: border-color .18s ease, box-shadow .18s ease;
+}
+.mm-auth-input::placeholder { color: #6B5D4A; }
+.mm-auth-input:focus { border-color: #C8A56B; box-shadow: 0 0 0 3px rgba(200,165,107,.14); }
+.mm-auth-input:disabled { opacity: .55; }
+.mm-auth-hint { display: block; margin-top: 7px; font-size: 12px; color: #7A6C5B; }
