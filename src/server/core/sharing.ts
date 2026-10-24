@@ -26,7 +26,15 @@ export function publishMuseum(actorId: string, museumId: string, expectedVersion
     if (unconfirmedExhibitIds.length) {
       throw new HttpError({ code: 'NOT_CONFIRMED', message: '请先确认列出的展品后再发布。', details: { unconfirmedExhibitIds } });
     }
-    for (const exhibit of exhibits) await validateAssets(db, museumId, exhibit.photoAssetId, exhibit.audioAssetId);
+    for (const exhibit of exhibits) {
+      await validateAssets(db, museumId, exhibit.photoAssetId, exhibit.audioAssetId);
+      if (exhibit.generatedModelAssetId !== null) {
+        const model = await db.query(`SELECT a.id FROM model_assets a
+          JOIN model_generation_jobs j ON j.id=a.job_id AND j.museum_id=a.museum_id
+          WHERE a.id=$1 AND a.museum_id=$2 AND j.exhibit_id=$3`, [exhibit.generatedModelAssetId, museumId, exhibit.id]);
+        if (model.rowCount !== 1) invalid('生成模型不属于当前展品。');
+      }
+    }
     const data = publicMuseumSchema.parse({ id: museumId, title: museum.title, description: museum.description,
       version: museum.version, publishedAt: new Date().toISOString(), exhibits: exhibits.map(toPublicExhibit) });
     const existing = await db.query<{ id: string }>('SELECT id FROM published_snapshots WHERE museum_id=$1 AND museum_version=$2 AND sealed', [museumId, museum.version]);
@@ -40,6 +48,12 @@ export function publishMuseum(actorId: string, museumId: string, expectedVersion
       const assetIds = new Set(exhibits.flatMap((item) => [item.photoAssetId, item.audioAssetId]).filter((id): id is string => id !== null));
       for (const assetId of assetIds) {
         await db.query('INSERT INTO snapshot_assets(snapshot_id,museum_id,asset_id) VALUES($1,$2,$3)', [snapshotId, museumId, assetId]);
+      }
+      for (const exhibit of exhibits) {
+        if (exhibit.generatedModelAssetId !== null) {
+          await db.query('INSERT INTO snapshot_model_assets(snapshot_id,museum_id,asset_id) VALUES($1,$2,$3)',
+            [snapshotId, museumId, exhibit.generatedModelAssetId]);
+        }
       }
       await db.query('UPDATE published_snapshots SET sealed=true WHERE id=$1', [snapshotId]);
     }
@@ -168,5 +182,19 @@ export function getShareAsset(actorId: string, token: string, assetId: string, c
     const member = await db.query('SELECT asset_id FROM snapshot_assets WHERE snapshot_id=$1 AND museum_id=$2 AND asset_id=$3', [share.snapshotId, share.id, assetId]);
     if (member.rowCount !== 1) shareNotFound();
     return assetRecord(db, share.id, assetId);
+  }, client);
+}
+
+export function getShareModelAsset(actorId: string, token: string, assetId: string, client?: PoolClient) {
+  return inTransaction(async (db) => {
+    await requireActor(db, actorId);
+    if (!idSchema.safeParse(assetId).success) shareNotFound();
+    const share = await shareRecord(db, token);
+    const result = await db.query<{ storage_key: string }>(`SELECT a.storage_key FROM snapshot_model_assets s
+      JOIN model_assets a ON a.id=s.asset_id AND a.museum_id=s.museum_id
+      WHERE s.snapshot_id=$1 AND s.museum_id=$2 AND s.asset_id=$3`, [share.snapshotId, share.id, assetId]);
+    const stored = result.rows[0];
+    if (!stored) shareNotFound();
+    return stored;
   }, client);
 }

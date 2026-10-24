@@ -32,6 +32,7 @@ const chapterInstructions = `${commonInstructions}
 整理成一个章节。严格使用结构 {"title":"章节标题","paragraphs":[{"id":"本次提供的段落ID","text":"段落文字","sources":[{"answerRevisionId":"回答版本ID","start":0,"end":1}]}]}。
 paragraphs 最多 12 段，每段最多 1000 个 Unicode 码点，总正文最多 6000 码点。不要凑字数，资料不足时不要编造。
 每段至少一处 sources，只引用所提供回答版本的原文非空区间；start/end 是 Unicode 码点偏移，end 不包含在片段中。段落 ID 从 paragraphIds 顺序取用。
+每份来源提供程序计算的 codePointLength 和 fullSourceRange。引用必须满足 0 <= start < end <= codePointLength，不得自行估算长度。不能准确定位局部区间时，直接复制该来源的 fullSourceRange 作为引用范围；不得修改其数值。
 不得把原始回答、内部推理或额外元数据加入输出。`;
 const followupInstructions = `${commonInstructions}
 当前只讨论提供的话题，最多提出一个相关、中性的追问，不把未经提供的猜测嵌入问题，不重复 answeredQuestionTexts 中的问题，不用换一种问法突破拒绝。
@@ -121,7 +122,7 @@ export function createDeepSeekAdapter(options: {
         && chapter.paragraphs.every((paragraph) => allowed.has(paragraph.id))
         && chapter.paragraphs.reduce((total, paragraph) => total + Array.from(paragraph.text).length, 0) <= 6_000,
       'AI 章节超过本次输出预算或使用了未知段落 ID。');
-      return call(chapterInstructions, { sources: validated.sources.map(({ id, text }) => ({ answerRevisionId: id, text })), paragraphIds }, output, 6_000);
+      return call(chapterInstructions, { sources: validated.sources.map(({ id, text }) => ({ answerRevisionId: id, text, codePointLength: Array.from(text).length, fullSourceRange: { start: 0, end: Array.from(text).length } })), paragraphIds }, output, 6_000);
     },
     async followup(input: MemoirAiInput, context: MemoirFollowupContext) {
       const validated = memoirAiInputSchema.parse(input);

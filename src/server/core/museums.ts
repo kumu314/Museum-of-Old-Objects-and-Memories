@@ -135,8 +135,8 @@ export function updateExhibit(actorId: string, museumId: string, id: string, inp
     await validateAssets(db, museumId, input.photoAssetId, input.audioAssetId);
     await validateModelInput(db, museumId, input);
     await db.query(`UPDATE exhibits SET name=$1,era=$2,slot_index=$3,model_key=$4,caption=$5,photo_asset_id=$6,audio_asset_id=$7,
-      approximation=$8,source_notice=$9,raw_story=$10,transcript=$11,source_segments=$12,model_input=$13,version=version+1,confirmed_version=NULL,
-      confirmed_by=NULL,confirmed_at=NULL,confirmation_note=NULL,updated_at=now() WHERE id=$14 AND museum_id=$15`, [...editableValues(input), id, museumId]);
+      approximation=$8,source_notice=$9,raw_story=$10,transcript=$11,source_segments=$12,model_input=$13,generated_model_asset_id=CASE WHEN $16 THEN NULL ELSE generated_model_asset_id END,version=version+1,confirmed_version=NULL,
+      confirmed_by=NULL,confirmed_at=NULL,confirmation_note=NULL,updated_at=now() WHERE id=$14 AND museum_id=$15`, [...editableValues(input), id, museumId, input.clearGeneratedModel === true]);
     await bumpMuseum(db, museumId);
     return exhibitRecord(db, museumId, id);
   }, client);

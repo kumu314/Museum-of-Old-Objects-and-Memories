@@ -1,7 +1,7 @@
 'use client';
 
 import Image from 'next/image';
-import { useEffect, useEffectEvent, useState } from 'react';
+import { useEffect, useEffectEvent, useRef, useState } from 'react';
 import { assetSchema } from '../../contracts/assets';
 import {
   modelAssetPath, modelGenerationJobSchema, modelGenerationPaths,
@@ -9,18 +9,23 @@ import {
   type ModelGenerationJob, type ModelInput,
 } from '../../contracts/model-generation';
 import { apiRequest, describeFailure, jsonRequest } from './api';
+import { modelResultState } from './model-generation-state';
 
 const STATUS_LABELS = { SUBMITTING: '提交中…', WAIT: '已受理，排队中…', RUN: '生成中…', FAIL: '失败', DONE: '已完成' } as const;
 
-export function ModelGenerationFields({ museumId, exhibitId, exhibitVersion, dirty, input, photoAssetId, disabled, onChange, onBusy, onError, onAdopt }: {
-  museumId: string; exhibitId: string | null; exhibitVersion: number | null; dirty: boolean; input: ModelInput; photoAssetId: string | null; disabled: boolean;
+export function ModelGenerationFields({ museumId, exhibitId, exhibitVersion, generatedModelAssetId, dirty, input, photoAssetId, disabled, onChange, onBusy, onError, onAdopt, onRefresh }: {
+  museumId: string; exhibitId: string | null; exhibitVersion: number | null; generatedModelAssetId: string | null; dirty: boolean; input: ModelInput; photoAssetId: string | null; disabled: boolean;
   onChange: (input: ModelInput) => void; onBusy: (busy: boolean) => void; onError: (error: string | null) => void;
   onAdopt: (jobId: string) => Promise<void>;
+  onRefresh: (exhibitId: string, signal: AbortSignal) => Promise<boolean>;
 }) {
   const assetPath = `/api/museums/${encodeURIComponent(museumId)}/assets`;
   const [storedJob, setJob] = useState<ModelGenerationJob | null>(null);
   const job = storedJob?.exhibitId === exhibitId ? storedJob : null;
   const [pollError, setPollError] = useState<string | null>(null);
+  const [refreshError, setRefreshError] = useState<{ jobId: string; message: string } | null>(null);
+  const [refreshAttempt, setRefreshAttempt] = useState(0);
+  const refreshedJob = useRef<string | null>(null);
   const active = job !== null && (job.status === 'SUBMITTING' || job.status === 'WAIT' || job.status === 'RUN');
   const terminal = job?.status === 'FAIL' || job?.status === 'DONE';
 
@@ -40,13 +45,6 @@ export function ModelGenerationFields({ museumId, exhibitId, exhibitVersion, dir
     return () => controller.abort();
   }, [museumId, exhibitId, onError]);
 
-  const refreshCompletedModel = useEffectEvent(async (completedJob: ModelGenerationJob) => {
-    // 使用最新编辑状态；刷新工作台不能覆盖正在编辑或上传的内容。
-    if (dirty || disabled || completedJob.exhibitId !== exhibitId) return;
-    try { await onAdopt(completedJob.id); }
-    catch (error) { onError(describeFailure(error)); }
-  });
-
   const jobId = job?.id;
   // 一次请求完成后再安排下一次，慢响应不会叠加；切换展品或任务后丢弃旧结果。
   useEffect(() => {
@@ -63,11 +61,6 @@ export function ModelGenerationFields({ museumId, exhibitId, exhibitVersion, dir
         setJob(next);
         setPollError(null);
         finished = next.status === 'FAIL' || next.status === 'DONE';
-        // 生成完成即已自动入柜；触发一次幂等采纳以刷新工作台，
-        // 让展柜立即改为展示生成的模型。
-        if (next.status === 'DONE' && next.modelAssetId !== null && exhibitId !== null) {
-          await refreshCompletedModel(next);
-        }
       } catch (error) {
         if (controller.signal.aborted) return;
         setPollError(`状态刷新失败，正在重试：${describeFailure(error)}`);
@@ -78,6 +71,24 @@ export function ModelGenerationFields({ museumId, exhibitId, exhibitVersion, dir
     timer = setTimeout(() => { void poll(); }, 3_000);
     return () => { clearTimeout(timer); controller.abort(); };
   }, [museumId, exhibitId, jobId, terminal]);
+
+  const refreshCompletedModel = useEffectEvent((id: string, signal: AbortSignal) => onRefresh(id, signal));
+  const completedJobId = job?.status === 'DONE' && job.modelAssetId !== null ? job.id : null;
+  // latest 与轮询共用完成处理；只读取当前展品，不重新采纳已被用户切换的展示。
+  useEffect(() => {
+    if (exhibitId === null || completedJobId === null || dirty || disabled || refreshedJob.current === completedJobId) return;
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        const refreshed = await refreshCompletedModel(exhibitId, controller.signal);
+        if (controller.signal.aborted) return;
+        if (refreshed) { refreshedJob.current = completedJobId; setRefreshError(null); }
+      } catch (error) {
+        if (!controller.signal.aborted) setRefreshError({ jobId: completedJobId, message: describeFailure(error) });
+      }
+    })();
+    return () => controller.abort();
+  }, [exhibitId, completedJobId, dirty, disabled, refreshAttempt]);
 
   function mode(next: ModelInput['mode']) {
     if (next === input.mode) return;
@@ -119,11 +130,13 @@ export function ModelGenerationFields({ museumId, exhibitId, exhibitVersion, dir
     : dirty || exhibitId === null || exhibitVersion === null ? '请先点击“保存草稿”（需填写素材来源说明），保存后即可生成。'
     : null;
   const submissionUnknown = job?.status === 'SUBMITTING' && job.errorCode === 'SUBMIT_UNKNOWN';
-  const staleResult = job?.status === 'DONE' && job.sourceVersion !== exhibitVersion;
+  const textureUnknown = job?.status === 'RUN' && job.errorCode === 'TEXTURE_SUBMIT_UNKNOWN';
+  const resultState = modelResultState(job, exhibitVersion, generatedModelAssetId);
   const statusText = job === null ? null
     : submissionUnknown ? '提交结果未知，需由管理员核对上游任务；核对前不会再次提交。'
+    : textureUnknown ? '纹理提交结果未知，正在核对上游任务；核对前不会重复提交，持续未恢复时请联系维护者。'
     : job.status === 'FAIL' ? `失败：${job.errorMessage ?? '请稍后重试。'}`
-    : job.status === 'DONE' ? staleResult ? '旧版生成结果：展品已修改，此模型不对应当前版本。' : '模型已生成（已通过模型校验）'
+    : job.status === 'DONE' ? resultState === 'adopted' ? '模型已入柜（已通过模型校验）' : resultState === 'stale' ? '旧版生成结果：展品已修改，此模型不对应当前版本。' : '模型已生成（已通过模型校验）'
     : STATUS_LABELS[job.status];
   return <section className="workbench-model-note" aria-label="照片生成三维准备">
     <div className="wb-row"><strong>照片生成 3D</strong><span className="wb-badge">生成任务</span></div>
@@ -138,9 +151,10 @@ export function ModelGenerationFields({ museumId, exhibitId, exhibitVersion, dir
     <p>生成前请先保存草稿；四视图生成暂未开放。生成可能消耗服务额度；已有进行中或待核对任务时不会再次提交。</p>
     {input.mode === 'multiview'
       ? <button type="button" className="wb-secondary" disabled>四视图生成 · 暂未支持</button>
-      : <button type="button" className="wb-secondary" disabled={!canGenerate} onClick={() => { void generate(); }}>{submissionUnknown ? '提交结果待核对' : active && job ? STATUS_LABELS[job.status] : job?.status === 'FAIL' ? '重新生成 3D 模型' : '生成 3D 模型'}</button>}
+      : <button type="button" className="wb-secondary" disabled={!canGenerate} onClick={() => { void generate(); }}>{submissionUnknown ? '提交结果待核对' : textureUnknown ? '纹理提交待核对' : active && job ? STATUS_LABELS[job.status] : job?.status === 'FAIL' ? '重新生成 3D 模型' : '生成 3D 模型'}</button>}
     {!active && generateBlockReason && <p className="wb-hint">{generateBlockReason}</p>}
     {pollError && <p role="status" className="wb-hint">{pollError}</p>}
+    {refreshError?.jobId === completedJobId && refreshError && <p role="status" className="wb-hint">展品刷新失败：{refreshError.message} <button type="button" className="wb-text-link" disabled={disabled || dirty} onClick={() => setRefreshAttempt((attempt) => attempt + 1)}>重试刷新展品</button></p>}
     {statusText && <p role="status">{statusText}{job?.status === 'DONE' && job.modelAssetId && <> · <a href={modelAssetPath(museumId, job.modelAssetId)} download={`model-${job.id}.glb`}>下载 GLB</a></>}</p>}
     {job?.status === 'DONE' && job.stats && <p>结果规模：{job.stats.meshCount} 网格 / {job.stats.materialCount} 材质 / {Math.round(job.stats.byteLength / 1024)} KB。</p>}
     {job?.status === 'DONE' && job.modelAssetId && <div className="wb-actions">

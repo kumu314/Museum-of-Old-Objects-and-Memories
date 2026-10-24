@@ -8,9 +8,9 @@ export const glbModelSourceSchema = z.strictObject({
   assetId: z.string().min(1), version: z.string().min(1), url: z.string().min(1),
 });
 export type GlbModelSource = z.infer<typeof glbModelSourceSchema>;
-// 演示临时上限：云 API Pro 默认输出约 38–40 MB、50 万面，原 32 MiB/25 万面
-// 会直接拒绝真实结果。目标设备的最终预算仍待 A/D 实测后冻结（见 MODEL_HANDOFF）。
-export const modelBudget = { bytes: 64 * 1024 * 1024, triangles: 600_000, textureDimension: 4096, texturePixels: 32_000_000 } as const;
+// 桌面演示预算：实际混元相机为约 60 MB、50 万面、三张 4096² 贴图
+//（50,331,648 像素，RGBA 含 mipmap 约 256 MiB）。移动设备尚待独立验收。
+export const modelBudget = { bytes: 64 * 1024 * 1024, triangles: 600_000, textureDimension: 4096, texturePixels: 64_000_000 } as const;
 export interface ModelStats { triangles: number; textures: number; texturePixels: number }
 
 export function resolveModelUrl(input: string, base: string): string {

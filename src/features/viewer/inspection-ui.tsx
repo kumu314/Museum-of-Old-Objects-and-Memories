@@ -4,7 +4,7 @@ import type { SharedContribution } from '../../contracts/contributors';
 import { authorLabel } from './shared-contributions';
 import './inspection-ui.css';
 
-type Story = Pick<PublicExhibit, 'name' | 'era' | 'caption' | 'approximation' | 'sourceNotice' | 'modelKey'>;
+type Story = Pick<PublicExhibit, 'name' | 'era' | 'caption' | 'approximation' | 'sourceNotice' | 'modelKey' | 'generatedModelAssetId'>;
 
 function timeLabel(seconds: number) {
   const value = Math.max(0, Math.floor(seconds));
@@ -68,7 +68,7 @@ export function ExhibitStory({ exhibit, photoUrl, audioUrl, active, contribution
     <h2 className="exhibit-story__title">{exhibit.name}</h2>
     <p className="exhibit-story__era">{exhibit.era}</p>
     <p className="exhibit-story__caption">{exhibit.caption}</p>
-    <details className="exhibit-story__sources"><summary>模型为近似展示 · 查看说明</summary><p>{exhibit.approximation}</p><p>{exhibit.sourceNotice}</p>{exhibit.modelKey === 'photo-plane' && <p>三维展示为实拍照片薄片，背面为示意。</p>}</details>
+    <details className="exhibit-story__sources"><summary>模型为近似展示 · 查看说明</summary><p>{exhibit.approximation}</p><p>{exhibit.sourceNotice}</p>{exhibit.generatedModelAssetId && <p>由上传照片生成的近似模型，未拍摄的背面、结构与细节不代表精确复原。</p>}{!exhibit.generatedModelAssetId && exhibit.modelKey === 'photo-plane' && <p>三维展示为实拍照片薄片，背面为示意。</p>}</details>
     <div className="exhibit-audio" data-playing={playing}>
       <button className="exhibit-audio__play" type="button" disabled={audioUrl === null || !active} aria-label={playing ? '暂停物主原声' : '播放物主原声'} aria-pressed={playing} onClick={() => void toggleAudio()}>
         <svg viewBox="0 0 24 24" aria-hidden="true">{playing ? <path d="M7 5h4v14H7zm6 0h4v14h-4z"/> : <path d="m8 5 12 7-12 7z"/>}</svg>

@@ -327,12 +327,19 @@ export function createHunyuanWebProxyClient(config: HunyuanProxyConfig): Hunyuan
     if (tracked === undefined) {
       tracked = (async () => {
         if (config.claimTextureSubmission !== undefined &&
-          !await config.claimTextureSubmission(geometryWorksId)) return;
+          !await config.claimTextureSubmission(geometryWorksId)) {
+          upstreamError('已有纹理提交，尚未从上游作品确认结果。');
+        }
         const submission = await proxyLocal('/api/text3d/texture', {
           worksId: geometryWorksId,
           method: 'image',
           modelVersion: resolved.modelVersion,
         });
+        // 明确的业务拒绝没有受理任务；HTTP 4xx 也可能携带此响应。
+        if (isRecord(submission) && isRecord(submission.body) &&
+          typeof submission.body.errNo === 'number' && submission.body.errNo !== 0) {
+          throw new Hunyuan3DError('JOB_FAILED', '纹理阶段提交被上游明确拒绝，可重新生成。');
+        }
         if (!isRecord(submission) || typeof submission.status !== 'number' ||
           submission.status < 200 || submission.status >= 300 || !isRecord(submission.body)) {
           upstreamError('纹理阶段未返回有效的上游提交结果。');
@@ -346,7 +353,7 @@ export function createHunyuanWebProxyClient(config: HunyuanProxyConfig): Hunyuan
       })();
       textureStarts.set(geometryWorksId, tracked);
     }
-    // rejected promise 同样保留：外部可能已受理，不允许后续轮询重新付费提交。
+    // 失败 promise 也保留：明确拒绝交由上层结束任务，结果不明继续核对；均不自动重提。
     await tracked;
   }
 
@@ -405,7 +412,11 @@ export function createHunyuanWebProxyClient(config: HunyuanProxyConfig): Hunyuan
       // 缺少作品可能只是上游列表延迟；提交异常不等于任务失败，保留待核对状态。
       try {
         await startTextureStage(id);
-      } catch {
+      } catch (error) {
+        if (error instanceof Hunyuan3DError && error.code === 'JOB_FAILED') {
+          return { jobId: id, status: 'FAIL', files: [], errorCode: 'TEXTURE_SUBMIT_REJECTED',
+            errorMessage: '纹理阶段提交被上游明确拒绝，可重新生成。' };
+        }
         return { jobId: id, status: 'RUN', files: [], errorCode: 'TEXTURE_SUBMIT_UNKNOWN',
           errorMessage: '纹理提交结果尚未确认，正在核对上游任务，不会重复提交。' };
       }

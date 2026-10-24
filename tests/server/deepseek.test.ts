@@ -74,9 +74,11 @@ test('假上游：服务端分离 system/user，仅发送选中回答与必要�
     thinking: z.strictObject({ type: z.literal('disabled') }), response_format: z.strictObject({ type: z.literal('json_object') }),
     stream: z.literal(false), max_tokens: z.literal(6_000) }).parse(JSON.parse(requests[0] ?? '{}'));
   assert.ok(!sent.messages[0].content.includes(input.sources[0]?.text ?? 'missing source'));
-  const data = z.strictObject({ sources: z.array(z.strictObject({ answerRevisionId: z.uuid(), text: z.string() })), paragraphIds: z.array(z.uuid()).length(12) })
+  const data = z.strictObject({ sources: z.array(z.strictObject({ answerRevisionId: z.uuid(), text: z.string(), codePointLength: z.number().int(), fullSourceRange: z.strictObject({ start: z.literal(0), end: z.number().int() }) })), paragraphIds: z.array(z.uuid()).length(12) })
     .parse(JSON.parse(sent.messages[1].content));
   assert.equal(data.sources[0]?.text, input.sources[0]?.text);
+  assert.equal(data.sources[0]?.codePointLength, Array.from(input.sources[0]?.text ?? '').length);
+  assert.deepEqual(data.sources[0]?.fullSourceRange, { start: 0, end: data.sources[0]?.codePointLength });
   assert.ok(!sent.messages[1].content.includes(input.memoirId));
   assert.equal(requests.length, 1);
 });

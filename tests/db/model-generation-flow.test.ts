@@ -117,7 +117,11 @@ async function fixture(context: TestContext) {
 type ProxyState = {
   submitErrNo?: number | undefined;
   disconnectSubmit?: boolean;
+  textureSubmitErrNo?: number;
+  disconnectTextureSubmit?: boolean;
   beforeSubmit?: () => Promise<void>;
+  downloadModel?: (attempt: number) => Promise<Buffer>;
+  geometryResponse?: () => Promise<number>;
   geometryStatus: number;
   textureStatus: number | null;
   glbWithMaterial: boolean;
@@ -129,6 +133,7 @@ async function fakeProxy(context: TestContext, state: ProxyState) {
   let putBodyLength = 0;
   let textureSubmits = 0;
   let geometrySubmits = 0;
+  let modelDownloads = 0;
   const server = createServer((request: IncomingMessage, response: ServerResponse) => {
     request.on('error', () => {}); response.on('error', () => {});
     const chunks: Buffer[] = [];
@@ -164,7 +169,8 @@ async function fakeProxy(context: TestContext, state: ProxyState) {
       if (url === '/game3d/general_info/get_works_list') {
         const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as { worksIds?: string[]; worksPipeline?: number };
         if (Array.isArray(body.worksIds)) {
-          response.end(JSON.stringify({ errNo: 0, errMsg: '', data: { list: [{ worksId: 'geo-1', pipelineStatus: state.geometryStatus }] } }));
+          const status = state.geometryResponse ? await state.geometryResponse() : state.geometryStatus;
+          response.end(JSON.stringify({ errNo: 0, errMsg: '', data: { list: [{ worksId: 'geo-1', pipelineStatus: status }] } }));
           return;
         }
         const list = state.textureStatus === null ? [] : [{
@@ -176,15 +182,17 @@ async function fakeProxy(context: TestContext, state: ProxyState) {
       }
       if (url === '/api/text3d/texture') {
         textureSubmits += 1;
+        if (state.disconnectTextureSubmit) { response.destroy(); return; }
         // 模拟真实 Go 反代：ok 信封内含上游 HTTP 状态与原始响应体。
         response.end(JSON.stringify({ ok: true, data: {
           worksId: 'tex-1', method: 'image', modelVersion: 'v3.1', status: 200,
-          body: { errNo: 0, errMsg: '', data: { worksId: 'tex-1' } },
+          body: { errNo: state.textureSubmitErrNo ?? 0, errMsg: '', data: { worksId: 'tex-1' } },
         } }));
         return;
       }
       if (url === '/model.glb') {
-        response.end(glbBytes(state.glbWithMaterial)); return;
+        modelDownloads += 1;
+        response.end(state.downloadModel ? await state.downloadModel(modelDownloads) : glbBytes(state.glbWithMaterial)); return;
       }
       response.statusCode = 404; response.end(JSON.stringify({ ok: false, error: 'not found' }));
     });
@@ -317,6 +325,47 @@ test('提交中并发读取保持状态；相同失败 requestId 不再次提交
   assert.equal(proxy.geometrySubmits, 1);
 });
 
+test('纹理明确拒绝持久化 FAIL，允许新请求且不自动重提', async (context) => {
+  const setup = await fixture(context);
+  const proxy = await fakeProxy(context, { geometryStatus: 2, textureStatus: null,
+    glbWithMaterial: true, textureSubmitErrNo: 200002 });
+  const submitted = await requestSingleModelGeneration(setup.actor, setup.museum.id, setup.exhibit.id, request(setup), pool);
+  const failed = await getModelGenerationJob(setup.actor, setup.museum.id, setup.exhibit.id, submitted.id, pool);
+  assert.equal(failed.status, 'FAIL');
+  assert.equal(failed.errorCode, 'TEXTURE_SUBMIT_REJECTED');
+  assert.equal((await getModelGenerationJob(setup.actor, setup.museum.id, setup.exhibit.id, submitted.id, pool)).status, 'FAIL');
+  assert.equal(proxy.textureSubmits, 1);
+  const next = await requestSingleModelGeneration(setup.actor, setup.museum.id, setup.exhibit.id, request(setup), pool);
+  assert.notEqual(next.id, submitted.id);
+  assert.equal(proxy.geometrySubmits, 2);
+});
+
+test('纹理提交响应丢失跨连接保留核对提示，恢复作品后清除提示', async (context) => {
+  const setup = await fixture(context);
+  const state: ProxyState = { geometryStatus: 2, textureStatus: null,
+    glbWithMaterial: true, disconnectTextureSubmit: true };
+  const proxy = await fakeProxy(context, state);
+  const submitted = await requestSingleModelGeneration(setup.actor, setup.museum.id, setup.exhibit.id, request(setup), pool);
+  const first = await getModelGenerationJob(setup.actor, setup.museum.id, setup.exhibit.id, submitted.id, pool);
+  assert.equal(first.status, 'RUN');
+  assert.equal(first.errorCode, 'TEXTURE_SUBMIT_UNKNOWN');
+  const otherPool = new Pool({ connectionString: getIsolatedTestDatabaseUrl(), max: 2 });
+  try {
+    const restarted = await getModelGenerationJob(setup.actor, setup.museum.id, setup.exhibit.id, submitted.id, otherPool);
+    assert.equal(restarted.errorCode, 'TEXTURE_SUBMIT_UNKNOWN');
+    assert.match(restarted.errorMessage ?? '', /核对/);
+    const stored = (await pool.query<{ error_code: string }>('SELECT error_code FROM model_generation_jobs WHERE id=$1', [submitted.id])).rows[0];
+    assert.equal(stored?.error_code, 'TEXTURE_SUBMIT_UNKNOWN');
+    await assert.rejects(requestSingleModelGeneration(setup.actor, setup.museum.id, setup.exhibit.id, request(setup), pool), HttpError);
+    assert.equal(proxy.textureSubmits, 1);
+    state.textureStatus = 1;
+    const recovered = await getModelGenerationJob(setup.actor, setup.museum.id, setup.exhibit.id, submitted.id, otherPool);
+    assert.equal(recovered.status, 'RUN');
+    assert.equal(recovered.errorCode, null);
+    assert.equal(recovered.errorMessage, null);
+  } finally { await otherPool.end(); }
+});
+
 test('独立连接推进纹理只提交一次；完成后新来源版本创建新任务', async (context) => {
   const setup = await fixture(context);
   const state: ProxyState = { geometryStatus: 2, textureStatus: null, glbWithMaterial: true };
@@ -341,6 +390,78 @@ test('独立连接推进纹理只提交一次；完成后新来源版本创建�
     assert.equal(proxy.geometrySubmits, 2);
   } finally { await otherPool.end(); }
 });
+
+for (const winningStatus of ['DONE', 'FAIL'] as const) {
+  test(`跨 Pool 并发下载以先提交的 ${winningStatus} 裁决，迟到结果不改终态或错误采纳`, { timeout: 15_000 }, async (context) => {
+    const setup = await fixture(context);
+    const downloading = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    await fakeProxy(context, { geometryStatus: 2, textureStatus: 2, glbWithMaterial: true,
+      downloadModel: async (attempt) => {
+        if (attempt === 1) {
+          downloading.resolve();
+          await release.promise;
+          return glbBytes(winningStatus === 'FAIL');
+        }
+        return glbBytes(winningStatus === 'DONE');
+      },
+    });
+    const submitted = await requestSingleModelGeneration(setup.actor, setup.museum.id, setup.exhibit.id, request(setup), pool);
+    const otherPool = new Pool({ connectionString: getIsolatedTestDatabaseUrl(), max: 2 });
+    const late = getModelGenerationJob(setup.actor, setup.museum.id, setup.exhibit.id, submitted.id, pool);
+    try {
+      await downloading.promise;
+      const winner = await getModelGenerationJob(setup.actor, setup.museum.id, setup.exhibit.id, submitted.id, otherPool);
+      assert.equal(winner.status, winningStatus);
+      release.resolve();
+      const loser = await late;
+      assert.deepEqual(loser, winner);
+      const persisted = await getModelGenerationJob(setup.actor, setup.museum.id, setup.exhibit.id, submitted.id, otherPool);
+      assert.deepEqual(persisted, winner);
+      const exhibit = (await pool.query<{ generated_model_asset_id: string | null; version: number }>(
+        'SELECT generated_model_asset_id,version FROM exhibits WHERE id=$1', [setup.exhibit.id])).rows[0];
+      assert.equal(exhibit?.generated_model_asset_id, winner.modelAssetId);
+      assert.equal(exhibit?.version, setup.exhibit.version + (winningStatus === 'DONE' ? 1 : 0));
+      assert.equal((await pool.query('SELECT id FROM model_assets WHERE job_id=$1', [submitted.id])).rowCount, winningStatus === 'DONE' ? 1 : 0);
+    } finally {
+      release.resolve();
+      await Promise.allSettled([late]);
+      await otherPool.end();
+    }
+  });
+}
+
+for (const lateStatus of [0, 3]) {
+  test(`跨 Pool 迟到的上游状态 ${lateStatus} 不覆盖已完成任务的响应`, { timeout: 15_000 }, async (context) => {
+    const setup = await fixture(context);
+    const querying = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    let queried = false;
+    await fakeProxy(context, { geometryStatus: 2, textureStatus: 2, glbWithMaterial: true,
+      geometryResponse: async () => {
+        if (queried) return 2;
+        queried = true;
+        querying.resolve();
+        await release.promise;
+        return lateStatus;
+      },
+    });
+    const submitted = await requestSingleModelGeneration(setup.actor, setup.museum.id, setup.exhibit.id, request(setup), pool);
+    const otherPool = new Pool({ connectionString: getIsolatedTestDatabaseUrl(), max: 2 });
+    const late = getModelGenerationJob(setup.actor, setup.museum.id, setup.exhibit.id, submitted.id, pool);
+    try {
+      await querying.promise;
+      const winner = await getModelGenerationJob(setup.actor, setup.museum.id, setup.exhibit.id, submitted.id, otherPool);
+      assert.equal(winner.status, 'DONE');
+      release.resolve();
+      assert.deepEqual(await late, winner);
+    } finally {
+      release.resolve();
+      await Promise.allSettled([late]);
+      await otherPool.end();
+    }
+  });
+}
 
 test('他人不可提交或读取生成任务，归属检查在上游调用前完成', async (context) => {
   const setup = await fixture(context);

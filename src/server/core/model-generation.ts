@@ -103,9 +103,9 @@ function rowToJob(row: JobRow, stats: Record<string, number> | null): ModelGener
   });
 }
 
-async function loadJob(db: PoolClient, museumId: string, exhibitId: string, jobId: string): Promise<JobRow> {
+async function loadJob(db: PoolClient, museumId: string, exhibitId: string, jobId: string, lock = false): Promise<JobRow> {
   const result = await db.query<Record<string, unknown>>(
-    `SELECT ${jobColumns} FROM model_generation_jobs WHERE id=$1 AND museum_id=$2 AND exhibit_id=$3`,
+    `SELECT ${jobColumns} FROM model_generation_jobs WHERE id=$1 AND museum_id=$2 AND exhibit_id=$3${lock ? ' FOR UPDATE' : ''}`,
     [jobId, museumId, exhibitId]);
   const row = result.rows[0];
   if (!row) notFound();
@@ -118,6 +118,11 @@ async function loadStats(db: PoolClient, modelAssetId: string | null): Promise<R
   const row = result.rows[0];
   if (!row) return null;
   return modelGlbStatsSchema.parse(row.stats);
+}
+
+async function savedJob(db: PoolClient, museumId: string, exhibitId: string, jobId: string): Promise<ModelGenerationJob> {
+  const row = await loadJob(db, museumId, exhibitId, jobId);
+  return rowToJob(row, await loadStats(db, row.modelAssetId));
 }
 
 /**
@@ -167,9 +172,15 @@ async function failJob(db: PoolClient, jobId: string, code: string, message: str
 async function generateModelFile(client: Hunyuan3DClient, externalJobId: string, uploadDir: string) {
   const remote = await client.queryJob(externalJobId);
   if (remote.status === 'FAIL') {
+    if (remote.errorCode === 'TEXTURE_SUBMIT_REJECTED') {
+      return { kind: 'fail' as const, code: 'TEXTURE_SUBMIT_REJECTED', message: '纹理阶段提交被上游明确拒绝，可重新生成。' };
+    }
     return { kind: 'fail' as const, code: 'JOB_FAILED', message: '上游任务执行失败，可重新生成。' };
   }
-  if (remote.status !== 'DONE') return { kind: 'pending' as const, status: remote.status };
+  if (remote.status !== 'DONE') return { kind: 'pending' as const, status: remote.status,
+    errorCode: remote.errorCode === 'TEXTURE_SUBMIT_UNKNOWN' ? 'TEXTURE_SUBMIT_UNKNOWN' : null,
+    errorMessage: remote.errorCode === 'TEXTURE_SUBMIT_UNKNOWN'
+      ? '纹理提交结果尚未确认，正在核对上游任务，不会重复提交；持续未恢复时请联系管理员。' : null };
   const file = remote.files.find((entry) => entry.type.toLowerCase() === 'glb');
   if (!file) return { kind: 'fail' as const, code: 'RESULT_MISSING', message: '上游任务已完成但没有可用结果文件，本次任务已终止。' };
   const { bytes, stats } = await client.downloadGlb(file);
@@ -313,17 +324,17 @@ async function advanceJob(actorId: string, museumId: string, exhibitId: string, 
     const uploadDir = getServerConfig().uploadDir;
     const outcome = await generateModelFile(providerForJob(snapshot.row.provider, pool, jobId), snapshot.row.externalJobId, uploadDir);
     if (outcome.kind === 'pending') {
-      await withTransaction(async (db) => {
-        await db.query(`UPDATE model_generation_jobs SET status=$2, updated_at=now() WHERE id=$1 AND status IN ('SUBMITTING','WAIT','RUN')`,
-          [jobId, outcome.status]);
+      return await withTransaction(async (db) => {
+        await db.query(`UPDATE model_generation_jobs SET status=$2, error_code=$3, error_message=$4, updated_at=now() WHERE id=$1 AND status IN ('SUBMITTING','WAIT','RUN')`,
+          [jobId, outcome.status, outcome.errorCode, outcome.errorMessage]);
+        return savedJob(db, museumId, exhibitId, jobId);
       }, pool);
-      return rowToJob({ ...snapshot.row, status: outcome.status }, null);
     }
     if (outcome.kind === 'fail') {
-      await withTransaction(async (db) => {
+      return await withTransaction(async (db) => {
         await failJob(db, jobId, outcome.code, outcome.message);
+        return savedJob(db, museumId, exhibitId, jobId);
       }, pool);
-      return rowToJob({ ...snapshot.row, status: 'FAIL', errorCode: outcome.code, errorMessage: outcome.message }, null);
     }
     preparedId = outcome.prepared.id;
     const stats = modelGlbStatsSchema.parse({
@@ -332,15 +343,15 @@ async function advanceJob(actorId: string, museumId: string, exhibitId: string, 
       materialCount: outcome.stats.materialCount,
       imageCount: outcome.stats.imageCount,
     });
-    const modelAssetId = await withTransaction(async (db) => {
+    return await withTransaction(async (db) => {
       await requireActor(db, actorId);
       await museumRecord(db, actorId, museumId, true);
-      const current = await loadJob(db, museumId, exhibitId, jobId);
-      if (current.status === 'DONE') {
+      // 与失败/等待状态的 UPDATE 竞争同一行锁，终态裁决后才允许入库及采纳。
+      const current = await loadJob(db, museumId, exhibitId, jobId, true);
+      if (current.status === 'DONE' || current.status === 'FAIL') {
         console.warn('[model-generation] 并发下载的未引用文件待核对清理', { jobId, preparedId });
-        return current.modelAssetId;
+        return rowToJob(current, await loadStats(db, current.modelAssetId));
       }
-      if (current.status === 'FAIL') throw new Error('Generation already failed.');
       const inserted = await db.query<{ id: string }>(
         `INSERT INTO model_assets(id,museum_id,job_id,byte_size,storage_key,sha256,stats)
          VALUES(gen_random_uuid(),$1,$2,$3,$4,$5,$6) RETURNING id`,
@@ -349,7 +360,7 @@ async function advanceJob(actorId: string, museumId: string, exhibitId: string, 
       const assetId = inserted.rows[0]?.id;
       if (assetId === undefined) throw new Error('Saved model asset could not be read.');
       await db.query(`UPDATE model_generation_jobs SET status='DONE', model_asset_id=$2, error_code=NULL, error_message=NULL, updated_at=now()
-        WHERE id=$1 AND status IN ('SUBMITTING','WAIT','RUN')`, [jobId, assetId]);
+        WHERE id=$1`, [jobId, assetId]);
       // 自动入柜：生成完成即把模型挂到展品（来源版本及建模照片未变更时）。展品版本 +1、
       // 旧确认失效；照片保留为公开页兜底与失败回退。照片已变更时跳过自动
       // 入柜，交由用户重新生成或手动处理。
@@ -362,9 +373,8 @@ async function advanceJob(actorId: string, museumId: string, exhibitId: string, 
            AND model_input->>'mode' = 'single' AND model_input->>'imageAssetId' = $4`,
         [exhibitId, assetId, museumId, snapshot.row.inputAssetId, snapshot.row.sourceVersion]);
       if (adopted.rowCount === 1) await bumpMuseum(db, museumId);
-      return assetId;
+      return savedJob(db, museumId, exhibitId, jobId);
     }, pool);
-    return rowToJob({ ...snapshot.row, status: 'DONE', modelAssetId, errorCode: null, errorMessage: null }, stats);
   } catch (error) {
     if (preparedId) console.warn('[model-generation] 文件已写入，提交结果需核对后清理', { jobId, preparedId });
     // 轮询/下载失败：下载与 GLB 校验类错误视为终态；查询类瞬时错误保持原
@@ -375,12 +385,12 @@ async function advanceJob(actorId: string, museumId: string, exhibitId: string, 
     }
     if (error instanceof Hunyuan3DError && ['INVALID_GLB', 'RESULT_MISSING', 'RESULT_URL_REJECTED', 'DOWNLOAD_FAILED'].includes(error.code)) {
       const failure = describeGenerationFailure(error);
-      await withTransaction(async (db) => {
+      return withTransaction(async (db) => {
         await failJob(db, jobId, failure.code, failure.message);
+        return savedJob(db, museumId, exhibitId, jobId);
       }, pool);
-      return rowToJob({ ...snapshot.row, status: 'FAIL', errorCode: failure.code, errorMessage: failure.message }, null);
     }
-    return rowToJob(snapshot.row, snapshot.stats);
+    return withTransaction((db) => savedJob(db, museumId, exhibitId, jobId), pool);
   }
 }
 
@@ -405,7 +415,7 @@ export async function getLatestModelGenerationJob(
 /**
  * 采纳已完成的生成模型到展柜。只替换工作台的展示模型引用，不改照片与讲述：
  * 展品版本 +1、旧确认失效（与人工修改一致），公开快照仍需重新发布。
- * 公开参观页在快照支持模型前继续使用照片。
+ * 发布后由不可变快照引用该模型，草稿采纳不会改变现有公开展示。
  */
 export async function adoptGeneratedModel(
   actorId: string, museumId: string, exhibitId: string, jobId: string, expectedVersion: number,

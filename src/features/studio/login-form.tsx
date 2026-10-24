@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, type FormEvent } from 'react';
+import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import Link from '../navigation/navigation-link';
 import { Brand } from '../navigation/brand';
@@ -38,7 +39,7 @@ export function LoginForm({ returnTo = '/studio' }: { returnTo?: string }) {
     <main className="grid min-h-screen bg-[#100D0A] text-[#F0E8DA] lg:grid-cols-[45fr_55fr]">
       {/* 左侧品牌面板：按已确认的设计稿保留 */}
       <aside className="relative hidden flex-col justify-between overflow-hidden p-10 lg:flex">
-        <img src={AUTH_BG} alt="" className="absolute inset-0 h-full w-full object-cover" style={{ filter: 'sepia(.35) brightness(.52) contrast(1.06) saturate(.85)' }} />
+        <Image src={AUTH_BG} alt="" fill sizes="45vw" unoptimized className="absolute inset-0 h-full w-full object-cover" style={{ filter: 'sepia(.35) brightness(.52) contrast(1.06) saturate(.85)' }} />
         <div className="absolute inset-0" style={{ background: 'linear-gradient(75deg, rgba(16,13,10,.92) 22%, rgba(16,13,10,.42) 70%, rgba(16,13,10,.3) 100%)' }} />
         <div className="absolute inset-0" style={{ boxShadow: 'inset 0 0 140px 30px rgba(8,6,4,.72)' }} aria-hidden="true" />
         <div className="relative z-10 flex items-center gap-3">

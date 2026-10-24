@@ -1,6 +1,6 @@
 # 混元 3D 网页反代适配器（演示路径）
 
-对接本机 [hunyuan3d-proxy](https://github.com/montezl/hunyuan3d-proxy)（腾讯混元 3D 网页端反向代理）的 **concept（概念站）** 通道，复用 `../hunyuan3d` 的共享类型、错误、GLB 校验与下载策略。生产路径仍是官方云 API 适配器（`../hunyuan3d`）；本模块是**演示用**的第二 provider，二者实现同一个 `Hunyuan3DClient` 接口，现已接入应用持久化任务，尚未接入采纳与发布链路。
+对接本机 [hunyuan3d-proxy](https://github.com/montezl/hunyuan3d-proxy)（腾讯混元 3D 网页端反向代理）的 **concept（概念站）** 通道，复用 `../hunyuan3d` 的共享类型、错误、GLB 校验与下载策略。生产路径仍是官方云 API 适配器（`../hunyuan3d`）；本模块是**演示用**的第二 provider，二者实现同一个 `Hunyuan3DClient` 接口，现已接入应用持久化任务、私有模型入库、来源未变时自动入柜与幂等采纳；生成模型发布快照在当前工作区通过迁移 0017 接入（尚未提交）。确认与发布仍由用户明确操作，完整验收及真实样例范围见 [验收清单](../../../../docs/11-验收清单.md)。
 
 ## 合规与凭据边界
 
@@ -21,7 +21,7 @@
 ```
 
 - 对 C 仍呈现单一 `jobId`（几何 worksId），通过上游作品关联寻找纹理结果。
-- 适配器提供纹理提交抢占与记录钩子，应用编排使用数据库持久化；未提供钩子的独立调用仅有实例内去重，不能声称支持重启恢复。提交结果未知保持 RUN，核对关联作品前不再提交。
+- 适配器提供纹理提交抢占与记录钩子，应用编排使用数据库持久化；未提供钩子的独立调用仅有实例内去重，不能声称支持重启恢复。纹理上游明确返回非零业务错误码时进入 FAIL / TEXTURE_SUBMIT_REJECTED，允许用户修正条件后新建生成任务，不自动重试。提交结果未知保持 RUN / TEXTURE_SUBMIT_UNKNOWN，提示持久化且跨实例保留，核对关联作品前不再提交。
 - 白模同样有 `glbUrl`：`downloadGlb` 在 GLB 校验通过后额外要求 `materials > 0`，否则按 `INVALID_GLB` 拒绝。
 - `remainingTimes()` 返回 concept 积分池余量，供 B12 额度验收使用。
 

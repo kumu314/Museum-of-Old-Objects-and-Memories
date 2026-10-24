@@ -3,10 +3,10 @@
 import { OrnateFrame } from '../ornaments/ornate-frame';
 import { ConfirmationSeal } from '../ornaments/confirmation-seal';
 import { ObjectEngraving, WaxSeal } from './curator-details';
-import { useId, useState, type FormEvent, type ReactNode } from 'react';
+import { useId, useLayoutEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { z } from 'zod';
 import { adoptAiInputSchema, aiDraftSchema, type AiDraft } from '../../contracts/ai';
-import { confirmExhibitInputSchema, createExhibitInputSchema, displayPhotoRequiredMessage, exhibitDraftSchema, missingDisplayPhoto, updateExhibitInputSchema, type CreateExhibitInput, type ExhibitDraft, type MuseumDraft } from '../../contracts/museum';
+import { confirmExhibitInputSchema, createExhibitInputSchema, displayPhotoRequiredMessage, exhibitDraftSchema, missingDisplayPhoto, museumDraftSchema, updateExhibitInputSchema, type CreateExhibitInput, type ExhibitDraft, type MuseumDraft } from '../../contracts/museum';
 import { modelKeySchema } from '../../contracts/primitives';
 import { apiRequest, describeFailure, jsonRequest } from './api';
 import { AiDraftPanel } from './ai-draft-panel';
@@ -40,16 +40,17 @@ function editable(exhibit: ExhibitDraft | null, slotIndex: number): Editable {
   };
 }
 
-export function ExhibitEditor({ museum, initial, slotIndex, resetKey, cabinet, toolbar, reviewRequest, blocked, onSaved, onDeleted, onDirty, onBusy }: {
+export function ExhibitEditor({ museum, initial, slotIndex, resetKey, cabinet, toolbar, reviewRequest, blocked, onSaved, onRefreshed, onDeleted, onDirty, onBusy }: {
   museum: MuseumDraft; initial: ExhibitDraft | null; slotIndex: number;
   resetKey: string; cabinet: ReactNode; toolbar: (controls: ReactNode) => ReactNode; reviewRequest: ReviewRequest | null; blocked: boolean;
-  onSaved: (exhibit: ExhibitDraft) => Promise<void>; onDeleted: () => Promise<void>;
+  onSaved: (exhibit: ExhibitDraft) => Promise<void>; onRefreshed: (museum: MuseumDraft) => void; onDeleted: () => Promise<void>;
   onDirty: (dirty: boolean) => void; onBusy: (busy: boolean) => void;
 }) {
   const id = useId();
   const [editorKey, setEditorKey] = useState(resetKey);
   const [saved, setSaved] = useState(initial);
   const [fields, setFields] = useState(() => editable(initial, slotIndex));
+  const [clearGeneratedModel, setClearGeneratedModel] = useState(false);
   const [tab, setTab] = useState<Tab>('story');
   const [lastReview, setLastReview] = useState(reviewRequest);
   if (lastReview !== reviewRequest) {
@@ -66,11 +67,15 @@ export function ExhibitEditor({ museum, initial, slotIndex, resetKey, cabinet, t
   const [draftEdited, setDraftEdited] = useState(false);
   // Reset only the editing fields on an explicit selection/reload; the scene stays mounted.
   if (editorKey !== resetKey) {
-    setEditorKey(resetKey); setSaved(initial); setFields(editable(initial, slotIndex));
+    setEditorKey(resetKey); setClearGeneratedModel(false); setSaved(initial); setFields(editable(initial, slotIndex));
     setSettingsOpen(false); setTranscriptOpen(initial?.transcript !== null && initial?.transcript !== undefined); setNote(''); setBusy(null); setError(null); setMessage(null); setAiDraft(null); setDraftEdited(false);
   }
-  const dirty = JSON.stringify(fields) !== JSON.stringify(editable(saved, slotIndex));
+  const dirty = clearGeneratedModel || JSON.stringify(fields) !== JSON.stringify(editable(saved, slotIndex));
   const disabled = blocked || busy !== null;
+  const refreshGuard = useRef({ resetKey, dirty: false, disabled: false, exhibitId: saved?.id });
+  useLayoutEffect(() => {
+    refreshGuard.current = { resetKey, dirty: dirty || note.length > 0 || draftEdited, disabled, exhibitId: saved?.id };
+  }, [resetKey, dirty, note, draftEdited, disabled, saved?.id]);
   const captionLength = Array.from(fields.caption.trim()).length;
   const confirmed = saved !== null && saved.confirmedVersion === saved.version;
   const photoMissing = missingDisplayPhoto(fields);
@@ -126,12 +131,12 @@ export function ExhibitEditor({ museum, initial, slotIndex, resetKey, cabinet, t
   function change<K extends keyof Editable>(key: K, value: Editable[K]) {
     const next = { ...fields, [key]: value };
     setFields(next);
-    onDirty(JSON.stringify(next) !== JSON.stringify(editable(saved, slotIndex)) || note.length > 0 || draftEdited);
+    onDirty(clearGeneratedModel || JSON.stringify(next) !== JSON.stringify(editable(saved, slotIndex)) || note.length > 0 || draftEdited);
     setMessage(null);
   }
   function pending(value: string | null) { setBusy(value); onBusy(value !== null); }
   async function acceptSaved(exhibit: ExhibitDraft, messageText: string, keepDraftEdits = draftEdited) {
-    setSaved(exhibit); setFields(editable(exhibit, slotIndex)); setNote('');
+    setClearGeneratedModel(false); setSaved(exhibit); setFields(editable(exhibit, slotIndex)); setNote('');
     onDirty(keepDraftEdits); setMessage(messageText);
     await onSaved(exhibit);
   }
@@ -142,7 +147,7 @@ export function ExhibitEditor({ museum, initial, slotIndex, resetKey, cabinet, t
     try {
       const values = { ...fields, sourceSegments: sourceSegmentsFromText(fields.rawStory, fields.transcript, saved?.sourceSegments ?? []) };
       const input = saved
-        ? updateExhibitInputSchema.parse({ ...values, expectedVersion: saved.version })
+        ? updateExhibitInputSchema.parse({ ...values, ...(clearGeneratedModel ? { clearGeneratedModel: true } : {}), expectedVersion: saved.version })
         : createExhibitInputSchema.parse({ ...values, expectedMuseumVersion: museum.version });
       const result = await apiRequest(saved ? `${path}/${saved.id}` : path, exhibitDraftSchema, jsonRequest(saved ? 'PATCH' : 'POST', input));
       await acceptSaved(result, '草稿已保存。确认与发布由你分别决定。');
@@ -176,13 +181,25 @@ export function ExhibitEditor({ museum, initial, slotIndex, resetKey, cabinet, t
     } catch (failure) { setError(describeFailure(failure)); }
     finally { pending(null); }
   }
+  async function refreshModel(exhibitId: string, signal: AbortSignal): Promise<boolean> {
+    const key = resetKey;
+    const refreshed = await apiRequest(`/api/museums/${museum.id}`, museumDraftSchema, { signal });
+    const updated = refreshed.exhibits.find((exhibit) => exhibit.id === exhibitId);
+    const current = refreshGuard.current;
+    if (signal.aborted || current.resetKey !== key || current.exhibitId !== exhibitId || current.dirty || current.disabled) return false;
+    if (!updated) throw new Error('旧物已被移除，请重新读取展馆。');
+    setSaved(updated); setFields(editable(updated, slotIndex)); setClearGeneratedModel(false);
+    // The guarded response already contains the entire museum; avoid a second unguarded read.
+    onRefreshed(refreshed);
+    return true;
+  }
   async function adoptModel(jobId: string) {
     if (!saved) return;
     pending('采纳模型');
     setError(null);
     try {
       const updated = await apiRequest(`${path}/${saved.id}/model/jobs/${jobId}/adopt`, exhibitDraftSchema, jsonRequest('POST', { expectedVersion: saved.version }));
-      setSaved(updated); setFields(editable(updated, slotIndex)); onDirty(false);
+      setClearGeneratedModel(false); setSaved(updated); setFields(editable(updated, slotIndex)); onDirty(false);
       setMessage('模型已采纳，展柜将改为展示生成的模型；确认与发布仍需重新完成。');
       await onSaved(updated);
     } catch (error) { setError(describeFailure(error)); }
@@ -287,9 +304,15 @@ export function ExhibitEditor({ museum, initial, slotIndex, resetKey, cabinet, t
     <WorkbenchDialog open={settingsOpen} title="展示设置" onClose={() => setSettingsOpen(false)}>
       <fieldset disabled={disabled} className="workbench-fields">
         <Field label="柜格位置"><select id={`${id}-slotIndex-input`} value={fields.slotIndex} onChange={(event) => change('slotIndex', Number(event.target.value))}>{availablePositions.map((index) => <option key={index} value={index} disabled={museum.exhibits.some((item) => item.slotIndex === index && item.id !== saved?.id)}>{cabinetPosition(index)}</option>)}</select></Field>
-        <Field label="当前展示方式"><select id={`${id}-modelKey-input`} value={fields.modelKey} onChange={(event) => change('modelKey', modelKeySchema.parse(event.target.value))}><option value="photo-plane">实拍照片平面展示</option><option value="camera-01">复古相机 · 内置演示模型</option><option value="cassette">手录磁带 · 内置演示模型</option><option value="ticket">旧车票 · 内置演示模型</option></select></Field>
+        <Field label="当前展示方式"><select id={`${id}-modelKey-input`} value={saved?.generatedModelAssetId && !clearGeneratedModel ? 'generated' : fields.modelKey} onChange={(event) => {
+          const generated = event.target.value === 'generated';
+          const clear = Boolean(saved?.generatedModelAssetId) && !generated;
+          const next = generated ? fields : { ...fields, modelKey: modelKeySchema.parse(event.target.value) };
+          setClearGeneratedModel(clear); setFields(next); setMessage(null);
+          onDirty(clear || JSON.stringify(next) !== JSON.stringify(editable(saved, slotIndex)) || note.length > 0 || draftEdited);
+        }}>{saved?.generatedModelAssetId && <option value="generated">已采纳的生成模型</option>}<option value="photo-plane">实拍照片平面展示</option><option value="camera-01">复古相机 · 内置演示模型</option><option value="cassette">手录磁带 · 内置演示模型</option><option value="ticket">旧车票 · 内置演示模型</option></select></Field>
         <Field label="展示近似程度" hint="与展示方式保持一致，不将照片平面或演示模型描述为精确复原。"><textarea id={`${id}-approximation-input`} required rows={3} value={fields.approximation} onChange={(event) => change('approximation', event.target.value)} /></Field>
-        <div id={`${id}-generation`} tabIndex={-1} className="workbench-generation-panel"><ModelGenerationFields museumId={museum.id} exhibitId={saved?.id ?? null} exhibitVersion={saved?.version ?? null} dirty={dirty} input={fields.modelInput} photoAssetId={fields.photoAssetId} disabled={disabled} onChange={(input) => change('modelInput', input)} onBusy={(uploading) => pending(uploading ? '上传建模照片' : null)} onError={setError} onAdopt={adoptModel} /></div>
+        <div id={`${id}-generation`} tabIndex={-1} className="workbench-generation-panel"><ModelGenerationFields museumId={museum.id} exhibitId={saved?.id ?? null} exhibitVersion={saved?.version ?? null} generatedModelAssetId={saved?.generatedModelAssetId ?? null} onRefresh={refreshModel} dirty={dirty || note.length > 0 || draftEdited} input={fields.modelInput} photoAssetId={fields.photoAssetId} disabled={disabled} onChange={(input) => change('modelInput', input)} onBusy={(uploading) => pending(uploading ? '上传建模照片' : null)} onError={setError} onAdopt={adoptModel} /></div>
         <Notice error={error} message={message} />
         <button type="submit" form={`${id}-form`} className="wb-primary" disabled={disabled}>保存旧物草稿</button>
       </fieldset>

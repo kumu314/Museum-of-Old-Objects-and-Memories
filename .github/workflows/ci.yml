@@ -29,6 +29,9 @@ jobs:
         env:
           APP_ORIGIN: https://museum.example.test
           COMMIT_RANGE: ${{ github.event_name == 'pull_request' && format('{0}..{1}', github.event.pull_request.base.sha, github.event.pull_request.head.sha) || 'HEAD~1..HEAD' }}
+      - name: 安装浏览器回归运行时
+        run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm test:browser
       - run: pnpm test:http
       - if: always()
         run: docker compose -f compose.local.yml stop

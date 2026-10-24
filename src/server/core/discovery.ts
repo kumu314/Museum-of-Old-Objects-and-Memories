@@ -321,3 +321,16 @@ export function getDiscoveryAsset(actorId: string, museumId: string, accessEpoch
     return assetRecord(db, museumId, assetId);
   }, client);
 }
+
+export function getDiscoveryModelAsset(actorId: string, museumId: string, accessEpoch: string, assetId: string, client?: PoolClient) {
+  return inTransaction(async (db) => {
+    await requireDemoAccount(db, actorId);
+    const record = await discoveryRecord(db, museumId, accessEpoch);
+    const result = await db.query<{ storage_key: string }>(`SELECT a.storage_key FROM snapshot_model_assets s
+      JOIN model_assets a ON a.id=s.asset_id AND a.museum_id=s.museum_id
+      WHERE s.snapshot_id=$1 AND s.museum_id=$2 AND s.asset_id=$3`, [record.snapshotId, museumId, assetId]);
+    const stored = result.rows[0];
+    if (!stored) notFound();
+    return stored;
+  }, client);
+}

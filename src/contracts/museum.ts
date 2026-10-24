@@ -54,6 +54,8 @@ export const createExhibitInputSchema = z.strictObject({
 export const updateExhibitInputSchema = z.strictObject({
   ...draftFields,
   expectedVersion: versionSchema,
+  // Only explicit clearing is allowed; assignment goes through validated model adoption.
+  clearGeneratedModel: z.literal(true).optional(),
 });
 
 export function missingDisplayPhoto(exhibit: Pick<CreateExhibitInput, 'modelKey' | 'photoAssetId'>): boolean {
@@ -70,7 +72,7 @@ export const exhibitDraftSchema = z.strictObject({
   ...draftFields,
   id: idSchema,
   museumId: idSchema,
-  // 工作台展柜优先渲染已采纳的生成模型；公开参观页在快照支持模型前仍用照片。
+  // 已采纳模型在确认发布时冻结进入公开快照。
   generatedModelAssetId: idSchema.nullable(),
   version: versionSchema,
   confirmedVersion: versionSchema.nullable(),
@@ -110,6 +112,8 @@ export const museumDraftSchema = museumSummarySchema.extend({
 
 export const publicExhibitSchema = z.strictObject({
   ...exhibitFields,
+  // 旧封存快照没有此字段，保持可读且不改写历史内容。
+  generatedModelAssetId: idSchema.nullable().optional(),
   id: idSchema,
   caption: textSchema(1, 120),
 }).refine((exhibit) => !missingDisplayPhoto(exhibit), { message: displayPhotoRequiredMessage, path: ['photoAssetId'] });
@@ -134,6 +138,7 @@ function displayExhibit(exhibit: ExhibitDraft): PublicExhibit {
     era: exhibit.era,
     slotIndex: exhibit.slotIndex,
     modelKey: exhibit.modelKey,
+    generatedModelAssetId: exhibit.generatedModelAssetId,
     caption: exhibit.caption,
     photoAssetId: exhibit.photoAssetId,
     audioAssetId: exhibit.audioAssetId,

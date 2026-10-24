@@ -471,7 +471,7 @@ test('HTTP 上传同样必须经过显式来源策略', () => {
   assert.equal(checked, true);
 });
 
-test('纹理封装 ok=true 不掩盖内层拒绝', async (context) => {
+test('纹理封装 ok=true 的明确拒绝进入 FAIL，且不自动重新提交', async (context) => {
   let textureCalls = 0;
   const proxy = await fakeServer(context, (request, response, body) => {
     if (request.url === '/game3d/general_info/get_works_list') {
@@ -484,12 +484,14 @@ test('纹理封装 ok=true 不掩盖内层拒绝', async (context) => {
     }
     textureCalls += 1;
     response.end(JSON.stringify({ ok: true, data: {
-      status: 200, body: { errNo: 200002, errMsg: '输入参数错误', data: null },
+      status: 400, body: { errNo: 200002, errMsg: '输入参数错误', data: null },
     } }));
   });
   const client = createHunyuanWebProxyClient({ baseUrl: proxy.origin });
-  assert.equal((await client.queryJob('geo-1')).errorCode, 'TEXTURE_SUBMIT_UNKNOWN');
-  assert.equal((await client.queryJob('geo-1')).errorCode, 'TEXTURE_SUBMIT_UNKNOWN');
+  const rejected = await client.queryJob('geo-1');
+  assert.equal(rejected.status, 'FAIL');
+  assert.equal(rejected.errorCode, 'TEXTURE_SUBMIT_REJECTED');
+  assert.equal((await client.queryJob('geo-1')).status, 'FAIL');
   assert.equal(textureCalls, 1);
 });
 
@@ -659,12 +661,14 @@ test('持久化纹理抢占跨实例防重复，响应丢失后通过列表恢�
     recordTextureSubmission: async (geometryId, textureId) => { recorded.push(`${geometryId}:${textureId}`); },
   };
   const first = createHunyuanWebProxyClient(config);
-  assert.equal((await first.queryJob('geo-1')).status, 'RUN');
+  assert.equal((await first.queryJob('geo-1')).errorCode, 'TEXTURE_SUBMIT_UNKNOWN');
   const restarted = createHunyuanWebProxyClient(config);
-  assert.equal((await restarted.queryJob('geo-1')).status, 'RUN');
+  assert.equal((await restarted.queryJob('geo-1')).errorCode, 'TEXTURE_SUBMIT_UNKNOWN');
   assert.equal(submitted, 1);
   visible = true;
-  assert.equal((await restarted.queryJob('geo-1')).status, 'RUN');
+  const recovered = await restarted.queryJob('geo-1');
+  assert.equal(recovered.status, 'RUN');
+  assert.equal(recovered.errorCode, undefined);
   assert.deepEqual(recorded, ['geo-1:tex-1']);
 });
 

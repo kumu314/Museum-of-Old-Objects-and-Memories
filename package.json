@@ -23,7 +23,8 @@
     "test:scene": "node --import tsx --test src/features/**/*.test.ts",
     "team:create": "node --env-file-if-exists=.env.local --import tsx scripts/create-member.ts",
     "dev:scene": "vite --config vite.scene.config.mjs",
-    "build:scene": "vite build --config vite.scene.config.mjs"
+    "build:scene": "vite build --config vite.scene.config.mjs",
+    "test:browser": "node --test tests/browser/*.test.mjs"
   },
   "dependencies": {
     "next": "16.4.3",
@@ -52,6 +53,7 @@
     "tailwindcss": "4.3.3",
     "@tailwindcss/postcss": "4.3.3",
     "tsx": "4.23.15",
-    "vite": "8.3.5"
+    "vite": "8.3.5",
+    "playwright": "1.62.1"
   }
 }

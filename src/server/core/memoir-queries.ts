@@ -1,3 +1,5 @@
+import { memoirAiColumns } from './memoir-ai';
+import { memoirAiOperationSchema } from '../../contracts';
 import type { PoolClient } from 'pg';
 import {
   interviewSessionSchema, memoirChapterSchema, memoirPageInputSchema, memoirPageSchema, onlineMemoirSchema,
@@ -96,7 +98,7 @@ export function exportMemoir(actorId: string, memoirId: string, client?: PoolCli
     const confirmations = (await query(`SELECT ${memoirConfirmationColumns} FROM memoir_confirmations WHERE memoir_id=$1 ORDER BY confirmed_at,id`)).map(memoirConfirmationProjection);
     const publications = (await query(`SELECT ${memoirPublicationColumns} FROM memoir_publications WHERE memoir_id=$1 ORDER BY granted_at,id`)).map(memoirPublicationProjection);
     return memoirExportSchema.parse({ formatVersion: 1, provenance: 'synthetic_online_demo', exportedAt: new Date().toISOString(), ...online, sessions, questions, answers, chapters,
-      drafts: contents.filter((content) => 'output' in content), revisions: contents.filter((content) => 'paragraphs' in content), confirmations, publications, aiOperations: [] });
+      drafts: contents.filter((content) => 'output' in content), revisions: contents.filter((content) => 'paragraphs' in content), confirmations, publications, aiOperations: (await query(`SELECT ${memoirAiColumns} FROM memoir_ai_operations WHERE memoir_id=$1 ORDER BY created_at,id`)).map((row) => memoirAiOperationSchema.parse(memoirDates(row))) });
   }, client);
 }
 function literal(text: string) {

@@ -285,3 +285,43 @@ test('入口分流仅读取本人有效展馆与展品存在性，删除及停�
     await rejected(getOwnMuseumEntry(actor, db), 'UNAUTHORIZED');
   });
 });
+
+test('生成模型随确认快照发布，草稿替换不影响快照，模型读取受当前分享及发现权限约束', async () => {
+  const { getShareModelAsset } = await import('../../src/server/core/sharing');
+  const { getDiscoveryModelAsset } = await import('../../src/server/core/discovery');
+  await fixture(async (db, actor) => {
+    const museum = await createMuseum(actor, { title: '生成模型发布测试', description: '' }, db);
+    const exhibit = await createExhibit(actor, museum.id, exhibitInput(museum.version), db);
+    const photo = await asset(db, actor, museum.id);
+    async function model() {
+      const job = randomUUID(); const id = randomUUID();
+      await db.query(`INSERT INTO model_generation_jobs(id,museum_id,exhibit_id,source_version,mode,input_asset_id,provider,status,created_by)
+        VALUES($1,$2,$3,1,'single',$4,'synthetic-test','RUN',$5)`, [job, museum.id, exhibit.id, photo, actor]);
+      await db.query(`INSERT INTO model_assets(id,museum_id,job_id,byte_size,storage_key,sha256,stats)
+        VALUES($1,$2,$3,100,$4,$5,'{}')`, [id, museum.id, job, `${id}/model.glb`, '0'.repeat(64)]);
+      return id;
+    }
+    const first = await model(); const replacement = await model();
+    await db.query('UPDATE exhibits SET generated_model_asset_id=$1 WHERE id=$2', [first, exhibit.id]);
+    await confirmExhibit(actor, museum.id, exhibit.id, { expectedVersion: exhibit.version, confirmationNote: '合成测试确认' }, db);
+    await publishMuseum(actor, museum.id, await currentVersion(db, actor, museum.id), db);
+    const { token } = await rotateShareToken(actor, museum.id, await currentVersion(db, actor, museum.id), db);
+    assert.equal((await readShare(actor, token, db)).exhibits[0]?.generatedModelAssetId, first);
+    assert.equal((await getShareModelAsset(actor, token, first, db)).storage_key, `${first}/model.glb`);
+    await rejected(getShareModelAsset(actor, token, replacement, db), 'SHARE_NOT_FOUND');
+    await rejected(getShareModelAsset(randomUUID(), token, first, db), 'UNAUTHORIZED');
+    await db.query('UPDATE exhibits SET generated_model_asset_id=$1 WHERE id=$2', [replacement, exhibit.id]);
+    assert.equal((await readShare(actor, token, db)).exhibits[0]?.generatedModelAssetId, first);
+    await db.query('INSERT INTO direction1_demo_accounts(user_id) VALUES($1)', [actor]);
+    await db.query("INSERT INTO public_profiles(user_id,nickname) VALUES($1,'合成测试')", [actor]);
+    const epoch = randomUUID();
+    await db.query("UPDATE museums SET access_mode='discoverable',access_epoch=$2 WHERE id=$1", [museum.id, epoch]);
+    assert.equal((await getDiscoveryModelAsset(actor, museum.id, epoch, first, db)).storage_key, `${first}/model.glb`);
+    await rejected(getDiscoveryModelAsset(actor, museum.id, epoch, replacement, db), 'NOT_FOUND');
+    const rotated = await rotateShareToken(actor, museum.id, await currentVersion(db, actor, museum.id), db);
+    await rejected(getShareModelAsset(actor, token, first, db), 'SHARE_NOT_FOUND');
+    await rejected(getDiscoveryModelAsset(actor, museum.id, epoch, first, db), 'NOT_FOUND');
+    await stopSharing(actor, museum.id, await currentVersion(db, actor, museum.id), db);
+    await rejected(getShareModelAsset(actor, rotated.token, first, db), 'SHARE_NOT_FOUND');
+  });
+});

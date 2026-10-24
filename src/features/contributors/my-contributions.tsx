@@ -138,26 +138,28 @@ export function MyContributions({ initial }: { readonly initial: MyContributions
                 {composing === item.invitation.id ? (
                   <div className={styles.form}>
                     <label className={styles.label}>你记得的事
-                      <textarea className={styles.textarea} rows={4} maxLength={4000} value={draft.story}
+                      <textarea className={styles.textarea} rows={4} maxLength={4000} disabled={busy} value={draft.story}
                         onChange={(event) => setDraft({ ...draft, story: event.target.value })} />
                     </label>
                     <label className={styles.label}>来源（谁讲的、何时何地）
-                      <input className={styles.input} maxLength={200} value={draft.sourceNote}
+                      <input className={styles.input} maxLength={200} disabled={busy} value={draft.sourceNote}
                         onChange={(event) => setDraft({ ...draft, sourceNote: event.target.value })} />
                     </label>
                     <label className={styles.check}>
-                      <input type="checkbox" checked={draft.publishConsent}
+                      <input type="checkbox" disabled={busy} checked={draft.publishConsent}
                         onChange={(event) => setDraft({ ...draft, publishConsent: event.target.checked })} />
                       我同意这份讲述在展品已发布且分享开启时立即向登录参观者公开，无需馆主再次发布（可撤回）
                     </label>
                     <div className={styles.actions}>
                       <button type="button" className={styles.primary} disabled={busy || draft.story.trim() === '' || draft.sourceNote.trim() === ''}
                         onClick={() => submit(item)}>提交</button>
-                      <button type="button" className={styles.link} onClick={() => setComposing(null)}>取消</button>
+                      <button type="button" className={styles.link} disabled={busy} onClick={() => setComposing(null)}>取消</button>
                     </div>
                   </div>
                 ) : (
-                  <button type="button" className={styles.link} onClick={() => { setComposing(item.invitation.id); setDraft({ story: '', sourceNote: '', publishConsent: false }); }}>
+                  <button type="button" className={styles.link} disabled={busy} onClick={() => {
+                    if (composing !== null && (draft.story || draft.sourceNote || draft.publishConsent) && !window.confirm('切换展品会放弃当前未保存的讲述，是否继续？')) return;
+                    setComposing(item.invitation.id); setDraft({ story: '', sourceNote: '', publishConsent: false }); }}>
                     写一份讲述
                   </button>
                 )}

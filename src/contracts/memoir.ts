@@ -243,6 +243,7 @@ export const memoirAiOperationSchema = z.strictObject({
   id: idSchema,
   memoirId: idSchema,
   kind: z.enum(['followup', 'chapter']),
+  targetId: idSchema,
   sourceVersion: versionSchema,
   state: z.enum(['prepared', 'sending', 'succeeded', 'failed', 'unknown', 'superseded']),
   generation: z.enum(['fixture', 'provider']),

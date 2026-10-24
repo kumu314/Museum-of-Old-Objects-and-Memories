@@ -1,6 +1,6 @@
-# 个人展馆与建模接口准备
+# 个人展馆与建模流程
 
-更新：2026-10-24。以下个人展馆与建模照片准备已进入当前 main，来源为 [PR #9](https://github.com/kumu314/Museum-of-Old-Objects-and-Memories/pull/9)。这不表示生成任务或生产部署已完成；最新验证及未执行项见 [验收清单第 8 节](11-验收清单.md#8-代码审查修复复验2026-10-24)。
+更新：2026-10-25。个人展馆与单图生成任务已接入；生成模型发布快照已接入（迁移 0017）。四视图仅支持照片准备，完整自助流程、实际手机与生产部署仍待验收；证据按 [验收清单](11-验收清单.md) 的日期及范围判断。
 
 ## 入口与内容
 
@@ -18,7 +18,7 @@
 
 本次合流保留 main 的 `0003_user_ownership.sql` 与 `0004_login_attempt_scope.sql`、`team_members`/`team_sessions`、复合节流及注册开关；个人展馆迁移接续为 0005。未改写 main 已应用迁移。早期 PR #9 在队员机器应用的 0003 表改名及 0004 个人展馆历史与 main 不同，旧分支数据库会被迁移器拒绝直接叠加；须先备份并另行协调数据迁移，不能改迁移记录或清库。
 
-执行既有 `pnpm db:migrate` 和 `pnpm db:migrate:test` 应用连续迁移 `0005_personal_museum_pages.sql`。迁移增加每账号一个有效展馆索引、将格位改为非负 PostgreSQL integer，并增加私有 `model_input`。
+执行既有 `pnpm db:migrate` 和 `pnpm db:migrate:test` 会应用各自目标库的全部待执行迁移；完整编号见 [迁移说明](../migrations/README.md)。其中 `0005_personal_museum_pages.sql`迁移增加每账号一个有效展馆索引、将格位改为非负 PostgreSQL integer，并增加私有 `model_input`。
 
 旧展品按单图空准备初始化，不改变旧照片、讲述、展签或已发布快照。更新接口采用完整白名单，新增必填 `modelInput`，旧客户端须随本轮一起更新；缺省会拒绝而不会静默清空已保存的建模照片。
 
@@ -43,17 +43,17 @@ GROUP BY created_by HAVING count(*) > 1;
 } }
 ```
 
-公共契约位于 `src/contracts/model-generation.ts`，预留以下两个 POST 路径（由 `modelGenerationPaths` 提供）。**尚未注册任务提交路由**；这些是接入约定，不能作为已可调用的生成服务。当前工作台不会创建任务、展示生成进度或向生成服务传输素材，界面按钮禁用并标注“混元 · 尚未接入”。
+公共契约位于 `src/contracts/model-generation.ts`，路径由 `modelGenerationPaths` 提供。
 
-| 预留路径 | 校验 schema | 照片字段 |
+| 路径 | 状态 | 请求 |
 | --- | --- | --- |
-| `/api/museums/{museumId}/exhibits/{exhibitId}/model/single` | `singleModelRequestSchema` | `imageAssetId: UUID` |
-| `/api/museums/{museumId}/exhibits/{exhibitId}/model/multiview` | `multiviewModelRequestSchema` | `views: { front, back, left, right }`，四个不同素材 UUID |
+| `POST /api/museums/{museumId}/exhibits/{exhibitId}/model/single` | 已接入单图任务 | `singleModelRequestSchema`，`imageAssetId: UUID` |
+| `POST /api/museums/{museumId}/exhibits/{exhibitId}/model/multiview` | 仅预留契约，未接入生成 | `multiviewModelRequestSchema`，四个不同素材 UUID |
 
-两者均须带 `expectedVersion`、用于去重的 UUID `requestId`、明确授权 `generationConsent: true`。不接受远程图片地址或本地路径。schema 通过只表示请求结构有效；正式处理器仍须服务端核对身份、展馆/展品/照片归属和当前来源版本。
+请求须带 `expectedVersion`、用于去重的 UUID `requestId`、明确授权 `generationConsent: true`；不接受远程图片地址或本地路径。单图处理器在调用上游前核对身份、展馆/展品/照片归属与来源版本。工作台保存照片后可提交单图生成、读取最新任务及轮询状态；四视图按钮仍不可提交。
 
-正式接入由 C/D 实现持久任务、幂等提交、状态查询、结果不明时的核对和资源限制；外部调用在事务外，返回后重新核对来源版本。生成结果需经过 GLB 安全与预算校验，再供预览、明确采纳、确认和发布，不能自动替换当前展示。
+持久任务实现请求去重、状态恢复与未知提交保护；外部调用在事务外，返回后重新核对来源版本。结果通过 GLB 安全与预算校验后私有保存：来源版本与单图输入未变、展品未删除时自动入柜，增加展品及展馆版本、使旧确认失效；过期结果保留为候选，不覆盖新内容。幂等采纳接口保留，用户仍须审阅并明确确认、发布。工作台“当前展示方式”可切回照片或内置模型；保存时显式解除当前生成模型引用，增加版本并使确认失效，已发布快照不变。普通编辑不会解除模型引用。迁移 0017 将生成模型纳入不可变快照及授权分享读取。
 
-服务端已有两套适配器：[官方云 API](../src/server/integrations/hunyuan3d/README.md) 面向生产，[concept 网页反代](../src/server/integrations/hunyuan3d-proxy/README.md) 仅用于演示，均未接入上述业务任务。官方 API 尚无真实账号调用证据；concept 的真实文生白模样本不代表照片生成与纹理成品链路已通过。
+两套服务端适配器均已接入单图任务：[官方云 API](../src/server/integrations/hunyuan3d/README.md) 面向生产，[concept 网页反代](../src/server/integrations/hunyuan3d-proxy/README.md) 用于演示。2026-10-25 工作区已有一次获准相机示例的云端生成、隔离环境发布读取和桌面检视记录，存在 COS DNS 环境限制；不据此宣布普通用户完整自助流程或手机验收通过。详见验收清单的当日增量记录。
 
 照片准备模式参考腾讯官方开源实现的 [单图/多视图输入](https://github.com/Tencent-Hunyuan/Hunyuan3D-2/blob/main/gradio_app.py) 和 [多视图示例](https://github.com/Tencent-Hunyuan/Hunyuan3D-2/blob/main/examples/shape_gen_multiview.py)，应用未安装或调用其运行时。当前适配器提交入口为单图；四视图照片准备和请求 schema 不代表官方云 API 或 concept 已支持该提交方式，实际接入仍须 D 核实并对齐。

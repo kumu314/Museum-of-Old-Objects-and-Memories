@@ -44,7 +44,7 @@ export function MuseumDisplay(props: DisplayProps) {
         <p className="museum-visit-caption">{selected.caption || '这件旧物的展签还在整理中。'}</p>
         {selected.photoAssetId && <a className="workbench-photo" href={`${assetBase}/${selected.photoAssetId}`} target="_blank" rel="noreferrer"><Image src={`${assetBase}/${selected.photoAssetId}`} alt={`${selected.name}的实拍照片`} width={600} height={400} unoptimized /></a>}
         {selected.audioAssetId && <div className="museum-visit-audio"><h3>听一段原声</h3><audio controls preload="none" aria-label={`${selected.name}的原声录音`} src={`${assetBase}/${selected.audioAssetId}`} /></div>}
-        <details className="workbench-details"><summary>展示与素材说明</summary><p>{selected.approximation}</p><p>{selected.sourceNotice}</p></details>
+        <details className="workbench-details"><summary>展示与素材说明</summary>{selected.generatedModelAssetId && <p>由上传照片生成的近似模型，未拍摄的背面、结构与细节不代表精确复原。</p>}<p>{selected.approximation}</p><p>{selected.sourceNotice}</p></details>
       </article> : <p className="museum-visit-story">这一页还没有收录旧物。</p>}
     </div>
     <footer className="museum-visit-footer">{owner ? `这是仅本人可见的草稿预览 v${museum.version}。修改保存后在这里查看；分享内容需在工作台明确确认并发布。` : `这是发布版本 v${museum.version} 的纪念展。持有当前链接并登录有效账号后可参观。`}</footer>

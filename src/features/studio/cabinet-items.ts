@@ -1,8 +1,7 @@
 import type { PublicExhibit } from '../../contracts/museum';
 import type { CabinetStageItem } from '../cabinet/cabinet-stage';
 
-export type CabinetExhibit = Pick<PublicExhibit, 'id' | 'name' | 'era' | 'slotIndex' | 'modelKey' | 'photoAssetId'>
-  & { readonly generatedModelAssetId?: string | null };
+export type CabinetExhibit = Pick<PublicExhibit, 'id' | 'name' | 'era' | 'slotIndex' | 'modelKey' | 'photoAssetId' | 'generatedModelAssetId'>;
 
 export function cabinetItems(
   exhibits: readonly CabinetExhibit[],

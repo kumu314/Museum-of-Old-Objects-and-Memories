@@ -208,7 +208,7 @@ function MuseumEditor({ initial }: { initial: MuseumDraft }) {
   return <main className="memory-workbench curator-workbench">
     <FloatingDust />
     <ExhibitEditor resetKey={`${selection}:${editorGeneration}`} museum={museum} initial={selected} slotIndex={newSlot}
-      blocked={action !== null || refreshRequired} onSaved={savedExhibit} onDeleted={deletedExhibit} onDirty={setEditorDirty} onBusy={setEditorBusy}
+      blocked={action !== null || refreshRequired} onSaved={savedExhibit} onRefreshed={setMuseum} onDeleted={deletedExhibit} onDirty={setEditorDirty} onBusy={setEditorBusy}
       cabinet={<CabinetPreview exhibits={museum.exhibits} selectedSlot={selected?.slotIndex ?? newSlot} confirmedIds={museum.exhibits.filter((item) => item.confirmedVersion === item.version).map((item) => item.id)} disabled={busy || refreshRequired} onSelectSlot={chooseSlot} assetBase={`${path}/assets`} />}
       toolbar={toolbar} reviewRequest={reviewRequest} />
     <WorkbenchDialog open={panel === 'museum'} title="展馆资料" onClose={() => setPanel(null)}>

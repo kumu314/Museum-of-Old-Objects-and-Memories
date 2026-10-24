@@ -23,3 +23,13 @@ test('photo planes read their snapshot asset through the revocable share endpoin
   assert.equal(item.photoUrl, `/api/share/token%2Fwith%3Fcharacters/assets/${assetId}`);
   assert.equal(publicExhibitSchema.safeParse({ ...exhibit, photoAssetId: null }).success, false);
 });
+
+test('generated models take precedence and use only the revocable snapshot model endpoint', () => {
+  const model = randomUUID();
+  const exhibit = publicExhibitSchema.parse({ id: randomUUID(), name: '旧相机', era: '约八十年代', slotIndex: 1, modelKey: 'camera-01',
+    generatedModelAssetId: model, caption: '合成测试', photoAssetId: null, audioAssetId: null, approximation: '近似', sourceNotice: '测试' });
+  const item = publicStageItems([exhibit], 'token/with?characters')[0];
+  assert.ok(item?.modelKey === 'glb');
+  assert.equal(item.source.url, `/api/share/token%2Fwith%3Fcharacters/model-assets/${model}`);
+  assert.equal(item.source.version, model);
+});
