@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { sourceSegmentsSchema } from '../../contracts/ai';
 import { sourceSegmentsFromText } from './source-segments';
 
 test('反复保存保留未改讲述的来源标识，修改只替换对应片段', () => {
@@ -25,4 +26,20 @@ test('超长讲述按 Unicode 字符分段，不截断增补平面字符；空�
   assert.equal(Array.from(segments[0]?.text ?? '').length, 6000);
   assert.equal(segments[1]?.text, '𠮷');
   assert.equal(segments.map((segment) => segment.text).join(''), text);
+});
+
+test('超过40个短段落时只合并相邻同来源片段，保留原文并符合保存契约', () => {
+  const paragraphs = (count: number, prefix: string) => Array.from({ length: count }, (_, index) => `${prefix}${index}，记不清了。`).join('\n\n');
+  for (const [rawStory, transcript] of [
+    [paragraphs(41, '旧物'), null],
+    [paragraphs(21, '讲述'), paragraphs(20, '录音')],
+    [paragraphs(41, '讲述'), paragraphs(41, '录音')],
+    ['𠮷'.repeat(6_000), paragraphs(41, '录音')],
+  ] as const) {
+    const segments = sourceSegmentsFromText(rawStory, transcript, []);
+    sourceSegmentsSchema.parse(segments);
+    assert.equal(segments.filter(({ source }) => source === 'rawStory').map(({ text }) => text).join('\n\n'), rawStory);
+    assert.equal(segments.filter(({ source }) => source === 'transcript').map(({ text }) => text).join('\n\n'), transcript ?? '');
+    assert.deepEqual(sourceSegmentsFromText(rawStory, transcript, segments), segments);
+  }
 });

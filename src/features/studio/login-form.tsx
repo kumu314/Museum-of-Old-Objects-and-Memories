@@ -85,7 +85,7 @@ export function LoginForm({ returnTo = '/studio' }: { returnTo?: string }) {
 
           <form onSubmit={submit} className="mt-2">
             <label className="mm-auth-field">用户名
-              <input className="mm-auth-input" autoComplete="username" required value={username} onChange={(event) => setUsername(event.target.value)} disabled={pending} placeholder={registering ? '例如：lin-jiayi 或 阿澄' : '你的用户名'} />
+              <input className="mm-auth-input" autoComplete="username" required value={username} onChange={(event) => setUsername(event.target.value)} disabled={pending} placeholder={registering ? '例如：lin-jiayi 或 阿澄的馆' : '你的用户名'} />
               {registering && <span className="mm-auth-hint">3–40 个字符，不能包含空格。</span>}
             </label>
             <label className="mm-auth-field">密码
