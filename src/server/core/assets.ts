@@ -9,8 +9,44 @@ import { getMuseum } from './museums';
 import { assetRecord, museumRecord, type StoredAsset } from './records';
 
 const multipartLimit = uploadLimits.audioBytes + 65_536;
-/** 超限后最多再读这么多字节用于清空请求体，更离谱的体积直接放弃、不陪跑。 */
+/** 超限后最多再丢这么多字节；超过就终止连接，不陪跑无底洞。 */
 const drainCeiling = multipartLimit * 2;
+/** 超限后清空请求体的时间上限；客户端停传时不能把 handler 挂住。 */
+export const drainTimeoutMs = 5_000;
+
+type ReadOutcome = { kind: 'chunk'; value: Uint8Array } | { kind: 'done' } | { kind: 'stopped' };
+
+function toOutcome(result: ReadableStreamReadResult<Uint8Array>): ReadOutcome {
+  return result.done || !result.value ? { kind: 'done' } : { kind: 'chunk', value: result.value };
+}
+
+async function readChunk(reader: ReadableStreamDefaultReader<Uint8Array>): Promise<ReadOutcome> {
+  try { return toOutcome(await reader.read()); }
+  catch { return { kind: 'stopped' }; }
+}
+
+/**
+ * 丢弃阶段的单次读取必须带时间边界：客户端停传时 `read()` 永不返回，
+ * handler 会被一直挂着，既不响应也不再收数据。超时按「停止」处理，由调用方终止。
+ */
+function readChunkWithin(reader: ReadableStreamDefaultReader<Uint8Array>, timeoutMs: number): Promise<ReadOutcome> {
+  return new Promise<ReadOutcome>((resolve) => {
+    let settled = false;
+    const finish = (outcome: ReadOutcome) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(outcome);
+    };
+    const timer = setTimeout(() => finish({ kind: 'stopped' }), timeoutMs);
+    reader.read().then(
+      (result) => finish(toOutcome(result)),
+      // 取消流会让挂起的 read 失败，这里不能让它变成未处理的拒绝。
+      () => finish({ kind: 'stopped' }),
+    );
+  });
+}
+
 export async function readAssetUpload(request: Request): Promise<AssetInput> {
   const contentType = request.headers.get('content-type') ?? '';
   if (!/^multipart\/form-data\s*;/i.test(contentType)) throw new HttpError({ code: 'UNSUPPORTED_MEDIA_TYPE', message: '请使用文件上传表单。' });
@@ -23,20 +59,32 @@ export async function readAssetUpload(request: Request): Promise<AssetInput> {
   const chunks: Uint8Array[] = [];
   let size = 0;
   let dropped = 0;
+  // 一旦判定超限却没能读到流结束，就必须主动终止这条流，而不是只把锁还回去。
+  let unconsumed = false;
   try {
     for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
+      const outcome = overflow ? await readChunkWithin(reader, drainTimeoutMs) : await readChunk(reader);
+      if (outcome.kind !== 'chunk') {
+        if (outcome.kind === 'stopped') unconsumed = true;
+        break;
+      }
       if (overflow) {
-        dropped += value.byteLength;
-        if (dropped > drainCeiling) break;
+        dropped += outcome.value.byteLength;
+        if (dropped > drainCeiling) { unconsumed = true; break; }
         continue;
       }
-      size += value.byteLength;
+      size += outcome.value.byteLength;
       if (size > multipartLimit) { overflow = true; chunks.length = 0; continue; }
-      chunks.push(value);
+      chunks.push(outcome.value);
     }
-  } finally { reader.releaseLock(); }
+  } finally {
+    // 残留数据留在连接上，下一个请求复用它就会读到半截请求。
+    if (overflow && unconsumed) {
+      try { await reader.cancel(); }
+      catch { /* 连接已断，没有需要保护的复用者 */ }
+    }
+    reader.releaseLock();
+  }
   if (overflow) throw tooLarge();
   let form: FormData;
   try { form = await new Response(Buffer.concat(chunks), { headers: { 'Content-Type': contentType } }).formData(); }
