@@ -228,7 +228,7 @@ test('来源片段 ID 超长不影响重复判断', () => {
   const longId = 'S'.repeat(81);
   pack.facts.sourceSegments = [
     { id: longId, source: 'rawStory', text: '第一段' },
-    { id: longId, source: 'rawStory', text: '第二段' },
+    { id: ` ${longId}\n`, source: 'rawStory', text: '第二段' },
   ];
   pack.curation.aiDraft.sourceSegmentIds = [longId];
   const errors = checkPack(pack).errors;
@@ -236,4 +236,39 @@ test('来源片段 ID 超长不影响重复判断', () => {
     `超长 ID 重复应报出，实际：${JSON.stringify(errors)}`);
 });
 
+test('来源片段 ID 去除首尾空白后判重', () => {
+  for (const id of [' S1', 'S1\n', '　S1　']) {
+    const pack = load(join(okDir, 'base.json'));
+    pack.facts.sourceSegments = [
+      { id: 'S1', source: 'rawStory', text: '第一段' },
+      { id, source: 'transcript', text: '第二段' },
+    ];
+    pack.curation.aiDraft.sourceSegmentIds = ['S1'];
+    const errors = checkPack(pack).errors;
+    assert.equal(errors.length, 1, `实际：${JSON.stringify(errors)}`);
+    assert.match(errors[0], /sourceSegments\[1\]\.id 重复/);
+  }
+});
 
+test('AI 草稿按去除首尾空白后的来源片段 ID 匹配', () => {
+  for (const [sourceId, referenceId] of [
+    [' S1 ', 'S1'],
+    ['S1', '\tS1\n'],
+    ['　S1', ' S1\n'],
+  ]) {
+    const pack = load(join(okDir, 'base.json'));
+    pack.facts.sourceSegments = [{ id: sourceId, source: 'rawStory', text: '第一段' }];
+    pack.curation.aiDraft.sourceSegmentIds = [referenceId];
+    assert.deepEqual(checkPack(pack).errors, []);
+  }
+});
+
+test('AI 草稿的非字符串或空白来源 ID 仍报错', () => {
+  for (const id of [null, undefined, 0, true, [], {}, '', ' \t']) {
+    const pack = load(join(okDir, 'base.json'));
+    pack.curation.aiDraft.sourceSegmentIds = [id];
+    const errors = checkPack(pack).errors;
+    assert.equal(errors.length, 1, `实际：${JSON.stringify(errors)}`);
+    assert.match(errors[0], /sourceSegmentIds\[0\].*找不到/);
+  }
+});

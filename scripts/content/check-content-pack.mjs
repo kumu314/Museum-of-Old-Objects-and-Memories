@@ -158,14 +158,15 @@ export function checkPack(pack) {
         if (!isNonEmptyString(s?.id)) {
           E(`facts.sourceSegments[${i}].id 不能为空`);
         } else {
-          // 与工程契约一致：sourceIdSchema 是 textSchema(1, 80)，trim 后计数
-          const idLength = Array.from(s.id.trim()).length;
+          // 与工程契约一致：sourceIdSchema 先 trim，再计数和去重
+          const id = s.id.trim();
+          const idLength = Array.from(id).length;
           if (idLength > SEGMENT_ID_MAX) {
             E(`facts.sourceSegments[${i}].id 有 ${idLength} 字，工程契约上限 ${SEGMENT_ID_MAX} 字（src/contracts/primitives.ts）`);
           }
           // 长度超限不影响去重：过长 ID 仍要参与重复判断，否则会漏报一组重复 ID
-          if (seen.has(s.id)) E(`facts.sourceSegments[${i}].id 重复：${s.id}`);
-          else seen.add(s.id);
+          if (seen.has(id)) E(`facts.sourceSegments[${i}].id 重复：${id}`);
+          else seen.add(id);
         }
         if (!isNonEmptyString(s?.text)) {
           E(`facts.sourceSegments[${i}].text 不能为空`);
@@ -233,10 +234,11 @@ export function checkPack(pack) {
         const factIds = new Set(
           (isArray(facts?.sourceSegments) ? facts.sourceSegments : [])
             .map((s) => s?.id)
-            .filter(isNonEmptyString),
+            .filter(isNonEmptyString)
+            .map((id) => id.trim()),
         );
         d.sourceSegmentIds.forEach((id, i) => {
-          if (!factIds.has(id)) {
+          if (!isNonEmptyString(id) || !factIds.has(id.trim())) {
             E(`curation.aiDraft.sourceSegmentIds[${i}] = ${JSON.stringify(id)} 在 facts.sourceSegments 里找不到`);
           }
         });
