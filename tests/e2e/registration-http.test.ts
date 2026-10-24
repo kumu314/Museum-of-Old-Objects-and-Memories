@@ -88,3 +88,38 @@ test('自助注册HTTP：校验、唯一性、注册即可用与归属隔离', a
   const denial = await failure(await get(`/api/museums/${museumId}`, secondCookie));
   assert.deepEqual([denial.status, denial.code], [404, 'NOT_FOUND']);
 });
+
+// 回归：注册与登录的节流计数器必须互不相干。
+//
+// 旧实现把用途拼进键里（'register:' + username），而用户名允许包含冒号，
+// 于是名为 "register:alice" 的账号，其登录键与名为 "alice" 的注册键是同一个字符串。
+// 实际后果：任何人反复注册 alice，就能让 register:alice 的持有者无法登录。
+test('自助注册HTTP：注册节流不得锁死另一个账号的登录', async () => {
+  const target = `thr-${randomUUID().slice(0, 12)}`;
+  const victim = { username: `register:${target}`, password };
+
+  assert.equal((await post('/api/auth/register', victim)).status, 201);
+  // 第一次建号成功，之后每次重名失败也照常累加计数。
+  assert.equal((await post('/api/auth/register', { username: target, password })).status, 201);
+  // 注册成功会清空该账号的注册计数，所以从零开始累加：10 次重名到上限，
+  // 第 11 次才被拒。数字写错会让下面的断言在旧代码上"碰巧通过"。
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const duplicate = await failure(await post('/api/auth/register', { username: target, password }));
+    assert.deepEqual([duplicate.status, duplicate.code], [400, 'VALIDATION_ERROR']);
+  }
+  // 必须真的被节流，否则不能证明计数已到上限，后面的断言也就失去意义。
+  const throttled = await failure(await post('/api/auth/register', { username: target, password }));
+  assert.deepEqual([throttled.status, throttled.code], [401, 'UNAUTHORIZED']);
+  assert.match(throttled.message, /注册尝试过多/);
+
+  // 核心断言：受害账号密码正确，不得被另一个账号的注册计数牵连。
+  const login = await post('/api/auth/login', victim);
+  assert.equal(login.status, 200, '注册计数不应影响其它账号的登录');
+  assert.ok(cookieOf(login));
+
+  // 反向同理：注册被节流后，同名账号的正常登录也必须照旧可用。
+  // 把两种用途合并成一个计数器（而不是分成两列）会在这里失败，
+  // 那等于任何人都能用注册接口反复打满别人的登录额度。
+  const sameName = await post('/api/auth/login', { username: target, password });
+  assert.equal(sameName.status, 200, '注册节流不应波及同名账号的登录');
+});
