@@ -143,3 +143,76 @@ test('合法的生成记录取值不被误伤', () => {
   assert.deepEqual(checkPack(pack).errors, [], '没有生成记录时允许整项为 null');
 });
 
+// 应用契约 transcript 是 z.string()（无 min），空字符串合法；「没有录音」应写 null。
+test('录音转写允许空字符串，但仍拒绝非字符串', () => {
+  const pack = load(join(okDir, 'base.json'));
+
+  pack.facts.transcript = '';
+  assert.deepEqual(checkPack(pack).errors, [], '空字符串应放行');
+
+  pack.facts.transcript = '   ';
+  assert.deepEqual(checkPack(pack).errors, [], '纯空白同样合法');
+
+  pack.facts.transcript = null;
+  assert.deepEqual(checkPack(pack).errors, [], 'null 表示没有录音');
+
+  for (const bad of [5, true, [], {}]) {
+    pack.facts.transcript = bad;
+    const errors = checkPack(pack).errors;
+    assert.ok(errors.length > 0 && errors.some((e) => /transcript 必须是字符串/.test(e)),
+      `transcript = ${JSON.stringify(bad)} 应被拦下，实际：${JSON.stringify(errors)}`);
+  }
+});
+
+// 应用契约 textSchema 是 z.string().trim() 之后才计数，校验器必须先 trim 再比长度。
+test('展签长度先去除首尾空白再计数', () => {
+  const pack = load(join(okDir, 'base.json'));
+
+  pack.curation.currentLabel = '展'.repeat(120) + '\n';
+  assert.deepEqual(checkPack(pack).errors, [], '120 字正文加一个换行是合法内容');
+
+  pack.curation.currentLabel = '  ' + '展'.repeat(120) + '  ';
+  assert.deepEqual(checkPack(pack).errors, [], '首尾空白不计入长度');
+
+  pack.curation.currentLabel = '展'.repeat(121);
+  const errors = checkPack(pack).errors;
+  assert.equal(errors.length, 1, `实际：${JSON.stringify(errors)}`);
+  assert.match(errors[0], /去除首尾空白后有 121 字/);
+});
+
+// src/contracts/ai.ts 的 sourceSegmentsSchema 有四条限制，此前一条都没查：
+// 单段 textSchema(1, 6000)、数组 max(40)、合计 reduce <= 12000。
+// 校验器放过而应用存不下的内容包，正是这一类缺口。
+test('来源片段受单段、数量与合计长度三重限制', () => {
+  const seg = (id, text) => ({ id, source: 'rawStory', text });
+  const setSegs = (pack, segs) => {
+    pack.facts.sourceSegments = segs;
+    pack.curation.aiDraft.sourceSegmentIds = segs.map((s) => s.id);
+  };
+
+  const ok = [
+    ['单段 6000 字', [seg('S1', '旧'.repeat(6_000))]],
+    ['合计 12000 字', [seg('S1', '旧'.repeat(6_000)), seg('S2', '旧'.repeat(6_000))]],
+    ['40 段', Array.from({ length: 40 }, (_, i) => seg('S' + i, '短'))],
+  ];
+  for (const [label, segs] of ok) {
+    const pack = load(join(okDir, 'base.json'));
+    setSegs(pack, segs);
+    assert.deepEqual(checkPack(pack).errors, [], `${label} 应当放行`);
+  }
+
+  const bad = [
+    ['单段 6001 字', [seg('S1', '旧'.repeat(6_001))], /单段上限 6000/],
+    ['合计 12001 字', Array.from({ length: 40 }, (_, i) => seg('S' + i, '旧'.repeat(301))), /合计 12040 字/],
+    ['41 段', Array.from({ length: 41 }, (_, i) => seg('S' + i, '短')), /上限 40 段/],
+  ];
+  for (const [label, segs, pattern] of bad) {
+    const pack = load(join(okDir, 'base.json'));
+    setSegs(pack, segs);
+    const errors = checkPack(pack).errors;
+    assert.ok(errors.some((e) => pattern.test(e)),
+      `${label} 应被拦下，实际：${JSON.stringify(errors)}`);
+  }
+});
+
+

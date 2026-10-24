@@ -39,6 +39,10 @@ const EXACT_YEAR = /^\d{4}$/;          // 纯 4 位数字 = 补造的精确年�
 const YEAR_WITH_QUALIFIER = /约|可能|记不清|大概|左右|前后|年代|世纪/;
 // src/contracts/museum.ts：rawStory / transcript 都不得超过 12000 字，超了填不进系统
 const NARRATIVE_MAX = 12_000;
+// src/contracts/ai.ts 的 sourceSegmentsSchema：每段文字上限、片段总数上限、合计长度上限
+const SEGMENT_TEXT_MAX = 6_000;
+const SEGMENT_COUNT_MAX = 40;
+const SEGMENT_TOTAL_MAX = 12_000;
 
 const isNonEmptyString = (v) => typeof v === 'string' && v.trim().length > 0;
 const isArray = Array.isArray;
@@ -119,9 +123,12 @@ export function checkPack(pack) {
     // 由 sourceSegments[].source（rawStory / transcript）区分归属；
     // 工程侧 sourceSegmentsFromText 也是按字段逐个切段，不比较文本是否相同。
     // 因此这里只查类型与长度，不查两者内容差异。
+    //
+    // 空字符串同样合法：src/contracts/museum.ts 里是 z.string()（无 .min()），只限制不超过 12000 字。
+    // 「没有录音」应写 null，不要写 ""——两者应用都接受，但 null 的语义更明确。
     if (facts.transcript != null) {
-      if (!isNonEmptyString(facts.transcript)) {
-        E(`facts.transcript 若填就必须是非空字符串（当前是 ${typeName(facts.transcript)}；没有录音就整项设 null）`);
+      if (typeof facts.transcript !== 'string') {
+        E(`facts.transcript 必须是字符串（当前是 ${typeName(facts.transcript)}；没有录音就整项设 null）`);
       } else if (Array.from(facts.transcript).length > NARRATIVE_MAX) {
         E(`facts.transcript 有 ${Array.from(facts.transcript).length} 字，工程契约上限 ${NARRATIVE_MAX} 字（src/contracts/museum.ts）`);
       }
@@ -140,12 +147,25 @@ export function checkPack(pack) {
     if (!isArray(segs) || segs.length === 0) {
       E('facts.sourceSegments 至少要有一条（展签每句都要能指回原始讲述）');
     } else {
+      if (segs.length > SEGMENT_COUNT_MAX) {
+        E(`facts.sourceSegments 有 ${segs.length} 段，工程契约上限 ${SEGMENT_COUNT_MAX} 段（src/contracts/ai.ts sourceSegmentsSchema）`);
+      }
       const seen = new Set();
+      let totalChars = 0;
       segs.forEach((s, i) => {
         if (!isNonEmptyString(s?.id)) E(`facts.sourceSegments[${i}].id 不能为空`);
         else if (seen.has(s.id)) E(`facts.sourceSegments[${i}].id 重复：${s.id}`);
         else seen.add(s.id);
-        if (!isNonEmptyString(s?.text)) E(`facts.sourceSegments[${i}].text 不能为空`);
+        if (!isNonEmptyString(s?.text)) {
+          E(`facts.sourceSegments[${i}].text 不能为空`);
+        } else {
+          // 与工程契约一致：textSchema 是 trim 后计数，单段上限 6000
+          const textLength = Array.from(s.text.trim()).length;
+          if (textLength > SEGMENT_TEXT_MAX) {
+            E(`facts.sourceSegments[${i}].text 有 ${textLength} 字，工程契约单段上限 ${SEGMENT_TEXT_MAX} 字（src/contracts/ai.ts）`);
+          }
+          totalChars += textLength;
+        }
         // 与工程契约对齐：每条片段要标明出自原始讲述还是录音转写
         if (s?.source == null || s.source === '') {
           W(`facts.sourceSegments[${i}].source 未填（原始讲述写 rawStory，录音转写写 transcript）`);
@@ -153,6 +173,10 @@ export function checkPack(pack) {
           E(`facts.sourceSegments[${i}].source = ${JSON.stringify(s.source)} 不在允许值内（rawStory / transcript）`);
         }
       });
+      // 合计长度上限。校验器放过、应用存不下的内容包，就是这一类缺口。
+      if (totalChars > SEGMENT_TOTAL_MAX) {
+        E(`facts.sourceSegments 合计 ${totalChars} 字，工程契约上限 ${SEGMENT_TOTAL_MAX} 字（src/contracts/ai.ts）`);
+      }
     }
 
     if (!isArray(facts.photos) || facts.photos.length === 0) {
@@ -180,9 +204,13 @@ export function checkPack(pack) {
   } else {
     if (!isNonEmptyString(cur.currentLabel)) {
       E('curation.currentLabel 不能为空（待确认的最终展签文本）');
-    } else if (Array.from(cur.currentLabel).length > CAPTION_MAX) {
-      // 工程契约 caption 上限，超了填不进系统
-      E(`curation.currentLabel 有 ${Array.from(cur.currentLabel).length} 字，工程契约 caption 上限 ${CAPTION_MAX} 字（src/contracts/primitives.ts）`);
+    } else {
+      // 与工程契约一致：src/contracts/primitives.ts 的 textSchema 是 z.string().trim() 之后再计数。
+      // 不先 trim 就会把「120 字正文 + 一个换行」误判成 121 字而拒绝——那是合法内容。
+      const labelLength = Array.from(cur.currentLabel.trim()).length;
+      if (labelLength > CAPTION_MAX) {
+        E(`curation.currentLabel 去除首尾空白后有 ${labelLength} 字，工程契约 caption 上限 ${CAPTION_MAX} 字（src/contracts/primitives.ts）`);
+      }
     }
 
     if (cur.aiDraft != null) {
