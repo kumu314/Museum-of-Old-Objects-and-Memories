@@ -45,7 +45,9 @@ test('模型读取限定同源且不接受内嵌凭据、文件地址或第三�
 test('无 Content-Length 的超限流仍被取消，不将整个文件交给解析器', async () => {
   let canceled = false;
   const body = new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(new Uint8Array(modelBudget.bytes + 1)); }, cancel() { canceled = true; } });
-  await assert.rejects(readModelResponse(new Response(body), new AbortController().signal), /32 MiB/);
+  // 用预算常量断言，避免调整上限时文案漂移导致测试失败。
+  const limitMiB = modelBudget.bytes / (1024 * 1024);
+  await assert.rejects(readModelResponse(new Response(body), new AbortController().signal), new RegExp(`${limitMiB} MiB`));
   assert.equal(canceled, true);
 });
 
