@@ -1,0 +1,78 @@
+{
+  "_fixture": true,
+  "id": "EX-01",
+  "name": "示例旧物",
+  "era": "约 1980 年代",
+  "category": "独立新输入",
+  "facts": {
+    "originalNarrative": "这东西是我爸年轻时用的，具体哪年记不清了。",
+    "transcript": "嗯……我爸年轻时候用的，哪年记不清。",
+    "narrativeSource": {
+      "who": "测试用户",
+      "when": "2026-10-24",
+      "channel": "当面"
+    },
+    "sourceSegments": [
+      {
+        "id": "S1",
+        "source": "voice",
+        "text": "这东西是我爸年轻时用的"
+      }
+    ],
+    "photos": [
+      {
+        "file": "ex01.jpg",
+        "original": true
+      }
+    ],
+    "audio": null,
+    "knownDoubts": [
+      "具体哪年记不清"
+    ]
+  },
+  "curation": {
+    "aiDraft": {
+      "text": "草稿",
+      "sourceSegmentIds": [
+        "S1"
+      ],
+      "model": "test",
+      "generatedAt": "2026-10-24"
+    },
+    "humanEdits": [],
+    "questions": [
+      "哪一年拿到的"
+    ],
+    "currentLabel": "待确认的展签"
+  },
+  "confirmation": {
+    "version": "v1",
+    "confirmedBy": "测试用户",
+    "confirmedAt": "2026-10-24 20:00",
+    "channel": "界面操作",
+    "scope": "展签与照片",
+    "shareScope": "私有草稿"
+  },
+  "generation": {
+    "input": "asset-001 sha256:abc",
+    "task": "local-task-9 / 外部 job-77 / 服务 X 1.0 / 提交 20:01 完成 20:03",
+    "output": "model-001 glb 4.2MB 预算内",
+    "status": {
+      "result": "成功",
+      "durationMs": "128000",
+      "costNote": "未知（未启用计费）"
+    },
+    "adoption": "已采纳为展品 v1"
+  },
+  "licenses": [
+    {
+      "file": "ex01.jpg",
+      "source": "用户提供",
+      "licenseScope": "第三方建模与持链接分享",
+      "authorizedBy": "测试用户",
+      "authorizedAt": "2026-10-24",
+      "approximation": "真实生成"
+    }
+  ],
+  "missing": []
+}
