@@ -26,7 +26,12 @@ export function errorResponse(error: unknown, requestId: string = randomUUID()) 
   return Response.json(body, { status: errorHttpStatus[failure.code], headers: privateHeaders });
 }
 
-export async function readJsonRequest(request: Request): Promise<unknown> {
+// Exhibit schemas allow 24,000 original/transcript characters, 12,000 repeated
+// source characters, 3,200 source-ID characters and 1,780 display characters.
+// Even 12-byte JSON-escaped surrogate pairs fit with keys, UUIDs and syntax.
+export const exhibitJsonBodyLimit = 512 * 1024;
+
+export async function readJsonRequest(request: Request, maxBytes = 65_536): Promise<unknown> {
   if (!request.headers.get('content-type')?.toLowerCase().startsWith('application/json')) {
     throw new HttpError({ code: 'UNSUPPORTED_MEDIA_TYPE', message: '请使用 JSON 请求。' });
   }
@@ -39,7 +44,7 @@ export async function readJsonRequest(request: Request): Promise<unknown> {
       const { value, done } = await reader.read();
       if (done) break;
       size += value.byteLength;
-      if (size > 65536) {
+      if (size > maxBytes) {
         await reader.cancel();
         throw new HttpError({ code: 'PAYLOAD_TOO_LARGE', message: '请求内容过大。' });
       }

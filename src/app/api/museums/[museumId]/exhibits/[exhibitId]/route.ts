@@ -1,7 +1,7 @@
 import { updateExhibitInputSchema, versionInputSchema } from '@/contracts';
 import { requireMember, requireSameOrigin } from '@/server/auth/session';
 import { removeExhibit, updateExhibit } from '@/server/core';
-import { dataResponse, errorResponse, readJsonRequest } from '@/server/http';
+import { dataResponse, errorResponse, exhibitJsonBodyLimit, readJsonRequest } from '@/server/http';
 import { privateId, type ExhibitContext } from '../../../_params';
 
 export async function PATCH(request: Request, { params }: ExhibitContext) {
@@ -11,7 +11,7 @@ export async function PATCH(request: Request, { params }: ExhibitContext) {
     const ids = await params;
     const museumId = privateId(ids.museumId);
     const exhibitId = privateId(ids.exhibitId);
-    const input = updateExhibitInputSchema.parse(await readJsonRequest(request));
+    const input = updateExhibitInputSchema.parse(await readJsonRequest(request, exhibitJsonBodyLimit));
     return dataResponse(await updateExhibit(member.id, museumId, exhibitId, input));
   } catch (error) { return errorResponse(error); }
 }

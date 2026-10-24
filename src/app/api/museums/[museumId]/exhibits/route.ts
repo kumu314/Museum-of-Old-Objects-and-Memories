@@ -1,7 +1,7 @@
 import { createExhibitInputSchema } from '@/contracts';
 import { requireMember, requireSameOrigin } from '@/server/auth/session';
 import { createExhibit } from '@/server/core';
-import { dataResponse, errorResponse, readJsonRequest } from '@/server/http';
+import { dataResponse, errorResponse, exhibitJsonBodyLimit, readJsonRequest } from '@/server/http';
 import { privateId, type MuseumContext } from '../../_params';
 
 export async function POST(request: Request, { params }: MuseumContext) {
@@ -9,7 +9,7 @@ export async function POST(request: Request, { params }: MuseumContext) {
     requireSameOrigin(request);
     const member = await requireMember();
     const museumId = privateId((await params).museumId);
-    const input = createExhibitInputSchema.parse(await readJsonRequest(request));
+    const input = createExhibitInputSchema.parse(await readJsonRequest(request, exhibitJsonBodyLimit));
     return dataResponse(await createExhibit(member.id, museumId, input), 201);
   } catch (error) { return errorResponse(error); }
 }
