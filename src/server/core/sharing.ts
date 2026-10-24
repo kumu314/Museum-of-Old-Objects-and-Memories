@@ -13,6 +13,19 @@ function shareNotFound(): never {
   throw new HttpError({ code: 'SHARE_NOT_FOUND', message: shareNotFoundMessage });
 }
 
+/** The owner can view the sealed publication while keeping the museum private. */
+export function getOwnPublishedMuseum(actorId: string, client?: PoolClient) {
+  return inTransaction(async (db) => {
+    await requireActor(db, actorId);
+    const result = await db.query<{ data: unknown }>(`SELECT p.public_data AS data
+      FROM museums m JOIN published_snapshots p ON p.id=m.current_snapshot_id AND p.museum_id=m.id AND p.sealed
+      WHERE m.created_by=$1 AND m.deleted_at IS NULL`, [actorId]);
+    if (result.rows.length > 1) throw new Error('One active museum per account migration is required.');
+    const row = result.rows[0];
+    return row ? publicMuseumSchema.parse(row.data) : null;
+  }, client);
+}
+
 export function publishMuseum(actorId: string, museumId: string, expectedVersion: number, client?: PoolClient) {
   return inTransaction(async (db) => {
     await requireActor(db, actorId);

@@ -39,6 +39,41 @@ async function withPage(work) {
   finally { await page.close(); }
 }
 
+for (const refreshFails of [false, true]) {
+  test(`私密发布后提供展馆入口且不自动开启分享：${refreshFails ? '状态刷新失败仍保留成功入口' : '重新读取后保留入口'}`, { timeout: 30_000 }, async () => {
+    await withPage(async (page) => {
+      let published = false;
+      let shareWrites = 0;
+      const ready = { ...museum, exhibits: [{ ...original, confirmedVersion: 1, confirmedAt: original.updatedAt, confirmationNote: '已核对合成资料' }] };
+      await page.route('**/api/**', async (route) => {
+        const url = new URL(route.request().url());
+        if (url.pathname.endsWith('/share')) { shareWrites++; return route.abort(); }
+        if (url.pathname.endsWith('/publish')) {
+          published = true;
+          return route.fulfill({ json: { data: { museumId: museum.id, snapshotId: id(80), version: 2, token: null } } });
+        }
+        if (url.pathname === `/api/museums/${museum.id}`) {
+          if (published && refreshFails) return route.fulfill({ status: 500, json: { error: { code: 'INTERNAL_ERROR', message: '合成刷新失败', requestId: id(99) } } });
+          return route.fulfill({ json: { data: { ...ready, publishedVersion: published ? 2 : null } } });
+        }
+        if (url.pathname.endsWith('/latest')) return route.fulfill({ json: { data: null } });
+        return route.abort();
+      });
+      await page.goto(origin);
+      await page.getByRole('button', { name: '发布展馆', exact: true }).click();
+      assert.equal(await page.getByRole('link', { name: '进入展馆 →', exact: true }).count(), 0);
+      await page.getByRole('button', { name: '发布整座展馆', exact: true }).click();
+      const entry = page.getByRole('link', { name: '进入展馆 →', exact: true });
+      await entry.waitFor();
+      await page.waitForFunction(() => document.querySelector('a[href="/museum/published"]')?.getAttribute('aria-disabled') === 'false');
+      assert.equal(await entry.getAttribute('href'), '/museum/published');
+      assert.equal(shareWrites, 0);
+      await page.getByText('目前仅自己可见，邀请他人参观需另行开启持链接访问。', { exact: false }).first().waitFor();
+      if (refreshFails) await page.getByText('操作已完成，但展馆状态尚未刷新。', { exact: false }).first().waitFor();
+    });
+  });
+}
+
 for (const dirtyDuringRecovery of [false, true]) {
   test(`真实工作台恢复已完成模型：${dirtyDuringRecovery ? '保留等待期间输入' : '只读取一次恢复快照且不重复采纳'}`, { timeout: 30_000 }, async () => {
     await withPage(async (page) => {

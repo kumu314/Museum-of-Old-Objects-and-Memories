@@ -228,6 +228,11 @@
 }
 
 .workbench-publish-heading, .workbench-publish-action { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+.workbench-published-entry { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 24px; padding-bottom: 24px; border-bottom: 1px solid var(--wb-line); }
+.workbench-published-entry h3 { margin: 0 0 8px; }
+.workbench-published-entry p { margin: 0; font-size: 13px; color: var(--wb-muted); }
+.workbench-published-entry .wb-primary { margin-top: 0; text-decoration: none; white-space: nowrap; }
+.workbench-published-entry .wb-primary[aria-disabled="true"] { opacity: .55; cursor: wait; }
 .workbench-publish-heading h2 { font-size: 23px; }
 .workbench-publish-action { margin: 18px 0 12px; }
 .workbench-publish-action p { font-size: 13px; color: var(--wb-ink); }

@@ -149,7 +149,8 @@ function MuseumEditor({ initial }: { initial: MuseumDraft }) {
     setAction('发布'); setError(null); setMessage(null);
     try {
       const result = await apiRequest(`${path}/publish`, publishResultSchema, jsonRequest('POST', { expectedVersion: museum.version }));
-      setMessage(`已生成发布快照 v${result.version}。${museum.shareEnabled ? '已有参观入口现在展示此快照。' : '展馆仍为私密，可另行开启持链接访问。'}`);
+      setMuseum((current) => ({ ...current, publishedVersion: result.version }));
+      setMessage(`发布成功，可以进入展馆查看 v${result.version}。${museum.shareEnabled ? '已有参观链接已同步更新。' : '目前仅自己可见，邀请他人参观需另行开启持链接访问。'}`);
       await refreshState();
     } catch (failure) { fail(failure); }
     finally { setAction(null); }
@@ -188,10 +189,16 @@ function MuseumEditor({ initial }: { initial: MuseumDraft }) {
     : pendingExhibits.length > 0 ? `还有 ${pendingExhibits.length} 件旧物待确认，请逐件核对当前版本。`
     : '全部旧物已确认，可以发布当前展馆。';
   const publishing = <section className="workbench-publishing" aria-label="展馆发布与分享">
+    {museum.publishedVersion !== null && <div className="workbench-published-entry">
+      <div><h3>已发布 v{museum.publishedVersion}</h3><p>查看已发布的展柜、照片和展签，继续编辑可随时返回工作台。</p></div>
+      <Link className="wb-primary" href="/museum/published" aria-disabled={busy} onClick={(event) => {
+        if (busy || (anyDirty && !window.confirm('本页有未保存输入，仍要进入已发布展馆吗？'))) event.preventDefault();
+      }}>进入展馆 →</Link>
+    </div>}
     <div className="workbench-publish-heading"><span className="wb-badge">全馆已确认 {museum.exhibits.length - pendingExhibits.length} / {museum.exhibits.length} 件</span></div>
     <div className="workbench-publish-action"><p id="workbench-publish-reason" role="status">{publishReason}</p><button type="button" className="wb-primary" aria-describedby="workbench-publish-reason" disabled={publishDisabled} onClick={publish}>{action === '发布' ? '正在发布…' : '发布整座展馆'}</button></div>
     {(pendingExhibits.length > 0 || missingPhotos.length > 0) && <ul className="workbench-pending-list">{museum.exhibits.filter((item) => item.confirmedVersion !== item.version || missingDisplayPhoto(item)).map((item) => <li key={item.id}><button type="button" className="wb-secondary" disabled={busy || refreshRequired} onClick={() => reviewSlot(item)}>{missingDisplayPhoto(item) ? '待补图片' : '待确认'} · {cabinetPosition(item.slotIndex)} {item.name} →</button></li>)}</ul>}
-    <p className="wb-hint">发布后，持有效链接并登录的访客可查看已确认的旧物、照片与原声。</p>
+    <p className="wb-hint">开启持链接访问后，持有效链接并登录的访客可参观已发布的旧物、照片与原声。</p>
     <p className="wb-hint">发布整个展馆的已确认版本；原始讲述、AI 草稿及确认备注不公开。后续编辑不会改变本次快照。</p>
     {shareUrl && museum.shareEnabled && <div className="workbench-share-link"><Field label="当前参观链接"><input readOnly value={shareUrl} onFocus={(event) => event.target.select()} /></Field><div className="wb-actions"><button type="button" className="wb-secondary" onClick={copyShare}>复制链接</button><a className="wb-text-link" href={shareUrl} target="_blank" rel="noreferrer">打开参观页 ↗</a></div></div>}
     {museum.shareEnabled && !shareUrl && <p className="wb-hint">分享已启用。已有链接可继续使用；如未保留，可更换链接取得新的参观地址。</p>}
@@ -200,7 +207,9 @@ function MuseumEditor({ initial }: { initial: MuseumDraft }) {
 
   function toolbar(controls: ReactNode) {
     return <><header className="workbench-brandbar"><div className="workbench-brand"><Brand /><button type="button" className="workbench-museum-trigger" aria-haspopup="dialog" onClick={() => setPanel('museum')} title="编辑展馆名称与简介">{museum.title}{metadataDirty ? ' *' : ''}<span aria-hidden="true">⌄</span></button></div>
-      <div className="workbench-brand-actions">{controls}<button type="button" className="wb-secondary" aria-haspopup="dialog" onClick={() => setPanel('publish')}>发布展馆</button></div></header>
+      <div className="workbench-brand-actions">{controls}<Link className="wb-text-link" href="/memoir" title="合成资料在线演示，限已登记账号" onClick={(event) => {
+        if (busy || (anyDirty && !window.confirm('本页有未保存输入，仍要进入个人自传吗？'))) event.preventDefault();
+      }}>个人自传</Link><button type="button" className="wb-secondary" aria-haspopup="dialog" onClick={() => setPanel('publish')}>发布展馆</button></div></header>
       <Notice error={error} message={message} />
       {refreshRequired && <p role="alert" className="wb-hint">请先重新读取并核对展馆状态。已成功的写入不会自动重试。</p>}
     </>;
