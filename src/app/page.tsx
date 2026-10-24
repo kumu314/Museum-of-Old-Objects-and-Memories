@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { HomeCabinetStage } from '../features/cabinet/home-stage';
-import { AngleViewer } from '../features/studio/angle-viewer';
+import { CameraStage } from '../features/cabinet/camera-stage';
 
 const HERO_BG = 'https://images.unsplash.com/photo-1507842217343-583bb7270b66?auto=format&fit=crop&w=1800&q=60';
 const CARD_CAMERA = 'https://images.unsplash.com/photo-1510127034890-ba27508e9f1c?auto=format&fit=crop&w=1100&q=70';
@@ -144,7 +144,7 @@ export default function Home() {
           </div>
 
           <div>
-            <AngleViewer />
+            <CameraStage />
           </div>
         </div>
       </section>

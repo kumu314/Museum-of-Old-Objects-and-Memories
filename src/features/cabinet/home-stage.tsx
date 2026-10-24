@@ -41,8 +41,11 @@ export function HomeCabinetStage() {
   const loading = surface === 'loading' || Object.values(assets).some((status) => status === 'loading');
   const anyFailed = Object.values(assets).some((status) => status === 'failed');
 
-  return <div className="relative">
-    <canvas ref={canvasRef} className="block w-full rounded-xl" style={{ aspectRatio: '1.06 / 1' }} aria-label="六格木柜三维展柜：陈列相机、磁带、拍立得与信封" />
+  return <div className="relative" style={{
+    maskImage: 'radial-gradient(122% 116% at 50% 46%, black 58%, transparent 98%)',
+    WebkitMaskImage: 'radial-gradient(122% 116% at 50% 46%, black 58%, transparent 98%)',
+  }}>
+    <canvas ref={canvasRef} className="block w-full" style={{ aspectRatio: '1.06 / 1' }} aria-label="六格木柜三维展柜：陈列相机、磁带、拍立得与信封" />
     {loading && !unavailable && <p role="status" className="absolute inset-x-0 bottom-4 text-center text-sm text-[#B7A994]">正在布置展柜…</p>}
     {unavailable && <div className="absolute inset-0 grid place-items-center rounded-xl border border-[#3A2D20] bg-[#19140F]">
       <div className="max-w-sm px-8 text-center">
