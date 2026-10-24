@@ -102,7 +102,7 @@ test('从主线 0007 升级保留有效旧链接与私密状态；访问字段�
     await db.query('INSERT INTO published_snapshots(id,museum_id,museum_version,public_data,published_by,sealed) VALUES($1,$2,1,$3,$4,true)', [snapshot, museum, JSON.stringify(data), actor]);
     const token = randomBytes(32).toString('base64url');
     const hash = createHash('sha256').update(token).digest('hex');
-    await db.query('UPDATE museums SET current_snapshot_id=$1,share_enabled=true,share_token_hash=$2 WHERE id=$3', [snapshot, hash, museum]);
+    await db.query('UPDATE museums SET current_snapshot_id=$1,share_enabled=true,discovery_listed=true,share_token_hash=$2 WHERE id=$3', [snapshot, hash, museum]);
     // 应用方向一访问迁移：旧有效链接转为 link_only，私密馆保持 private。
     const upgrade = migrations[accessIndex];
     assert.ok(upgrade);
@@ -110,6 +110,14 @@ test('从主线 0007 升级保留有效旧链接与私密状态；访问字段�
     assert.deepEqual(await readShare(actor, token, db), data);
     const saved = await getMuseum(actor, museum, db);
     assert.equal(saved.accessMode, 'link_only'); assert.equal(saved.version, 1);
+    assert.equal(saved.discoveryListed, true);
+    assert.equal((await readLeaderboard(db)).entries.some((entry) => entry.museumId === museum), false);
+    const edited = await updateMuseum(actor, museum, { title: '旧馆新标题', description: '', expectedVersion: saved.version }, db);
+    assert.equal(edited.discoveryListed, true);
+    const revoked = await updateMuseum(actor, museum, { title: edited.title, description: '', discoveryListed: false, expectedVersion: edited.version }, db);
+    assert.equal(revoked.discoveryListed, false);
+    await assert.rejects(updateMuseum(actor, museum, { title: edited.title, description: '', discoveryListed: true, expectedVersion: revoked.version }, db), hasCode('VALIDATION_ERROR'));
+    assert.deepEqual(await readShare(actor, token, db), data);
     assert.equal((await db.query("SELECT id FROM museums WHERE access_mode='discoverable'")).rowCount, 0);
     assert.equal((await db.query('SELECT share_token_hash FROM museums WHERE id=$1', [museum])).rows[0]?.share_token_hash, hash);
     await db.query('SAVEPOINT legacy_writer');
@@ -118,7 +126,7 @@ test('从主线 0007 升级保留有效旧链接与私密状态；访问字段�
     await db.query('SAVEPOINT bad_private');
     await assert.rejects(db.query("UPDATE museums SET access_mode='private' WHERE id=$1", [museum]), { code: '23514' });
     await db.query('ROLLBACK TO SAVEPOINT bad_private');
-    await stopSharing(actor, museum, saved.version, db);
+    await stopSharing(actor, museum, revoked.version, db);
     await assert.rejects(readShare(actor, token, db), hasCode('SHARE_NOT_FOUND'));
   });
 });
@@ -128,18 +136,18 @@ test('退出公开发现即撤销收录同意：榜单地图不再展示，参�
     const museum = await ready(db, actor);
     await publishMuseum(actor, museum.id, museum.version, db);
     const { token } = await rotateShareToken(actor, museum.id, museum.version, db);
-    // 收录前提：登记的演示账号 + 已填公开昵称；标注城市并明确同意收录后开启公开发现。
+    // 收录前提：登记的演示账号 + 已填公开昵称；先开启公开发现，再标注城市并明确同意收录。
     await db.query('INSERT INTO direction1_demo_accounts(user_id) VALUES($1)', [actor]);
     await updatePublicProfile(actor, { operationId: randomUUID(), expectedVersion: 1, nickname: '演示收录者', expectMissing: true }, db);
     const linked = await getMuseum(actor, museum.id, db);
-    await updateMuseum(actor, museum.id, { title: 'DEMO 私密发布', description: '合成资料', regionCity: '洛阳', discoveryListed: true, expectedVersion: linked.version }, db);
-    const discoverable = await updateMuseumAccess(actor, museum.id, { operationId: randomUUID(), expectedVersion: linked.version + 1, accessMode: 'discoverable' }, db);
+    const discoverable = await updateMuseumAccess(actor, museum.id, { operationId: randomUUID(), expectedVersion: linked.version, accessMode: 'discoverable' }, db);
+    const listed = await updateMuseum(actor, museum.id, { title: 'DEMO 私密发布', description: '合成资料', regionCity: '洛阳', discoveryListed: true, expectedVersion: discoverable.version }, db);
     assert.equal(discoverable.accessMode, 'discoverable');
     assert.equal((await db.query('SELECT discovery_listed FROM museums WHERE id=$1', [museum.id])).rows[0]?.discovery_listed, true);
     assert.ok((await readLeaderboard(db)).entries.some((entry) => entry.museumId === museum.id));
 
     // 退出公开发现（转持链接）：收录同意必须一并撤销，否则退出后仍被榜单公示。
-    await updateMuseumAccess(actor, museum.id, { operationId: randomUUID(), expectedVersion: discoverable.version, accessMode: 'link_only' }, db);
+    await updateMuseumAccess(actor, museum.id, { operationId: randomUUID(), expectedVersion: listed.version, accessMode: 'link_only' }, db);
     const after = await db.query('SELECT discovery_listed,access_mode FROM museums WHERE id=$1', [museum.id]);
     assert.equal(after.rows[0]?.discovery_listed, false);
     assert.equal(after.rows[0]?.access_mode, 'link_only');
@@ -195,5 +203,20 @@ test('昵称编辑核对版本：过期 expectedVersion 返回 409，不静默�
     const final = await getPublicProfile(actor, db);
     assert.ok(final);
     assert.equal(final.nickname, '核对后的昵称');
+  });
+});
+
+test('普通账号不能新增无效收录或绕过演示权限，失败不改变资料', async () => {
+  await fixture(async (db, actor) => {
+    const museum = await ready(db, actor);
+    await assert.rejects(updateMuseum(actor, museum.id, { title: '不应保存', description: '', discoveryListed: true, expectedVersion: museum.version }, db), hasCode('VALIDATION_ERROR'));
+    assert.equal((await getMuseum(actor, museum.id, db)).title, museum.title);
+    await publishMuseum(actor, museum.id, museum.version, db);
+    const { token } = await rotateShareToken(actor, museum.id, museum.version, db);
+    const linked = await getMuseum(actor, museum.id, db);
+    await assert.rejects(updateMuseum(actor, museum.id, { title: '不应保存', description: '', discoveryListed: true, expectedVersion: linked.version }, db), hasCode('VALIDATION_ERROR'));
+    await assert.rejects(updateMuseumAccess(actor, museum.id, { operationId: randomUUID(), expectedVersion: linked.version, accessMode: 'discoverable' }, db), hasCode('DEMO_ONLY'));
+    assert.equal((await getMuseum(actor, museum.id, db)).version, linked.version);
+    assert.equal((await readShare(actor, token, db)).id, museum.id);
   });
 });

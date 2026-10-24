@@ -222,8 +222,10 @@ function MuseumEditor({ initial }: { initial: MuseumDraft }) {
             {henanCities.map((city) => <option key={city} value={city}>{city}</option>)}
           </select>
         </Field>
-        <label className="workbench-discovery-consent"><input type="checkbox" checked={discoveryListed} onChange={(event) => setDiscoveryListed(event.target.checked)} disabled={busy || refreshRequired} />我同意将已发布展馆的名称、所选城市与累计浏览次数收录到记忆地图和榜单，供所有登录用户查看。</label>
-        <p className="wb-hint">默认不收录。取消勾选并保存后退出地图和榜单，不会关闭现有参观链接。</p>
+        <label className="workbench-discovery-consent"><input type="checkbox" checked={discoveryListed} onChange={(event) => setDiscoveryListed(event.target.checked)} disabled={busy || refreshRequired || (museum.accessMode !== 'discoverable' && !museum.discoveryListed)} />我同意将已发布展馆的名称、所选城市与累计浏览次数收录到记忆地图和榜单，供所有登录用户查看。</label>
+        <p className="wb-hint">{museum.accessMode === 'discoverable'
+          ? '默认不收录。取消勾选并保存后退出地图和榜单，不会关闭现有参观链接。'
+          : '本馆未开启公开发现，不会进入地图和榜单。公开发现目前仅向登记的演示账号开放；已有收录标记可取消并保存，参观链接不受影响。'}</p>
         <Notice error={error} message={message} />
         <div className="wb-row"><span className="wb-hint" role="status">{action === '保存展馆' ? '正在保存…' : metadataDirty ? '有未保存修改' : '已保存'} · 再次发布后更新分享页</span><button className="wb-primary" disabled={busy || !metadataDirty || refreshRequired}>保存展馆资料</button></div>
       </form>

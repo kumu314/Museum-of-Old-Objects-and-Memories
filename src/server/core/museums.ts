@@ -85,6 +85,9 @@ export function updateMuseum(actorId: string, id: string, input: UpdateMuseumInp
     // 一次保存就会把馆主选好的城市悄悄抹掉。
     const regionCity = input.regionCity === undefined ? current.regionCity : input.regionCity;
     const discoveryListed = input.discoveryListed ?? current.discoveryListed;
+    if (discoveryListed && !current.discoveryListed && current.accessMode !== 'discoverable') {
+      invalid('请先开启公开发现，再同意收录到地图和榜单。公开发现目前仅向登记的演示账号开放。');
+    }
     await db.query('UPDATE museums SET title=$1,description=$2,region_city=$3,discovery_listed=$4,version=version+1,updated_at=now() WHERE id=$5',
       [input.title, input.description, regionCity, discoveryListed, id]);
     return museumDraft(db, actorId, id);

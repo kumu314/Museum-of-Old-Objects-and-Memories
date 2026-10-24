@@ -73,8 +73,8 @@ async function publishedMuseum(db: PoolClient, ownerId: string, title: string, r
   const museum = await createMuseum(ownerId, { title, description: '' }, db);
   assert.equal(museum.discoveryListed, false);
   let version = museum.version;
-  if (regionCity !== null || discoveryListed) {
-    version = (await updateMuseum(ownerId, museum.id, { title, description: '', regionCity, discoveryListed, expectedVersion: version }, db)).version;
+  if (regionCity !== null) {
+    version = (await updateMuseum(ownerId, museum.id, { title, description: '', regionCity, expectedVersion: version }, db)).version;
   }
   const image = randomUUID();
   await db.query(`INSERT INTO assets(id,museum_id,original_name,kind,mime,byte_size,storage_key,width,height,sha256,created_by)
@@ -91,6 +91,7 @@ async function publishedMuseum(db: PoolClient, ownerId: string, title: string, r
   const linked = (await getMuseum(ownerId, museum.id, db)).version;
   const discoverable = await updateMuseumAccess(ownerId, museum.id, { operationId: randomUUID(), expectedVersion: linked, accessMode: 'discoverable' }, db);
   assert.equal(discoverable.accessMode, 'discoverable');
+  if (discoveryListed) await updateMuseum(ownerId, museum.id, { title, description: '', discoveryListed: true, expectedVersion: discoverable.version }, db);
   return { museumId: museum.id, token: link.token };
 }
 
@@ -121,13 +122,14 @@ test('资格判断统一要求 discoverable：持链接馆重新勾选收录也�
     const visitor = await account(db, 'link-visitor');
     const museum = await publishedMuseum(db, owner.id, '持链接收录测试馆', '洛阳');
     assert.ok((await readLeaderboard(db)).entries.some((entry) => entry.museumId === museum.museumId));
-    // 退出公开发现转为持链接，再在工作台重新勾选收录：标记可以写，但资格口径统一后不得进榜。
+    // 退出公开发现转为持链接，再在工作台重新勾选收录：服务端拒绝无效收录，不改变原有资料。
     const current = (await getMuseum(owner.id, museum.museumId, db)).version;
     await updateMuseumAccess(owner.id, museum.museumId, { operationId: randomUUID(), expectedVersion: current, accessMode: 'link_only' }, db);
     const after = (await getMuseum(owner.id, museum.museumId, db)).version;
-    await updateMuseum(owner.id, museum.museumId, { title: '持链接收录测试馆', description: '', regionCity: '洛阳', discoveryListed: true, expectedVersion: after }, db);
+    await assert.rejects(updateMuseum(owner.id, museum.museumId, { title: '持链接收录测试馆', description: '', regionCity: '洛阳', discoveryListed: true, expectedVersion: after }, db),
+      (error: unknown) => error instanceof HttpError && error.failure.code === 'VALIDATION_ERROR');
     const flags = await db.query('SELECT discovery_listed,access_mode FROM museums WHERE id=$1', [museum.museumId]);
-    assert.equal(flags.rows[0]?.discovery_listed, true);
+    assert.equal(flags.rows[0]?.discovery_listed, false);
     assert.equal(flags.rows[0]?.access_mode, 'link_only');
     await recordMuseumView(visitor.id, museum.token, db);
     assert.equal(await viewCountOf(db, museum.museumId), undefined);
