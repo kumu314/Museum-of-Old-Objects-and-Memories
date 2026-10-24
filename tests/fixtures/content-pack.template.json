@@ -1,12 +1,14 @@
 {
   "_fixture": true,
   "_note": "结构模板，所有值都是占位符，不是真实素材。复制后逐项填，填完删掉 _fixture 与 _note。字段定义见 docs/12-内容包模板.md。",
+  "_contractNote": "与 src/contracts/ 的对应关系见 docs/12 第 5 节：originalNarrative→rawStory，transcript→transcript，currentLabel→caption（≤120 字），sourceSegments[].source 取值 rawStory/transcript。",
   "id": "EX-__",
   "name": "",
   "era": "",
   "category": "",
   "facts": {
     "originalNarrative": "",
+    "transcript": null,
     "narrativeSource": {
       "who": "",
       "when": "",
@@ -15,6 +17,7 @@
     "sourceSegments": [
       {
         "id": "S1",
+        "source": "",
         "text": ""
       }
     ],

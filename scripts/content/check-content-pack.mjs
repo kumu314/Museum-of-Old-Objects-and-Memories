@@ -78,6 +78,15 @@ function checkPack(pack) {
       W('facts.originalNarrative 短于 10 字，确认是否真的只有这些');
     }
 
+    // 录音整理文本（对应工程契约 transcript）。与原始讲述来源不同，不能混为一栏。
+    if (facts.transcript != null) {
+      if (!isNonEmptyString(facts.transcript)) {
+        E('facts.transcript 若填就必须是非空字符串（没有录音就整项设 null）');
+      } else if (isNonEmptyString(nar) && facts.transcript.trim() === nar.trim()) {
+        E('facts.transcript 与 originalNarrative 完全相同——录音转写与物主原话是两种来源，不能混为一栏');
+      }
+    }
+
     const src = facts.narrativeSource;
     if (src === null || typeof src !== 'object' || isArray(src)) {
       E('facts.narrativeSource 必须是对象（谁 / 何时 / 渠道）');
@@ -97,6 +106,10 @@ function checkPack(pack) {
         else if (seen.has(s.id)) E(`facts.sourceSegments[${i}].id 重复：${s.id}`);
         else seen.add(s.id);
         if (!isNonEmptyString(s?.text)) E(`facts.sourceSegments[${i}].text 不能为空`);
+        // 与工程契约对齐：每条片段要标明出自原始讲述还是录音转写
+        if (s?.source != null && !['rawStory', 'transcript'].includes(s.source)) {
+          E(`facts.sourceSegments[${i}].source = ${JSON.stringify(s.source)} 不在允许值内（rawStory / transcript）`);
+        }
       });
     }
 
@@ -125,6 +138,9 @@ function checkPack(pack) {
   } else {
     if (!isNonEmptyString(cur.currentLabel)) {
       E('curation.currentLabel 不能为空（待确认的最终展签文本）');
+    } else if (Array.from(cur.currentLabel).length > 120) {
+      // 工程契约 caption 上限 120 字，超了填不进系统
+      E(`curation.currentLabel 有 ${Array.from(cur.currentLabel).length} 字，工程契约 caption 上限 120 字`);
     }
 
     if (cur.aiDraft != null) {
