@@ -1,4 +1,6 @@
+import { PMREMGenerator } from 'three';
 import { mountCabinetStage, type AssetStatus, type StageRenderStats } from '../cabinet-stage';
+import { clearWebglProbe } from '../webgl-capability';
 import { modelManifest } from '../model-manifest';
 import { createInspectionController } from '../../viewer/inspection-controller';
 import type { GlbModelSource } from '../glb-model';
@@ -57,12 +59,29 @@ async function until(check: () => boolean, message: string) {
 }
 const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 function source(key: Key, slow = false): GlbModelSource { const url = new URL(catalog[key], document.baseURI); if (slow) url.searchParams.set('qaSlow', '1'); return { assetId: `qa-${key}`, version: String(++revision), url: url.href }; }
-function mount(key: Key = 'textured', blockWebgl = false) {
+// 模拟无 GPU 预览机的真实形态：getContext 返回句柄，但 getContextAttributes() 为 null。
+// 直接返回 null 会被预检的 no-context 分支挡下，掩盖 attributes 缺失这条更常见的路径。
+function blockWebglContexts() {
+  clearWebglProbe();
+  const dead = { isContextLost: () => false, getContextAttributes: () => null, getExtension: () => null };
+  const native = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, 'getContext');
+  const nativeGetContext = HTMLCanvasElement.prototype.getContext;
+  Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', { configurable: true, writable: true,
+    value(this: HTMLCanvasElement, kind: string, options?: unknown) {
+      return kind === 'webgl2' ? dead : nativeGetContext.call(this, kind, options);
+    },
+  });
+  return () => {
+    if (native === undefined) delete (HTMLCanvasElement.prototype as { getContext?: unknown }).getContext;
+    else Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', native);
+  };
+}
+function mount(key: Key = 'textured', blockWebgl = false, reuseCanvas = false) {
   assert(stage === null, '旧查看器尚未卸载');
   currentStatus = 'loading'; woodStatus = 'loading'; stats = null; lastError = '';
-  canvas = document.createElement('canvas'); canvas.tabIndex = 0; canvas.setAttribute('aria-label', '检查台三维画布'); area.replaceChildren(canvas);
-  const currentCanvas = canvas; const nativeContext = canvas.getContext;
-  if (blockWebgl) canvas.getContext = () => null;
+  if (reuseCanvas) assert(canvas instanceof HTMLCanvasElement, '没有可复用的画布');
+  else { canvas = document.createElement('canvas'); canvas.tabIndex = 0; canvas.setAttribute('aria-label', '检查台三维画布'); area.replaceChildren(canvas); }
+  const restore = blockWebgl ? blockWebglContexts() : null;
   controller = createInspectionController([id]);
   stage = mountCabinetStage(canvas, [{ id, slot: 1, plaqueText: 'QA 测试资产', modelKey: 'glb', source: source(key) }], controller, {
     inspectionInset: () => 0,
@@ -72,10 +91,9 @@ function mount(key: Key = 'textured', blockWebgl = false) {
     onModelStats(_id, value) { currentTriangles = value.triangles; },
     onRenderStats(value) { stats = value; },
   });
-  return () => { currentCanvas.getContext = nativeContext; };
+  return () => { restore?.(); };
 }
-async function settled() { await until(() => currentStatus === 'ready' && woodStatus === 'ready' && stage?.getDiagnostics().pendingFrame === false, '模型与渲染静止'); }
-async function replace(key: Key) { assert(stage, '没有查看器'); stage.setModelSource(id, source(key)); await until(() => currentStatus !== 'loading', `加载 ${key}`); }
+async function settled() { await until(() => currentStatus === 'ready' && woodStatus === 'ready' && stage?.getDiagnostics().pendingFrame === false, '模型与渲染静止'); }async function replace(key: Key) { assert(stage, '没有查看器'); stage.setModelSource(id, source(key)); await until(() => currentStatus !== 'loading', `加载 ${key}`); }
 function sample() { assert(stage && stats, '没有可用渲染记录'); return { ...stage.getDiagnostics(), cpuMs: stats.cpuMs, calls: stats.calls, renderer: stats.renderer }; }
 function record(name: string, result: Record<string, unknown>) { records.push({ name, ...result }); report.textContent = JSON.stringify(records, null, 2); }
 function destroy() { assert(stage, '没有查看器'); const previous = stage; stage.destroy(); stage = null; return previous; }
@@ -160,6 +178,50 @@ async function initialWebgl() {
   record('首次 WebGL 失败与三次重试', { passed: true, listenersBefore, listenersAfterRecovery: listenerCount(), diagnostics: stage.getDiagnostics() });
 }
 
+// StrictMode 双挂载、HMR、重试都会复用同一张画布，卸载时的 forceContextLoss 必须可逆。
+async function remount() {
+  if (stage) destroy();
+  mount(); await settled();
+  for (let cycle = 0; cycle < 3; cycle++) {
+    destroy();
+    mount('textured', false, true);
+    await until(() => stage?.getDiagnostics().surface === 'ready', `第 ${cycle + 1} 次复用画布后没有恢复`);
+  }
+  assert(stage !== null, '复用画布后没有查看器');
+  const diagnostics = stage.getDiagnostics();
+  assert(diagnostics.capability === 'supported', `复用画布后仍是降级态：${diagnostics.capability}`);
+  record('卸载后复用同一张画布', { passed: true, diagnostics });
+}
+
+// 在真实 renderer 创建后注入环境贴图故障，验证自动重试与失败后的手动恢复。
+async function initializationFailure() {
+  const nativeFromScene = PMREMGenerator.prototype.fromScene;
+  let failures = 0;
+  try {
+    if (stage) destroy();
+    PMREMGenerator.prototype.fromScene = function (...args) {
+      failures++;
+      if (failures === 1) throw new Error('QA：首次环境贴图初始化失败');
+      return nativeFromScene.apply(this, args);
+    };
+    mount();
+    await until(() => stage?.getDiagnostics().surface === 'ready', '环境贴图暂时失败后没有自动恢复');
+    await settled();
+    record('初始化中途失败后自动恢复', { passed: true, attempts: failures });
+
+    destroy(); failures = 0;
+    PMREMGenerator.prototype.fromScene = function () { failures++; throw new Error('QA：持续环境贴图初始化失败'); };
+    mount();
+    await until(() => stage?.getDiagnostics().capability === 'canvas-context', '环境贴图持续失败后没有降级');
+    assert(stage !== null && stage.getDiagnostics().surface === 'unavailable' && failures === 2, '初始化重试没有在两次后停止');
+    PMREMGenerator.prototype.fromScene = nativeFromScene;
+    stage.retry();
+    await until(() => stage?.getDiagnostics().surface === 'ready', '环境贴图恢复后手动重试失败');
+    await settled();
+    record('初始化持续失败降级与手动恢复', { passed: true, failures });
+  } finally { PMREMGenerator.prototype.fromScene = nativeFromScene; }
+}
+
 async function touch() {
   assert(stage, '没有查看器'); controller.select(id); await until(() => controller.getSnapshot().phase === 'inspecting', '进入检视');
   const current = stage; current.resetView(); const before = current.getDiagnostics();
@@ -191,14 +253,43 @@ async function touch() {
   mount(); await settled();
 }
 
-const actions = { fixtures, delay: () => delayed(false), unmount: () => delayed(true), switches, mounts, touch, initial: initialWebgl,
-  all: async () => { await fixtures(); await delayed(false); await delayed(true); await switches(); await mounts(); await touch(); await initialWebgl(); } };
-for (const [name, action] of Object.entries(actions)) element(name).addEventListener('click', () => {
+// 检视态必须能自己退出：点画布空白、点画布外、按 Escape 三条路都算「放回去」。
+async function dismiss() {
+  assert(stage, '没有查看器');
+  const enter = async () => { controller.select(id); await until(() => controller.getSnapshot().phase === 'inspecting', '进入检视'); };
+  const leave = async (label: string) => {
+    await until(() => controller.getSnapshot().phase === 'overview', `${label}后没有回到总览`);
+    record(label, { passed: true });
+  };
+  const nativeSet = canvas.setPointerCapture; const nativeRelease = canvas.releasePointerCapture; const nativeHas = canvas.hasPointerCapture;
+  const captures = new Set<number>();
+  canvas.setPointerCapture = (value) => { captures.add(value); }; canvas.releasePointerCapture = (value) => { captures.delete(value); }; canvas.hasPointerCapture = (value) => captures.has(value);
+  try {
+    await enter();
+    // 画布最右边缘：展品都在格位里，这里只可能是柜体或背景。
+    const rect = canvas.getBoundingClientRect(); const x = rect.left + rect.width * 0.97; const y = rect.top + rect.height / 2;
+    const send = (type: string) => canvas.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, pointerId: 7, pointerType: 'mouse', button: 0, clientX: x, clientY: y }));
+    send('pointerdown'); send('pointerup');
+    await leave('点画布空白放回');
+
+    await enter();
+    document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, pointerId: 8, pointerType: 'mouse', button: 0 }));
+    await leave('点画布外放回');
+
+    await enter();
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    await leave('按 Escape 放回');
+  } finally { canvas.setPointerCapture = nativeSet; canvas.releasePointerCapture = nativeRelease; canvas.hasPointerCapture = nativeHas; }
+}
+
+const actions = { fixtures, delay: () => delayed(false), unmount: () => delayed(true), switches, mounts, remount, initializationFailure, touch, dismiss, initial: initialWebgl,
+  all: async () => { await fixtures(); await delayed(false); await delayed(true); await switches(); await mounts(); await remount(); await initializationFailure(); await touch(); await dismiss(); await initialWebgl(); } };
+for (const [name, action] of Object.entries(actions)) { const trigger = document.getElementById(name); if (trigger === null) continue; trigger.addEventListener('click', () => {
   const buttons = document.querySelectorAll('button'); buttons.forEach((button) => { button.disabled = true; }); status.textContent = '检查中…';
   void action().then(() => { status.textContent = '检查通过，详细记录见下方'; }).catch((error: unknown) => {
     status.textContent = `检查失败：${error instanceof Error ? error.message : String(error)}`;
-    record(name, { passed: false, error: error instanceof Error ? error.message : String(error) });
+    record(name, { passed: false, error: error instanceof Error ? error.message : String(error), diagnostics: stage?.getDiagnostics() });
   }).finally(() => { buttons.forEach((button) => { button.disabled = false; }); });
-});
+}); }
 window.addEventListener('pagehide', () => { closed.abort(); if (stage) destroy(); EventTarget.prototype.addEventListener = addListener; EventTarget.prototype.removeEventListener = removeListener; window.ResizeObserver = NativeResizeObserver; });
 mount(); void settled().then(() => { status.textContent = '检查台就绪'; }).catch((error: unknown) => { status.textContent = `检查台初始化失败：${String(error)}`; });

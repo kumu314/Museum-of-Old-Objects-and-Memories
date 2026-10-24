@@ -21,6 +21,7 @@ import { overviewOffset } from './overview-motion.ts';
 import { updateBrassPlaqueText } from './brass-plaque.ts';
 import type { CabinetArrangement } from './cabinet-arrangement.ts';
 import { createFrameClock } from './frame-clock.ts';
+import { probeWebgl2, webglFailure, type WebglFailure } from './webgl-capability.ts';
 
 // Rendering inputs only. The public snapshot remains owned by C's shared schema.
 export type CabinetStageItem = { readonly id: string; readonly slot: number; readonly plaqueText?: string } & (
@@ -46,6 +47,29 @@ interface StageOptions {
 interface DisplayModel {
   item: CabinetStageItem; readonly group: Group; slot: number; status: AssetStatus | 'idle';
   placement: ModelPlacement; placed: ReturnType<typeof createPlacedModel> | null; request: AbortController | null;
+}
+
+const CONTEXT_ATTRIBUTES: WebGLContextAttributes = { antialias: true, alpha: true, powerPreference: 'high-performance' };
+// 画布与 WebGL 上下文是永久绑定的：卸载时 forceContextLoss 之后，同一张画布再 getContext
+// 只会拿回那个已丢失的上下文。StrictMode 双挂载、HMR、重试都会复用同一个 canvas 元素，
+// 所以把恢复句柄按画布存下来，下一次挂载才救得回来。
+const lostControls = new WeakMap<HTMLCanvasElement, WEBGL_lose_context>();
+// forceContextLoss() 让 isContextLost() 立刻变 true，但 webglcontextlost 事件要到下一个任务
+// 才派发；只有事件被取消之后浏览器才允许 restoreContext。所以"这张画布能不能恢复"必须按画布
+// 记录，不能靠调用顺序猜——猜早了就是 CONTEXT_LOST 的 INVALID_OPERATION。
+const restorableCanvases = new WeakSet<HTMLCanvasElement>();
+const pendingReinitialize = new WeakMap<HTMLCanvasElement, () => void>();
+
+function markRestorable(event: Event) {
+  event.preventDefault();
+  const target = event.target;
+  if (!(target instanceof HTMLCanvasElement)) return;
+  target.removeEventListener('webglcontextlost', markRestorable);
+  restorableCanvases.add(target);
+  const resume = pendingReinitialize.get(target);
+  pendingReinitialize.delete(target);
+  // 浏览器在 lost 事件派发结束后才处理 preventDefault 并允许恢复。
+  if (resume !== undefined) window.setTimeout(resume, 0);
 }
 
 export function mountCabinetStage(canvas: HTMLCanvasElement, items: readonly CabinetStageItem[], controller: Controller, options: StageOptions) {
@@ -121,11 +145,15 @@ export function mountCabinetStage(canvas: HTMLCanvasElement, items: readonly Cab
   dropIndicator.visible = false; dropIndicator.renderOrder = 20; scene.add(dropIndicator);
   let renderer: WebGLRenderer | null = null;
   let contextControl: WEBGL_lose_context | null = null;
+  let failureReason: WebglFailure | 'canvas-context' | 'restore-timeout' | null = null;
   let glassEnvironmentTarget: WebGLRenderTarget | null = null;
   let environmentTarget: WebGLRenderTarget | null = null;
   let surfaceStatus: SurfaceStatus = 'unavailable';
   let frame = 0;
   let restoreTimer: number | null = null;
+  let restoreDeadline: number | null = null;
+  // 构造失败后只自动再走一次，避免在真的不可用的环境里空转。
+  let retriedInitialize = false;
   const frameClock = createFrameClock();
   let destroyed = false;
   let zoom = 1;
@@ -155,6 +183,15 @@ export function mountCabinetStage(canvas: HTMLCanvasElement, items: readonly Cab
   }));
 
   function notifySurface(status: SurfaceStatus) { surfaceStatus = status; options.onSurfaceStatus(status); }
+  function failWebgl(reason: WebglFailure | 'canvas-context' | 'restore-timeout') {
+    failureReason = reason;
+    // 只报结论，不把 Three 内部的 Error 对象再抛到控制台：这条路径是预期内的降级。
+    console.warn(`三维展柜不可用（${reason}），已降级为静态界面`);
+    renderer?.dispose(); renderer = null;
+    // 手动重试时重新给一次自动重试的机会。
+    retriedInitialize = false;
+    notifySurface('unavailable');
+  }
   function invalidate() { if (!destroyed && surfaceStatus === 'ready' && frame === 0) frame = requestAnimationFrame(render); }
   function render(time: number) {
     frame = 0;
@@ -279,10 +316,29 @@ export function mountCabinetStage(canvas: HTMLCanvasElement, items: readonly Cab
   function initializeRenderer() {
     if (destroyed) return;
     if (renderer !== null) { contextControl?.restoreContext(); return; }
+    const context = canvas.getContext('webgl2', CONTEXT_ATTRIBUTES);
+    if (context === null) { failWebgl('no-context'); return; }
+    if (context.isContextLost()) {
+      // 上一次挂载丢掉了上下文。画布不能重建上下文，只能请求恢复，等 restored 事件后重走构造。
+      const control = lostControls.get(canvas) ?? context.getExtension('WEBGL_lose_context');
+      if (control === null) { failWebgl('context-lost'); return; }
+      lostControls.set(canvas, control);
+      if (restorableCanvases.has(canvas)) {
+        // lost 事件已派发且被取消，恢复是合法的。
+        control.restoreContext();
+      } else {
+        // forceContextLoss 让 isContextLost() 立刻变 true，但 lost 事件还在队列里；此时调用
+        // restoreContext 会被浏览器直接拒绝（context restoration not allowed）。挂起等事件落定。
+        pendingReinitialize.set(canvas, () => { if (!destroyed && renderer === null) initializeRenderer(); });
+      }
+      armRestoreDeadline();
+      return;
+    }
     try {
-      // Probe first: Three installs canvas listeners before a failed constructor returns.
-      const context = canvas.getContext('webgl2', { antialias: true, alpha: true, powerPreference: 'high-performance' });
-      if (context === null) throw new Error('浏览器无法创建 WebGL2 画布');
+      // 无 GPU 的预览机会返回句柄但 attributes 为 null。这条边界必须自己判掉：
+      // WebGLRenderer 构造器读 attributes.alpha 会抛 TypeError，而不是给出可恢复的失败。
+      const failure = webglFailure(context);
+      if (failure !== null) throw new Error(`WebGL2 上下文不可用：${failure}`);
       renderer = new WebGLRenderer({ canvas, context, antialias: true, alpha: true, powerPreference: 'high-performance' });
       // A lost context may stop returning extensions; retain the recovery handle now.
       contextControl = renderer.getContext().getExtension('WEBGL_lose_context');
@@ -294,12 +350,32 @@ export function mountCabinetStage(canvas: HTMLCanvasElement, items: readonly Cab
       // Glass resamples the opaque scene; retain two physical samples per CSS pixel for lettering.
       renderer.transmissionResolutionScale = 2 / renderer.getPixelRatio();
       rebuildEnvironment();
-    } catch (error: unknown) {
-      console.warn('无法初始化三维展示', error);
+      failureReason = null;
+      retriedInitialize = false;
+    } catch {
+      // 环境贴图初始化也可能在 renderer 已创建后失败；释放部分实例，保证重试能重新构造。
       renderer?.dispose(); renderer = null;
-      notifySurface('unavailable'); return;
+      contextControl = null;
+      // 构造或环境初始化暂时失败时只自动重试一次，持续失败则通知降级。
+      if (!retriedInitialize) {
+        retriedInitialize = true;
+        window.setTimeout(() => { if (!destroyed && renderer === null) initializeRenderer(); }, 50);
+        return;
+      }
+      // 预检只用于归因，不参与放行：虚拟化环境下脱离文档的画布测不准，真实画布的判定为准，
+      // 否则一次假阴性就会把本来能渲染的展柜判死。
+      const probe = probeWebgl2();
+      failWebgl(probe.supported ? 'canvas-context' : probe.reason); return;
     }
     notifySurface('ready'); resize();
+  }
+  // 恢复是异步的；给一个上限，恢复不了就如实降级，别让界面停在既没画面又没提示的状态。
+  function armRestoreDeadline() {
+    if (restoreDeadline !== null) window.clearTimeout(restoreDeadline);
+    restoreDeadline = window.setTimeout(() => {
+      restoreDeadline = null;
+      if (!destroyed && renderer === null) failWebgl('restore-timeout');
+    }, 1500);
   }
   function onContextLost(event: Event) {
     cancelDrag();
@@ -309,11 +385,15 @@ export function mountCabinetStage(canvas: HTMLCanvasElement, items: readonly Cab
     notifySurface('context-lost');
   }
   function onContextRestored() {
+    restorableCanvases.delete(canvas);
     // The next task runs after Three's native listener has rebuilt its GL internals.
     if (restoreTimer !== null) window.clearTimeout(restoreTimer);
     restoreTimer = window.setTimeout(() => {
       restoreTimer = null;
       if (destroyed) return;
+      if (restoreDeadline !== null) { window.clearTimeout(restoreDeadline); restoreDeadline = null; }
+      // 上一次挂载丢失的上下文刚被恢复：此时还没有 renderer，要重走完整构造，而不是只重建环境贴图。
+      if (renderer === null) { initializeRenderer(); return; }
       try {
         if (renderer !== null) contextControl = renderer.getContext().getExtension('WEBGL_lose_context');
         rebuildEnvironment(); notifySurface('ready'); frameClock.reset(); resize();
@@ -438,13 +518,24 @@ export function mountCabinetStage(canvas: HTMLCanvasElement, items: readonly Cab
   function onPointerLeave() { setHoveredSlot(null); }
   function onMotionPreferenceChange() { pointerOffset.set(0, 0); invalidate(); }
   function pick(event: PointerEvent) {
-    if (options.onSlotSelect && controller.getSnapshot().phase !== 'overview') return;
-    if (controller.getSnapshot().phase === 'overview') {
-      const slot = slotAtPointer(event);
-      if (slot !== null && options.onSlotSelect) { options.onSlotSelect(slot); return; }
-      const model = displayModels.find((entry) => entry.slot === slot);
-      if (model !== undefined) { controller.select(model.item.id); return; }
+    const state = controller.getSnapshot();
+    if (state.phase !== 'overview') {
+      // 检视中：点到模型本体就换一件，点到任何别的地方（柜体、背景、空白）就放回去。
+      // 这是「点空白收起」的唯一入口——没有它，收起只能靠 Escape，而 canvas 不保证有焦点。
+      pointRay(event);
+      const focused = raycaster.intersectObjects(displayModels.map((model) => model.group), true)[0];
+      if (focused === undefined) { controller.returnToOverview(); return; }
+      for (const model of displayModels) {
+        let node = focused.object;
+        while (node.parent !== null && node !== model.group) node = node.parent;
+        if (node === model.group) { controller.select(model.item.id); return; }
+      }
+      return;
     }
+    const slot = slotAtPointer(event);
+    if (slot !== null && options.onSlotSelect) { options.onSlotSelect(slot); return; }
+    const model = displayModels.find((entry) => entry.slot === slot);
+    if (model !== undefined) { controller.select(model.item.id); return; }
     pointRay(event);
     const hit = raycaster.intersectObjects(displayModels.map((model) => model.group), true)[0];
     if (hit === undefined) return;
@@ -518,12 +609,31 @@ export function mountCabinetStage(canvas: HTMLCanvasElement, items: readonly Cab
   function resetView() { yaw = 0; pitch = 0; zoom = 1; invalidate(); }
   function onDoubleClick() { if (controller.getSnapshot().phase === 'inspecting') resetView(); }
   function onKeyDown(event: KeyboardEvent) {
-    if (event.key === 'Escape') { if (slotDrag !== null) { event.preventDefault(); event.stopPropagation(); cancelDrag(); } else controller.returnToOverview(); return; }
+    // Escape 交给 window 级监听：canvas 不保证有焦点（首页的 canvas 由 effect 创建、未设 tabIndex），
+    // 绑在 canvas 上等于没有，用户按了也没反应。
     if (controller.getSnapshot().phase !== 'inspecting') return;
     if (event.key === 'ArrowLeft') yaw -= 0.15; else if (event.key === 'ArrowRight') yaw += 0.15;
     else if (event.key === 'ArrowUp') pitch = Math.max(-0.65, pitch - 0.1); else if (event.key === 'ArrowDown') pitch = Math.min(0.65, pitch + 0.1);
     else if (event.key === '+' || event.key === '=') zoom = Math.min(1.45, zoom + 0.1); else if (event.key === '-') zoom = Math.max(0.75, zoom - 0.1); else return;
     event.preventDefault(); invalidate();
+  }
+  function onWindowKeyDown(event: KeyboardEvent) {
+    if (event.key !== 'Escape' || destroyed) return;
+    const target = event.target;
+    if (target instanceof HTMLElement && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return;
+    if (slotDrag !== null) { event.preventDefault(); cancelDrag(); return; }
+    const state = controller.getSnapshot();
+    if (state.phase === 'focusing' || state.phase === 'inspecting') controller.returnToOverview();
+  }
+  function onDocumentPointerDown(event: PointerEvent) {
+    if (destroyed || editing) return;
+    const state = controller.getSnapshot();
+    if (state.phase !== 'focusing' && state.phase !== 'inspecting') return;
+    const target = event.target;
+    if (!(target instanceof Element) || canvas.contains(target)) return;
+    // 交互控件自己决定行为（重试、返回、编辑面板里的按钮），别抢。
+    if (target.closest('button,a,input,select,textarea,summary,[role="button"],[contenteditable="true"]') !== null) return;
+    controller.returnToOverview();
   }
   const unsubscribe = controller.subscribe(() => {
     cancelDrag();
@@ -540,6 +650,7 @@ export function mountCabinetStage(canvas: HTMLCanvasElement, items: readonly Cab
   canvas.addEventListener('wheel', onWheel, { passive: false }); canvas.addEventListener('dblclick', onDoubleClick); canvas.addEventListener('pointerleave', onPointerLeave);
   canvas.addEventListener('lostpointercapture', onPointerCancel);
   window.addEventListener('pointermove', onOverviewPointerMove); window.addEventListener('blur', onViewportLeave); document.addEventListener('mouseleave', onViewportLeave);
+  window.addEventListener('keydown', onWindowKeyDown); document.addEventListener('pointerdown', onDocumentPointerDown);
   reducedMotion.addEventListener('change', onMotionPreferenceChange);
   camera.position.set(0, 0.4, 16); initializeRenderer();
   for (const display of displayModels) void loadModel(display);
@@ -548,6 +659,7 @@ export function mountCabinetStage(canvas: HTMLCanvasElement, items: readonly Cab
     zoomBy,
     getDiagnostics() {
       return { destroyed, surface: surfaceStatus, zoom, yaw, pitch, pendingFrame: frame !== 0,
+        capability: renderer === null ? failureReason : 'supported',
         contextLost: renderer?.getContext().isContextLost() ?? true,
         pendingRequests: displayModels.filter((model) => model.request !== null).length,
         geometries: renderer?.info.memory.geometries ?? 0, textures: renderer?.info.memory.textures ?? 0,
@@ -601,15 +713,26 @@ export function mountCabinetStage(canvas: HTMLCanvasElement, items: readonly Cab
       destroyed = true; cancelDrag(); resourceAbort.abort(); unsubscribe(); observer.disconnect(); if (frame !== 0) cancelAnimationFrame(frame); frame = 0;
       for (const model of displayModels) model.request?.abort();
       if (restoreTimer !== null) window.clearTimeout(restoreTimer);
+      if (restoreDeadline !== null) { window.clearTimeout(restoreDeadline); restoreDeadline = null; }
       canvas.removeEventListener('webglcontextlost', onContextLost); canvas.removeEventListener('webglcontextrestored', onContextRestored);
       canvas.removeEventListener('pointerdown', events.pointerdown); canvas.removeEventListener('pointermove', events.pointermove); canvas.removeEventListener('pointerup', events.pointerup); canvas.removeEventListener('pointercancel', events.pointercancel); canvas.removeEventListener('keydown', events.keydown);
       canvas.removeEventListener('wheel', onWheel); canvas.removeEventListener('dblclick', onDoubleClick); canvas.removeEventListener('pointerleave', onPointerLeave);
       canvas.removeEventListener('lostpointercapture', onPointerCancel);
       window.removeEventListener('pointermove', onOverviewPointerMove); window.removeEventListener('blur', onViewportLeave); document.removeEventListener('mouseleave', onViewportLeave);
+      window.removeEventListener('keydown', onWindowKeyDown); document.removeEventListener('pointerdown', onDocumentPointerDown);
       reducedMotion.removeEventListener('change', onMotionPreferenceChange); canvas.style.cursor = originalCursor;
       for (const surface of hoverSurfaces) if (surface.plaque !== null) surface.plaque.envMap = null;
       disposeResources(scene, ownedTextures); environmentTarget?.dispose(); glassEnvironmentTarget?.dispose(); renderer?.dispose();
       // Three owns additional transmission targets; only context loss releases the whole owner.
+      // 恢复句柄在丢失后才最需要，先存进按画布的映射，再丢上下文。
+      if (renderer !== null) {
+        // lost 事件不是同步派发的，卸载后原有的 onContextLost 已被移除；必须有人
+        // preventDefault，否则这张画布被永久弃用，下一次挂载的 restoreContext 会被直接拒绝。
+        // 恢复资格只属于本轮 lost 事件，不能复用上一轮已取消事件的标记。
+        restorableCanvases.delete(canvas);
+        canvas.addEventListener('webglcontextlost', markRestorable);
+        if (contextControl !== null) lostControls.set(canvas, contextControl);
+      }
       renderer?.forceContextLoss();
     },
   };
