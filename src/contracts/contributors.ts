@@ -127,6 +127,9 @@ export const contributionStateSchema = z.strictObject({
   exhibitId: idSchema,
   invitations: z.array(contributionInvitationSchema),
   contributions: z.array(contributionSchema),
+}).refine((state) => state.invitations.every((invitation) => invitation.exhibitId === state.exhibitId)
+  && state.contributions.every((contribution) => contribution.exhibitId === state.exhibitId), {
+  message: '邀请与讲述必须属于当前展品。',
 });
 export type ContributionState = z.infer<typeof contributionStateSchema>;
 

@@ -21,8 +21,8 @@ import {
  */
 
 /** 该展品上真正拥有署名权的人。只有 accepted 算数，其余状态一律不算。 */
-export function acceptedAuthorIds(invitations: readonly ContributionInvitation[]): Set<string> {
-  return new Set(invitations.filter((invitation) => invitation.status === 'accepted').map((invitation) => invitation.inviteeId));
+export function acceptedAuthorIds(invitations: readonly ContributionInvitation[], exhibitId: string): Set<string> {
+  return new Set(invitations.filter((invitation) => invitation.status === 'accepted' && invitation.exhibitId === exhibitId).map((invitation) => invitation.inviteeId));
 }
 
 /**
@@ -38,7 +38,7 @@ export function exclusionReasonFor(
   if (contribution.withdrawnAt !== null) return 'withdrawn';
   if (!contribution.publishConsent) return 'no-consent';
   // 馆主不需要邀请；共同作者必须有该展品上已接受的邀请，否则不得署名。
-  if (contribution.authorRole === 'coauthor' && !acceptedAuthorIds(invitations).has(contribution.authorId)) {
+  if (contribution.authorRole === 'coauthor' && !acceptedAuthorIds(invitations, contribution.exhibitId).has(contribution.authorId)) {
     return 'invitation-not-accepted';
   }
   return null;
@@ -52,8 +52,8 @@ export function exclusionReasonFor(
  */
 export function toPublicationView(state: ContributionState): PublicationView {
   const ordered = [...state.contributions].sort((left, right) => {
-    if (left.createdAt === right.createdAt) return left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
-    return left.createdAt < right.createdAt ? -1 : 1;
+    const timeDifference = Date.parse(left.createdAt) - Date.parse(right.createdAt);
+    return timeDifference || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0);
   });
   const contributions = [];
   const excluded = [];

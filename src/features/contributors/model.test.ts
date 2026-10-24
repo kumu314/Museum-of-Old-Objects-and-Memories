@@ -127,3 +127,28 @@ test('参与者列表：馆主在前，已接受排在待回应之前', () => {
   assert.ok(statuses.indexOf('accepted') < statuses.indexOf('pending'));
   assert.equal(list.find((participant) => participant.userId === demoWang.id)?.invitationStatus, 'pending');
 });
+
+test('另一件展品已接受的邀请不能授予当前展品署名权', () => {
+  const contribution = demoState.contributions.find((entry) => entry.authorId === demoLi.id);
+  assert.ok(contribution);
+  const invitations = demoState.invitations.map((entry) => ({ ...entry, exhibitId: '6f1b0000-0000-4000-8000-000000000099' }));
+  assert.equal(model.exclusionReasonFor(contribution, invitations), 'invitation-not-accepted');
+});
+
+test('状态契约拒绝混入其他展品的邀请或讲述', () => {
+  const exhibitId = '6f1b0000-0000-4000-8000-000000000099';
+  assert.equal(contributionStateSchema.safeParse({ ...demoState,
+    invitations: demoState.invitations.map((entry) => ({ ...entry, exhibitId })),
+  }).success, false);
+  assert.equal(contributionStateSchema.safeParse({ ...demoState,
+    contributions: demoState.contributions.map((entry) => ({ ...entry, exhibitId })),
+  }).success, false);
+});
+
+test('公开讲述按实际时间排序，不受时区偏移与时间表示影响', () => {
+  const contributions = demoState.contributions.filter((entry) => entry.authorId === demoOwner.id || (entry.authorId === demoLi.id && entry.withdrawnAt === null))
+    .map((entry) => ({ ...entry, createdAt: entry.authorId === demoOwner.id ? '2026-10-01T10:00:00+08:00' : '2026-10-01T03:00:00Z' }));
+  assert.deepEqual(toPublicationView({ ...demoState, contributions }).contributions.map((entry) => entry.authorId), [demoOwner.id, demoLi.id]);
+  const sameInstant = contributions.map((entry) => ({ ...entry, createdAt: entry.authorId === demoOwner.id ? '2026-10-01T10:00:00+08:00' : '2026-10-01T02:00:00Z' }));
+  assert.deepEqual(toPublicationView({ ...demoState, contributions: sameInstant.reverse() }).contributions.map((entry) => entry.authorId), [demoOwner.id, demoLi.id]);
+});
