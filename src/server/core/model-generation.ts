@@ -23,6 +23,18 @@ import { assertVersion, assetRecord, exhibitRecord, invalid, museumRecord, notFo
 
 /** 网络调用在事务外；提交结果未知保留 SUBMITTING，核对上游前不再付费提交。 */
 function selectedProvider(): 'hunyuan-cloud' | 'hunyuan-proxy' {
+  // 显式锁定通道：部署可固定 provider，测试用它隔离本机真实云密钥。
+  const forced = process.env.HUNYUAN_PROVIDER?.trim();
+  if (forced === 'proxy') {
+    readHunyuanProxyConfig();
+    return 'hunyuan-proxy';
+  }
+  if (forced === 'cloud') {
+    if (!readHunyuanCloudConfig()) {
+      throw new HttpError({ code: 'GENERATION_UNAVAILABLE', message: '已指定云 API 通道，但 HUNYUAN_SECRET_ID/KEY/REGION 未配置完整。' });
+    }
+    return 'hunyuan-cloud';
+  }
   if (readHunyuanCloudConfig()) return 'hunyuan-cloud';
   readHunyuanProxyConfig();
   return 'hunyuan-proxy';
