@@ -44,7 +44,10 @@ export function readProviderSettings(path = resolve('.local', 'model-provider.js
   let mtimeMs: number;
   try {
     mtimeMs = statSync(path).mtimeMs;
-  } catch {
+  } catch (error) {
+    if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) {
+      throw new HttpError({ code: 'GENERATION_UNAVAILABLE', message: '无法读取通道配置文件，请检查文件路径与权限。' });
+    }
     settingsCache = { path, mtimeMs: 0, loadedAt: Date.now(), value: null };
     return null;
   }
@@ -78,13 +81,13 @@ function loopbackOnly(url: URL): void {
   }
 }
 
-function assertReplaceableEndpoint(value: string): void {
+function assertReplaceableEndpoint(value: string, nodeEnv: string | undefined): void {
   const url = new URL(value);
   if (!['http:', 'https:'].includes(url.protocol) || url.username !== '' || url.password !== '' ||
     url.search !== '' || url.hash !== '') {
     throw new HttpError({ code: 'GENERATION_UNAVAILABLE', message: 'API 地址无效：必须是不携带凭据与查询串的 HTTP(S) 地址。' });
   }
-  if (url.protocol === 'http:' && !['127.0.0.1', '[::1]', 'localhost'].includes(url.hostname)) {
+  if (url.protocol === 'http:' && (nodeEnv !== 'test' || !['127.0.0.1', '[::1]', 'localhost'].includes(url.hostname))) {
     throw new HttpError({ code: 'GENERATION_UNAVAILABLE', message: 'API 地址必须使用 HTTPS（本机测试地址除外）。' });
   }
 }
@@ -99,6 +102,9 @@ export function readHunyuanCloudConfig(
 ): HunyuanCloudConfiguration | undefined {
   const settings = settingsPath === undefined ? readProviderSettings() : readProviderSettings(settingsPath);
   const insecureResult = environment.HUNYUAN_CLOUD_ALLOW_INSECURE_RESULT === '1';
+  if (insecureResult && environment.NODE_ENV !== 'test') {
+    throw new HttpError({ code: 'GENERATION_UNAVAILABLE', message: '不安全的生成来源开关仅允许测试环境使用。' });
+  }
   if (settings?.cloud !== undefined) {
     const config: Hunyuan3DConfig = {
       secretId: settings.cloud.secretId,
@@ -108,7 +114,7 @@ export function readHunyuanCloudConfig(
     };
     if (settings.cloud.model !== undefined) config.model = settings.cloud.model;
     if (settings.cloud.endpoint !== undefined) {
-      assertReplaceableEndpoint(settings.cloud.endpoint);
+      assertReplaceableEndpoint(settings.cloud.endpoint, environment.NODE_ENV);
       config.endpoint = settings.cloud.endpoint;
     }
     if (insecureResult) config.resultUrlPolicy = loopbackOnly;

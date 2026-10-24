@@ -43,7 +43,7 @@ function selectedProvider(): 'hunyuan-cloud' | 'hunyuan-proxy' {
 
 function proxyConfig(): ReturnType<typeof readHunyuanProxyConfig> {
   const baseUrl = readSettingsProxyBaseUrl();
-  if (baseUrl !== undefined) return { baseUrl };
+  if (baseUrl !== undefined) return readHunyuanProxyConfig({ ...process.env, HUNYUAN_PROXY_BASE_URL: baseUrl });
   return readHunyuanProxyConfig();
 }
 
@@ -59,7 +59,7 @@ function providerForJob(provider: string, pool: Pool, jobId: string): Hunyuan3DC
 
 function proxyClient(pool: Pool, jobId: string): Hunyuan3DClient {
   return createHunyuanWebProxyClient({
-    ...readHunyuanProxyConfig(),
+    ...proxyConfig(),
     // 持久化 claim 在发送纹理请求前完成；多进程与重启后也不会重复提交。
     async claimTextureSubmission(geometryId) {
       const claimed = await pool.query(
@@ -392,12 +392,13 @@ export async function adoptGeneratedModel(
     assertVersion(current.version, expectedVersion);
     const job = await loadJob(db, museumId, exhibitId, jobId);
     if (job.status !== 'DONE' || job.modelAssetId === null) invalid('只能采纳已完成的生成任务。');
+    assertVersion(current.version, job.sourceVersion);
     if (current.modelInput.mode !== 'single' || job.inputAssetId !== current.modelInput.imageAssetId) {
       invalid('当前展品的建模照片已变更，请重新生成后再采纳。');
     }
     await db.query(
       `UPDATE exhibits SET generated_model_asset_id=$2, version=version+1, confirmed_version=NULL,
-         confirmation_note=NULL, confirmed_at=NULL, updated_at=now()
+         confirmation_note=NULL, confirmed_by=NULL, confirmed_at=NULL, updated_at=now()
        WHERE id=$1 AND museum_id=$3`, [exhibitId, job.modelAssetId, museumId]);
     await bumpMuseum(db, museumId);
     return exhibitRecord(db, museumId, exhibitId);

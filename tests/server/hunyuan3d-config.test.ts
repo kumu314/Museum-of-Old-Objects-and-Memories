@@ -90,3 +90,22 @@ test('可替换配置文件：优先于环境变量，改文件即可换 API 与
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test('JSON 云配置同样拒绝生产不安全下载与 HTTP 端点，stat 错误不降级', async () => {
+  const { mkdtemp, writeFile, rm } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { readProviderSettings } = await import('../../src/server/integrations/hunyuan3d/config');
+  const directory = await mkdtemp(join(tmpdir(), 'provider-safety-'));
+  const file = join(directory, 'settings.json');
+  try {
+    const cloud = { secretId: 'id', secretKey: 'key', region: 'ap-guangzhou' };
+    await writeFile(file, JSON.stringify({ cloud }));
+    assert.throws(() => readHunyuanCloudConfig({ NODE_ENV: 'production', HUNYUAN_CLOUD_ALLOW_INSECURE_RESULT: '1' }, file), HttpError);
+    await writeFile(file, JSON.stringify({ cloud: { ...cloud, endpoint: 'http://127.0.0.1:1234' } }));
+    assert.throws(() => readHunyuanCloudConfig({ NODE_ENV: 'production' }, file), HttpError);
+    assert.equal(readHunyuanCloudConfig({ NODE_ENV: 'test' }, file)?.config.endpoint, 'http://127.0.0.1:1234');
+    assert.throws(() => readProviderSettings(join(file, 'child.json')), HttpError);
+    assert.equal(readProviderSettings(join(directory, 'absent.json')), null);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});

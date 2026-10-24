@@ -432,11 +432,46 @@ test('采纳完成的生成模型：展品记录模型资产、版本递增且�
   const done = await getModelGenerationJob(setup.actor, setup.museum.id, setup.exhibit.id, job.id, pool);
   assert.equal(done.status, 'DONE');
   const { adoptGeneratedModel } = await import('../../src/server/core/model-generation');
+  await pool.query('UPDATE exhibits SET confirmed_version=version,confirmed_by=$2,confirmed_at=now(),confirmation_note=$3 WHERE id=$1', [setup.exhibit.id, setup.actor, '已确认']);
   const adopted = await adoptGeneratedModel(setup.actor, setup.museum.id, setup.exhibit.id, done.id, setup.exhibit.version, pool);
+  const confirmation = await pool.query('SELECT confirmed_by FROM exhibits WHERE id=$1', [setup.exhibit.id]);
+  assert.equal(confirmation.rows[0]?.confirmed_by, null);
   assert.equal(adopted.generatedModelAssetId, done.modelAssetId);
   assert.equal(adopted.version, setup.exhibit.version + 1);
   assert.equal(adopted.confirmedVersion, null);
   // 旧版本不能再次采纳；模型引用保持到下一次显式操作。
   await assert.rejects(adoptGeneratedModel(setup.actor, setup.museum.id, setup.exhibit.id, done.id, setup.exhibit.version, pool),
     (error: unknown) => error instanceof HttpError && error.failure.code === 'VERSION_CONFLICT');
+});
+
+
+test('过期生成结果即使照片不变也不能在新版本采纳', async (context) => {
+  const setup = await fixture(context);
+  await fakeProxy(context, { geometryStatus: 2, textureStatus: 2, glbWithMaterial: true });
+  const job = await requestSingleModelGeneration(setup.actor, setup.museum.id, setup.exhibit.id, request(setup), pool);
+  await getModelGenerationJob(setup.actor, setup.museum.id, setup.exhibit.id, job.id, pool);
+  await pool.query('UPDATE exhibits SET version=version+1 WHERE id=$1', [setup.exhibit.id]);
+  const { adoptGeneratedModel } = await import('../../src/server/core/model-generation');
+  await assert.rejects(adoptGeneratedModel(setup.actor, setup.museum.id, setup.exhibit.id, job.id, setup.exhibit.version + 1, pool),
+    (error: unknown) => error instanceof HttpError && error.failure.code === 'VERSION_CONFLICT');
+});
+
+test('JSON 反代配置实际用于提交与查询，并保留测试来源策略', async (context) => {
+  const setup = await fixture(context);
+  const proxy = await fakeProxy(context, { geometryStatus: 2, textureStatus: 2, glbWithMaterial: true });
+  const file = resolve('.local/model-provider.json');
+  const baseUrl = process.env.HUNYUAN_PROXY_BASE_URL;
+  assert.ok(baseUrl);
+  await mkdir(dirname(file), { recursive: true });
+  await writeFile(file, JSON.stringify({ provider: 'hunyuan-proxy', proxyBaseUrl: baseUrl }), { flag: 'wx' });
+  delete process.env.HUNYUAN_PROXY_BASE_URL;
+  try {
+    const job = await requestSingleModelGeneration(setup.actor, setup.museum.id, setup.exhibit.id, request(setup), pool);
+    assert.equal(proxy.geometrySubmits, 1);
+    const done = await getModelGenerationJob(setup.actor, setup.museum.id, setup.exhibit.id, job.id, pool);
+    assert.equal(done.status, 'DONE');
+  } finally {
+    process.env.HUNYUAN_PROXY_BASE_URL = baseUrl;
+    await rm(file);
+  }
 });
