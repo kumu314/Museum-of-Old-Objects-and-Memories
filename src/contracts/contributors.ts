@@ -135,3 +135,63 @@ export type ContributionState = z.infer<typeof contributionStateSchema>;
 
 export type ContributionInvitation = z.infer<typeof contributionInvitationSchema>;
 export type Contribution = z.infer<typeof contributionSchema>;
+
+/**
+ * 邀请的输入：按**用户名**指定被邀请人。
+ *
+ * 用用户名而不是 id，是因为馆主手里只有"这个人叫什么"，拿不到也不该拿到别人的
+ * 账号主键。代价是邀请接口能间接回答"某个用户名是否存在"——这是邀请功能无法
+ * 回避的探测面，缓解手段是它需要登录、且只对馆主开放；不得在此基础上再加
+ * "该用户是否存在"这种更明确的查询接口。
+ */
+export const createInvitationInputSchema = z.strictObject({
+  username: textSchema(1, 80),
+});
+
+/**
+ * 接受 / 拒绝。只允许这两个值：`pending` 不能由被邀请人设回，`cancelled`
+ * 是馆主的动作，走的是另一条接口。把四种状态统一塞进一个可写枚举，
+ * 等于让被邀请人有机会把自己标成"馆主已收回"。
+ */
+export const respondInvitationInputSchema = z.strictObject({
+  status: z.enum(['accepted', 'declined']),
+});
+
+/**
+ * 写一份讲述。`authorId` / `authorRole` / 署名都不在输入里：
+ * 署名由服务端按"是不是馆主、有没有已接受邀请"判定，客户端说了不算。
+ */
+export const createContributionInputSchema = z.strictObject({
+  story: textSchema(1, 4_000),
+  sourceNote: textSchema(1, 200),
+  publishConsent: z.boolean(),
+});
+
+export type CreateInvitationInput = z.infer<typeof createInvitationInputSchema>;
+export type RespondInvitationInput = z.infer<typeof respondInvitationInputSchema>;
+export type CreateContributionInput = z.infer<typeof createContributionInputSchema>;
+
+/**
+ * 收件箱条目。展品名与展馆标题是展示必需的上下文，
+ * 但**不含邀请人姓名**：对方只需要知道"哪件东西、哪座馆"。
+ */
+export const invitationInboxItemSchema = z.strictObject({
+  invitation: contributionInvitationSchema,
+  exhibitName: textSchema(1, 80),
+  museumTitle: textSchema(1, 120),
+});
+export type InvitationInboxItem = z.infer<typeof invitationInboxItemSchema>;
+
+/** "我讲过的"条目：自己的讲述加上它在哪件展品上。 */
+export const myContributionItemSchema = z.strictObject({
+  contribution: contributionSchema,
+  exhibitName: textSchema(1, 80),
+  museumTitle: textSchema(1, 120),
+});
+export type MyContributionItem = z.infer<typeof myContributionItemSchema>;
+
+export const myContributionsSchema = z.strictObject({
+  invitations: z.array(invitationInboxItemSchema),
+  contributions: z.array(myContributionItemSchema),
+});
+export type MyContributions = z.infer<typeof myContributionsSchema>;
