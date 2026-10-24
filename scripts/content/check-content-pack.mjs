@@ -43,6 +43,8 @@ const NARRATIVE_MAX = 12_000;
 const SEGMENT_TEXT_MAX = 6_000;
 const SEGMENT_COUNT_MAX = 40;
 const SEGMENT_TOTAL_MAX = 12_000;
+// src/contracts/primitives.ts：sourceIdSchema 是 textSchema(1, 80)，片段 ID 也受 trim 后 1–80 字限制
+const SEGMENT_ID_MAX = 80;
 
 const isNonEmptyString = (v) => typeof v === 'string' && v.trim().length > 0;
 const isArray = Array.isArray;
@@ -153,9 +155,18 @@ export function checkPack(pack) {
       const seen = new Set();
       let totalChars = 0;
       segs.forEach((s, i) => {
-        if (!isNonEmptyString(s?.id)) E(`facts.sourceSegments[${i}].id 不能为空`);
-        else if (seen.has(s.id)) E(`facts.sourceSegments[${i}].id 重复：${s.id}`);
-        else seen.add(s.id);
+        if (!isNonEmptyString(s?.id)) {
+          E(`facts.sourceSegments[${i}].id 不能为空`);
+        } else {
+          // 与工程契约一致：sourceIdSchema 是 textSchema(1, 80)，trim 后计数
+          const idLength = Array.from(s.id.trim()).length;
+          if (idLength > SEGMENT_ID_MAX) {
+            E(`facts.sourceSegments[${i}].id 有 ${idLength} 字，工程契约上限 ${SEGMENT_ID_MAX} 字（src/contracts/primitives.ts）`);
+          }
+          // 长度超限不影响去重：过长 ID 仍要参与重复判断，否则会漏报一组重复 ID
+          if (seen.has(s.id)) E(`facts.sourceSegments[${i}].id 重复：${s.id}`);
+          else seen.add(s.id);
+        }
         if (!isNonEmptyString(s?.text)) {
           E(`facts.sourceSegments[${i}].text 不能为空`);
         } else {

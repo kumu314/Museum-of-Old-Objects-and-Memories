@@ -205,6 +205,7 @@ test('来源片段受单段、数量与合计长度三重限制', () => {
     ['单段 6001 字', [seg('S1', '旧'.repeat(6_001))], /单段上限 6000/],
     ['合计 12001 字', Array.from({ length: 40 }, (_, i) => seg('S' + i, '旧'.repeat(301))), /合计 12040 字/],
     ['41 段', Array.from({ length: 41 }, (_, i) => seg('S' + i, '短')), /上限 40 段/],
+    ['片段 ID 81 字', [seg('S'.repeat(81), '短')], /id 有 81 字/],
   ];
   for (const [label, segs, pattern] of bad) {
     const pack = load(join(okDir, 'base.json'));
@@ -213,6 +214,26 @@ test('来源片段受单段、数量与合计长度三重限制', () => {
     assert.ok(errors.some((e) => pattern.test(e)),
       `${label} 应被拦下，实际：${JSON.stringify(errors)}`);
   }
+
+  // ID 恰好 80 字应放行——上限是「不超过 80」，不是「小于 80」
+  const pack80 = load(join(okDir, 'base.json'));
+  const id80 = 'S'.repeat(80);
+  setSegs(pack80, [seg(id80, '短')]);
+  assert.deepEqual(checkPack(pack80).errors, [], 'ID 恰好 80 字应当放行');
+});
+
+// ID 超长仍要参与去重，否则一组重复 ID 会因为长度超限被跳过而漏报。
+test('来源片段 ID 超长不影响重复判断', () => {
+  const pack = load(join(okDir, 'base.json'));
+  const longId = 'S'.repeat(81);
+  pack.facts.sourceSegments = [
+    { id: longId, source: 'rawStory', text: '第一段' },
+    { id: longId, source: 'rawStory', text: '第二段' },
+  ];
+  pack.curation.aiDraft.sourceSegmentIds = [longId];
+  const errors = checkPack(pack).errors;
+  assert.ok(errors.some((e) => /id 重复/.test(e)),
+    `超长 ID 重复应报出，实际：${JSON.stringify(errors)}`);
 });
 
 
