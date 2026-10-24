@@ -14,7 +14,7 @@ import { getPool, withTransaction } from '../db/pool';
 import { getServerConfig } from '../config';
 import { prepareGeneratedModel, resolveAssetPath } from '../assets/storage';
 import { createHunyuan3DClient, Hunyuan3DError } from '../integrations/hunyuan3d';
-import { readHunyuanCloudConfig } from '../integrations/hunyuan3d/config';
+import { readForcedProvider, readHunyuanCloudConfig, readSettingsProxyBaseUrl } from '../integrations/hunyuan3d/config';
 import { createHunyuanWebProxyClient } from '../integrations/hunyuan3d-proxy';
 import { readHunyuanProxyConfig } from '../integrations/hunyuan3d-proxy/config';
 import type { Hunyuan3DClient } from '../integrations/hunyuan3d/types';
@@ -23,21 +23,28 @@ import { assertVersion, assetRecord, exhibitRecord, invalid, museumRecord, notFo
 
 /** 网络调用在事务外；提交结果未知保留 SUBMITTING，核对上游前不再付费提交。 */
 function selectedProvider(): 'hunyuan-cloud' | 'hunyuan-proxy' {
-  // 显式锁定通道：部署可固定 provider，测试用它隔离本机真实云密钥。
-  const forced = process.env.HUNYUAN_PROVIDER?.trim();
-  if (forced === 'proxy') {
-    readHunyuanProxyConfig();
+  // 通道锁定：.local/model-provider.json 优先，其次 HUNYUAN_PROVIDER；
+  // 都未指定时按可用性自动选择（云 API 优先）。
+  const forced = readForcedProvider();
+  if (forced === 'hunyuan-proxy') {
+    proxyConfig();
     return 'hunyuan-proxy';
   }
-  if (forced === 'cloud') {
+  if (forced === 'hunyuan-cloud') {
     if (!readHunyuanCloudConfig()) {
-      throw new HttpError({ code: 'GENERATION_UNAVAILABLE', message: '已指定云 API 通道，但 HUNYUAN_SECRET_ID/KEY/REGION 未配置完整。' });
+      throw new HttpError({ code: 'GENERATION_UNAVAILABLE', message: '已指定云 API 通道，但密钥/地域配置缺失。' });
     }
     return 'hunyuan-cloud';
   }
   if (readHunyuanCloudConfig()) return 'hunyuan-cloud';
-  readHunyuanProxyConfig();
+  proxyConfig();
   return 'hunyuan-proxy';
+}
+
+function proxyConfig(): ReturnType<typeof readHunyuanProxyConfig> {
+  const baseUrl = readSettingsProxyBaseUrl();
+  if (baseUrl !== undefined) return { baseUrl };
+  return readHunyuanProxyConfig();
 }
 
 function providerForJob(provider: string, pool: Pool, jobId: string): Hunyuan3DClient {
@@ -126,7 +133,10 @@ function describeFailure(error: unknown): { code: string; message: string } {
       RESULT_URL_REJECTED: '生成结果地址未通过来源校验，本次任务已终止。',
       JOB_FAILED: '上游任务执行失败，可重新生成。',
     };
-    const message = messages[error.code] ?? '三维生成服务暂时不可用，请稍后重试。';
+    const quota = /insufficient|balance|quota|limit|exceeded/i.test(error.upstreamCode ?? '');
+    const message = quota
+      ? '当前 API 额度已用完。请在服务端更换 API 凭据（model-provider.json）或补充额度后重试。'
+      : (messages[error.code] ?? '三维生成服务暂时不可用，请稍后重试。');
     // 上游任意文本不可进入 API 或数据库错误字段。
     return { code: error.upstreamCode && /^\d{1,12}$/.test(error.upstreamCode) ? error.upstreamCode : error.code, message };
   }
@@ -216,10 +226,11 @@ export async function requestSingleModelGeneration(
     if (stored.asset.kind !== 'image') invalid('生成需要图片素材。');
     const bytes = new Uint8Array(await readFile(resolveAssetPath(uploadDir, stored.storageKey)));
     submissionStarted = true;
-    const { jobId } = await providerForJob(provider, pool, claim.jobId).submitImage({
+    const requests = {
       image: { bytes, mime: stored.asset.contentType as 'image/webp', width: stored.asset.width, height: stored.asset.height },
       enablePbr: true,
-    });
+    };
+    const { jobId } = await providerForJob(provider, pool, claim.jobId).submitImage(requests);
     externalAccepted = true;
     await withTransaction(async (db) => {
       await db.query(
