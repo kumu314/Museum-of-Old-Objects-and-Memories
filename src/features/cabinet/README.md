@@ -1,10 +1,12 @@
 # A：展柜与检视原型
 
-更新于 2026-10-24。本目录与 `../viewer/` 为统一仓库中的独立三维原型。这是可操作的三维原型，尚未接入 C 的公共展示 schema、发布快照或 B 的正式故事与音频面板，不能视为完整产品或 G4 已完成。
+更新于 2026-10-24。本目录保留独立三维原型；同一场景现也由 `../viewer/shared-museum.tsx` 挂载到 `/share/[token]` 正式参观页。正式页面经公共 schema 校验后消费发布快照，联动展签、实拍和原声；独立预览的本地编辑不会写入正式展馆。真实 AI、内容和设备尚未完整验收，不能据此视为 G4 已完成。
 
 ## 入口与边界
 
-- `cabinet-stage.ts`：`mountCabinetStage(canvas, items, controller, options)`，一个 Canvas，消费展品 ID、格位和受信任模型键。返回 `retry()`、`retryModel(id)`、`resetView()`、`setEditing(enabled)`、`setArrangement(arrangement)`、`destroy()`；`onSlotDrop(id, targetSlot)` 只上报换位意图，由调用方更新权威陈列数据。
+方案 B 的动态 GLB、制作预览、陈列设置与 C/D/B 交接说明见 [模型预览接口](../viewer/MODEL_INTEGRATION.md)。独立入口为 `/model-preview.html`；`/qa.html?preview=model` 使用相同检查台验证窄屏和图形故障，`&webgl=blocked` 模拟首次初始化失败。`/model-lab.html` 检查实际 GLB 边界、旧响应、双指和重复挂载；程序化资产与再生成命令见 [夹具说明](demo/fixtures/README.md)。这些入口采用已有演示或明确标识的合成资产，没有调用照片生成服务或保存到正式展馆。
+
+- `cabinet-stage.ts`：`mountCabinetStage(canvas, items, controller, options)`，一个 Canvas，消费展品 ID、格位、铭牌和受信任模型键；`photo-plane` 使用当前快照授权的处理图片生成有厚度的薄片，背面为示意；`glb` 消费本站受控模型地址。返回 `retry()`、`retryModel(id)`、`resetView()`、`setModelSource(id, source)`、`setModelPlacement(id, placement)`、`setEditing(enabled)`、`setArrangement(arrangement)`、`destroy()`；`onSlotDrop(id, targetSlot)` 只上报换位意图，由调用方更新权威陈列数据。
 - `../viewer/inspection-controller.ts`：`createInspectionController(ids)`，提供选择、返回、订阅和带 transitionId 的完成通知；旧回调无法完成新动画。
 - `model-fit.ts`：完整节点包围盒的最小等比适配与底部中心落点，三轴均保留至少 10%；当前三件米制 GLB 共用 `cabinet-layout.ts` 中的 `MODEL_UNITS_PER_METRE=14.18`，不再逐件按柜格宽度放大。
 - `cabinet-arrangement.ts`：演示陈列条目的校验、六格移动/互换和铭牌文字修改；每件展品恰好出现一次，格位为互不重复的整数 0–5。
@@ -12,7 +14,7 @@
 - `demo/index.html`、`demo/main.ts`、`demo/style.css`：可移植的演示页面源文件。通过根目录 Vite 配置与锁文件运行。
 - `demo/qa.html`、`demo/qa.ts`：单独检查台，支持视口、WebGL 中断、减少动态 fixture、合成悬停和静止一秒 RAF 计数；不是参观页面的操作入口。
 
-接入时在客户端挂载场景，并在对应生命周期调用 `destroy()`。调用方必须先按公共契约校验数据。`inspectionInset()` 返回覆盖画布的右侧面板宽度（像素）；窄屏面板在画布下方时返回 0。`onSurfaceStatus` 应显示故障说明、隐藏失效画布并保留图文入口；`onAssetStatus` 提供加载和失败状态。B 从同一个 controller 订阅当前选择，并在切换时停止旧音频，默认不自动播放。
+接入时在客户端挂载场景，并在对应生命周期调用 `destroy()`。销毁会释放指针捕获并关闭所属 WebGL 上下文；再次挂载使用新 Canvas。`zoomBy(factor)` 调整检视时的临时观察比例，`getDiagnostics()` 为检查台提供只读资源记录。调用方必须先按公共契约校验数据。`inspectionInset()` 返回覆盖画布的右侧面板宽度（像素）；窄屏面板在画布下方时返回 0。`onSurfaceStatus` 应显示故障说明、隐藏失效画布并保留图文入口；`onAssetStatus` 提供加载和失败状态。B 从同一个 controller 订阅当前选择，并在切换时停止旧音频，默认不自动播放。
 
 ## 当前实现（2026-10-24 三维模型、统一尺寸与陈列编辑）
 
@@ -52,4 +54,4 @@ pnpm build:scene
 
 预览地址 `http://127.0.0.1:17681/`，构建产物为 `dist/scene/`。完整工具链与验证入口见 [运行说明](../../../docs/运行说明.md)。旧版本精修日志可查 Git；本页只保留当前接口、行为和验证边界。
 
-原型浏览器结果不替代正式参观页验收。真实手机 / Safari、目标设备性能、正式音频联动、完整应用部署与浏览器往返缓存实机命中仍未验收。当前资产的来源与许可见 [来源清单](assets/SOURCES.md)，不得因精简开发日志而删除许可记录。
+原型浏览器结果不替代正式参观页验收。正式页面的本机检视、PNG 实拍、WAV 播放、快速切换、Esc 返回、390px 窄屏、模型失败及 WebGL 中断与恢复已使用合成内容验证；证据见 [验收清单](../../../docs/11-验收清单.md)。真实手机 / Safari、目标设备性能、完整应用部署与浏览器往返缓存实机命中仍未验收。当前资产的来源与许可见 [来源清单](assets/SOURCES.md)，不得因精简开发日志而删除许可记录。
