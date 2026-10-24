@@ -78,7 +78,8 @@ try {
   for (const path of ['src', 'package.json', 'pnpm-lock.yaml', 'tsconfig.json', 'next.config.ts', 'postcss.config.mjs', 'migrations']) {
     await cp(join(root, path), join(appDirectory, path), { recursive: true });
   }
-  await symlink(join(root, 'node_modules'), join(appDirectory, 'node_modules'), 'dir');
+  // Windows 上创建目录符号链接需要额外特权，会以 EPERM 失败；junction 不需要特权，语义在此等价。
+  await symlink(join(root, 'node_modules'), join(appDirectory, 'node_modules'), process.platform === 'win32' ? 'junction' : 'dir');
   await mkdir(join(directory, 'uploads'));
   const port = await freePort();
   const origin = `http://127.0.0.1:${port}`;
