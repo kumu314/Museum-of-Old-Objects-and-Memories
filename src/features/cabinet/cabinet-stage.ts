@@ -432,6 +432,13 @@ export function mountCabinetStage(canvas: HTMLCanvasElement, items: readonly Cab
   function onMotionPreferenceChange() { pointerOffset.set(0, 0); invalidate(); }
   function pick(event: PointerEvent) {
     if (options.onSlotSelect && controller.getSnapshot().phase !== 'overview') return;
+    // 检视途中点击展品周边（未命中任何展品）返回展柜总览。
+    if (controller.getSnapshot().phase !== 'overview') {
+      pointRay(event);
+      const hit = raycaster.intersectObjects(displayModels.map((model) => model.group), true)[0];
+      if (hit === undefined) controller.returnToOverview();
+      return;
+    }
     if (controller.getSnapshot().phase === 'overview') {
       const slot = slotAtPointer(event);
       if (slot !== null && options.onSlotSelect) { options.onSlotSelect(slot); return; }
