@@ -120,10 +120,29 @@ async function loadStats(db: PoolClient, modelAssetId: string | null): Promise<R
   return modelGlbStatsSchema.parse(row.stats);
 }
 
-function describeFailure(error: unknown): { code: string; message: string } {
+/**
+ * 把上游失败翻译成可操作提示。上游错误码只保留形如 `ResourceUnavailable.NotExist`
+ * 的安全标识（不含自由文本），便于在任务表里定位；额度/未开通/地域/鉴权分开展示。
+ */
+export function describeGenerationFailure(error: unknown): { code: string; message: string } {
   if (error instanceof Hunyuan3DError) {
+    const upstream = error.upstreamCode ?? '';
+    const safeUpstream = /^(?:\d{1,12}|[A-Za-z][A-Za-z0-9.]{0,60})$/.test(upstream) ? upstream : undefined;
+    if (/^ResourceUnavailable\.NotExist$/i.test(upstream)) {
+      return { code: upstream, message: '该账号未开通混元生3D 或资源不可用：请在腾讯云控制台开通本服务并领取额度，地域使用 ap-guangzhou。' };
+    }
+    if (/^UnsupportedRegion$/i.test(upstream)) {
+      return { code: upstream, message: '该地域不支持混元生3D：请把地域改为 ap-guangzhou。' };
+    }
+    if (/^AuthFailure/i.test(upstream)) {
+      return { code: safeUpstream ?? error.code, message: '云 API 鉴权失败：请检查 SecretId/SecretKey 与子账号是否具备混元生3D 权限。' };
+    }
+    if (/insufficient|balance|quota|limit|exceeded/i.test(upstream)) {
+      return { code: /^[A-Za-z][A-Za-z0-9.]{0,60}$/.test(upstream) ? upstream : 'QUOTA_EXHAUSTED',
+        message: '当前 API 额度已用完。请在服务端更换 API 凭据（.local/model-provider.json）或补充额度后重试。' };
+    }
     const messages: Record<string, string> = {
-      CONFIG_INVALID: '三维生成服务配置无效，请检查本机反代。',
+      CONFIG_INVALID: '三维生成服务配置无效，请检查服务端配置。',
       INPUT_INVALID: '照片不满足生成要求（每边 128–5000 像素、JPEG/PNG/WebP、不超过 6MB）。',
       UPSTREAM_ERROR: '混元上游拒绝了请求，请稍后重试或更换照片。',
       TIMEOUT: '三维生成服务请求超时，请稍后重试。',
@@ -133,12 +152,7 @@ function describeFailure(error: unknown): { code: string; message: string } {
       RESULT_URL_REJECTED: '生成结果地址未通过来源校验，本次任务已终止。',
       JOB_FAILED: '上游任务执行失败，可重新生成。',
     };
-    const quota = /insufficient|balance|quota|limit|exceeded/i.test(error.upstreamCode ?? '');
-    const message = quota
-      ? '当前 API 额度已用完。请在服务端更换 API 凭据（model-provider.json）或补充额度后重试。'
-      : (messages[error.code] ?? '三维生成服务暂时不可用，请稍后重试。');
-    // 上游任意文本不可进入 API 或数据库错误字段。
-    return { code: error.upstreamCode && /^\d{1,12}$/.test(error.upstreamCode) ? error.upstreamCode : error.code, message };
+    return { code: safeUpstream ?? error.code, message: messages[error.code] ?? '三维生成服务暂时不可用，请稍后重试。' };
   }
   if (error instanceof HttpError) return { code: 'GENERATION_UNAVAILABLE', message: error.message };
   return { code: 'GENERATION_UNAVAILABLE', message: '三维生成服务暂时不可用，请稍后重试。' };
@@ -240,7 +254,7 @@ export async function requestSingleModelGeneration(
   } catch (error) {
     const rejected = !externalAccepted && (!submissionStarted || (error instanceof Hunyuan3DError &&
       (['CONFIG_INVALID', 'INPUT_INVALID'].includes(error.code) || error.upstreamCode !== undefined)));
-    const failure = rejected ? describeFailure(error) : {
+    const failure = rejected ? describeGenerationFailure(error) : {
       code: 'SUBMIT_UNKNOWN', message: '提交结果未知，请由管理员核对上游任务后处理，当前不会再次提交。',
     };
     await withTransaction(async (db) => {
@@ -348,7 +362,7 @@ async function advanceJob(actorId: string, museumId: string, exhibitId: string, 
       throw error;
     }
     if (error instanceof Hunyuan3DError && ['INVALID_GLB', 'RESULT_MISSING', 'RESULT_URL_REJECTED', 'DOWNLOAD_FAILED'].includes(error.code)) {
-      const failure = describeFailure(error);
+      const failure = describeGenerationFailure(error);
       await withTransaction(async (db) => {
         await failJob(db, jobId, failure.code, failure.message);
       }, pool);

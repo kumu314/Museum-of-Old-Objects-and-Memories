@@ -76,6 +76,18 @@ if (job.status === 'DONE') {
 5. 失败保留原照片、讲述和已有模型；提交结果不明时先查询，不自动重新付费提交。
 6. 与 A 确认模型朝向、陈列 scale、资源预算和目标设备；资源上限在实测后冻结，不预先编造。
 
+## 常见上游错误（2026-10-24 实测）
+
+| 上游码 | 含义 | 处理 |
+| --- | --- | --- |
+| `ResourceUnavailable.NotExist` | 该账号未开通混元生3D（鉴权本身通过） | 在腾讯云控制台开通本服务并领取额度；地域用 `ap-guangzhou` |
+| `UnsupportedRegion` | 地域不支持 | `ap-shanghai`/`ap-beijing`/`ap-chengdu` 均返回此码，只能 `ap-guangzhou` |
+| `AuthFailure.*` | 密钥或子账号权限问题 | 换密钥或补授权 |
+| `FailedOperation.InsufficientBalance` 等 | 额度不足 | 更换凭据或补充额度 |
+| `FailedOperation.JobNotFound` | 查询的 JobId 不存在（鉴权正常） | 可作为“凭据有效”的免费探测 |
+
+任务表 `error_code` 保留上述安全标识；自由文本会丢弃。
+
 ## 额度用完后如何替换 API 与凭据
 
 生产通道支持**服务端热替换**，不需要改代码或重启进程：编辑（或新建）

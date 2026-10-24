@@ -19,13 +19,14 @@ const pool = new Pool({ connectionString: getIsolatedTestDatabaseUrl(), max: 1, 
 // getServerConfig 是进程级单例：整个文件共享一个上传根目录，用例内以
 // uuid 存储键隔离，避免目录切换被缓存吞掉。
 const uploadRoot = resolve('.local', `model-jobs-${randomUUID()}`);
-const providerEnv = ['HUNYUAN_PROVIDER', 'HUNYUAN_SECRET_ID', 'HUNYUAN_SECRET_KEY', 'HUNYUAN_REGION'] as const;
+const providerEnv = ['HUNYUAN_PROVIDER', 'HUNYUAN_PROVIDER_CONFIG', 'HUNYUAN_SECRET_ID', 'HUNYUAN_SECRET_KEY', 'HUNYUAN_REGION'] as const;
 const previousProviderEnv = providerEnv.map((name) => [name, process.env[name]] as const);
 before(async () => {
   await mkdir(uploadRoot, { recursive: true });
   process.env.UPLOAD_DIR = uploadRoot;
-  // 默认隔离本机真实云密钥：本文件的反代用例必须走假反代。
+  // 隔离本机真实配置文件与云密钥：本文件的反代用例必须走假反代。
   process.env.HUNYUAN_PROVIDER = 'proxy';
+  process.env.HUNYUAN_PROVIDER_CONFIG = resolve('.local', 'no-such-provider-config.json');
   delete process.env.HUNYUAN_SECRET_ID;
   delete process.env.HUNYUAN_SECRET_KEY;
   delete process.env.HUNYUAN_REGION;
@@ -459,12 +460,14 @@ test('过期生成结果即使照片不变也不能在新版本采纳', async (c
 test('JSON 反代配置实际用于提交与查询，并保留测试来源策略', async (context) => {
   const setup = await fixture(context);
   const proxy = await fakeProxy(context, { geometryStatus: 2, textureStatus: 2, glbWithMaterial: true });
-  const file = resolve('.local/model-provider.json');
+  const file = resolve(uploadRoot, 'model-provider.json');
+  const previousPath = process.env.HUNYUAN_PROVIDER_CONFIG;
   const baseUrl = process.env.HUNYUAN_PROXY_BASE_URL;
   assert.ok(baseUrl);
   await mkdir(dirname(file), { recursive: true });
   await writeFile(file, JSON.stringify({ provider: 'hunyuan-proxy', proxyBaseUrl: baseUrl }), { flag: 'wx' });
   delete process.env.HUNYUAN_PROXY_BASE_URL;
+  process.env.HUNYUAN_PROVIDER_CONFIG = file;
   try {
     const job = await requestSingleModelGeneration(setup.actor, setup.museum.id, setup.exhibit.id, request(setup), pool);
     assert.equal(proxy.geometrySubmits, 1);
@@ -472,6 +475,8 @@ test('JSON 反代配置实际用于提交与查询，并保留测试来源策略
     assert.equal(done.status, 'DONE');
   } finally {
     process.env.HUNYUAN_PROXY_BASE_URL = baseUrl;
+    if (previousPath === undefined) delete process.env.HUNYUAN_PROVIDER_CONFIG;
+    else process.env.HUNYUAN_PROVIDER_CONFIG = previousPath;
     await rm(file);
   }
 });
