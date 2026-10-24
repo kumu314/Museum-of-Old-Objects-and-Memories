@@ -18,15 +18,17 @@ function rejectUrl(message: string): never {
   throw new Hunyuan3DError('RESULT_URL_REJECTED', message);
 }
 
-/** 腾讯 COS 虚拟主机格式：<bucket>-<appid>.cos.<region>.myqcloud.com。 */
+/** 官方结果示例的地域端点，以及 COS 新旧域名下的存储桶端点。 */
 function isTencentCosResultHost(hostname: string): boolean {
   const labels = hostname.toLowerCase().split('.');
+  if (labels.length !== 4 && labels.length !== 5) return false;
   const tail = labels.slice(-4);
   const [cos, region, cloud, tld] = tail;
-  if (cos !== 'cos' || cloud !== 'myqcloud' || tld !== 'com') return false;
+  const knownDomain = (cloud === 'myqcloud' && tld === 'com') || (cloud === 'tencentcos' && tld === 'cn');
+  if (cos !== 'cos' || !knownDomain) return false;
   if (region === undefined || !/^[a-z][a-z0-9-]*$/.test(region)) return false;
   const bucket = labels.slice(0, -4).join('.');
-  return /^[a-z0-9][a-z0-9-]*$/.test(bucket);
+  return bucket === '' || /^[a-z0-9][a-z0-9-]*-\d+$/.test(bucket);
 }
 
 function isRejectedIPv4Bytes(bytes: readonly number[]): boolean {

@@ -198,6 +198,8 @@ export function createHunyuan3DClient(config: Hunyuan3DConfig): Hunyuan3DClient 
       if (timedOut) timeoutError();
       throw new Hunyuan3DError('UPSTREAM_ERROR', '混元 3D 网络请求失败。', { cause: error });
     } finally {
+      // 状态码或 Content-Length 提前拒绝时，响应体可能仍在持续发送。
+      controller.abort();
       clearTimeout(timer);
     }
   }
@@ -266,6 +268,7 @@ export function createHunyuan3DClient(config: Hunyuan3DConfig): Hunyuan3DClient 
         if (timedOut) timeoutError();
         throw new Hunyuan3DError('DOWNLOAD_FAILED', 'GLB 下载失败。', { cause: error });
       } finally {
+        controller.abort();
         clearTimeout(timer);
       }
     },

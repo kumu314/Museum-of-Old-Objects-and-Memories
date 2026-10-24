@@ -292,6 +292,9 @@ test('默认下载策略拒绝非 HTTPS、非 COS 来源与内网地址，不发
 test('默认下载策略要求解析结果全部为公网地址', async (context) => {
   const responses: dns.LookupAddress[][] = [
     [{ address: '1.2.3.4', family: 4 }],
+    [{ address: '1.2.3.4', family: 4 }],
+    [{ address: '1.2.3.4', family: 4 }],
+    [{ address: '1.2.3.4', family: 4 }],
     [{ address: '1.2.3.4', family: 4 }, { address: '10.0.0.7', family: 4 }],
     [{ address: '::ffff:127.0.0.1', family: 6 }],
     [{ address: '169.254.169.254', family: 4 }],
@@ -315,10 +318,13 @@ test('默认下载策略要求解析结果全部为公网地址', async (context
   context.after(() => { lookupMock.mock.restore(); });
   const host = 'https://bucket-1.cos.ap-guangzhou.myqcloud.com/model.glb?X-Cos-Signature=keep';
   await assertProviderResultUrl(new URL(host));
+  for (const hostname of ['bucket-1.cos.ap-guangzhou.tencentcos.cn', 'cos.ap-guangzhou.tencentcos.cn', 'cos.ap-guangzhou.myqcloud.com']) {
+    await assertProviderResultUrl(new URL(`https://${hostname}/model.glb`));
+  }
   await rejectsCode(assertProviderResultUrl(new URL('https://bucket-1.cos.ap-guangzhou.myqcloud.com/model.glb')), 'RESULT_URL_REJECTED');
   await rejectsCode(assertProviderResultUrl(new URL('https://bucket-1.cos.ap-guangzhou.myqcloud.com/model.glb')), 'RESULT_URL_REJECTED');
   await rejectsCode(assertProviderResultUrl(new URL('https://bucket-1.cos.ap-guangzhou.myqcloud.com/model.glb')), 'RESULT_URL_REJECTED');
-  assert.equal(call, 4);
+  assert.equal(call, 7);
 });
 
 test('私网地址判定覆盖环回、链路本地、映射 IPv6 与保留段', () => {
@@ -402,6 +408,25 @@ test('GLB 下载同样在读取过程中执行大小上限', async (context) => 
   await rejectsCode(client.downloadGlb(glbFile(`${server.endpoint}model.glb`)), 'DOWNLOAD_FAILED');
 });
 
+test('根据状态码或声明长度拒绝响应后立即中止未读完的连接', async (context) => {
+  let mode: 'http' | 'size' = 'http';
+  let closed = 0;
+  const server = await fakeServer(context, (_request, response) => {
+    response.statusCode = mode === 'http' ? 503 : 200;
+    response.setHeader('Content-Length', String(2 * 1024 * 1024));
+    response.on('close', () => { closed += 1; });
+    response.write('unfinished');
+  });
+  const client = createHunyuan3DClient(testConfig(server.endpoint));
+  for (const current of ['http', 'size'] as const) {
+    mode = current;
+    await rejectsCode(client.queryJob('job-1'), 'UPSTREAM_ERROR');
+    await rejectsCode(client.downloadGlb(glbFile(`${server.endpoint}model.glb`)), 'DOWNLOAD_FAILED');
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.equal(closed, current === 'http' ? 2 : 4, '拒绝响应后不能继续持有未读完的连接');
+  }
+});
+
 test('GLB 校验拒绝必需解码扩展、漏声明使用、外部资源与损坏容器', () => {
   const { json, bin } = buildValidGlb();
   const cases: Record<string, unknown>[] = [
@@ -429,6 +454,9 @@ test('GLB 校验拒绝必需解码扩展、漏声明使用、外部资源与损�
 
 test('GLB 校验拒绝不可加载的引用结构', () => {
   const { json, bin } = buildValidGlb();
+  const withoutScenes = { ...json };
+  delete withoutScenes.scene;
+  delete withoutScenes.scenes;
   const cases: Record<string, unknown>[] = [
     // 只有 meshes 没有 scenes/nodes。
     { asset: { version: '2.0' }, meshes: [{ primitives: [{ attributes: { POSITION: 0 } }] }], buffers: [{ byteLength: bin.byteLength }] },
@@ -448,6 +476,10 @@ test('GLB 校验拒绝不可加载的引用结构', () => {
     { ...json, accessors: [{ bufferView: 0, componentType: 5123, count: 3, type: 'SCALAR' }] },
     // 节点引用成环。
     { ...json, nodes: [{ mesh: 0, children: [1] }, { children: [0] }] },
+    // GLTFLoader 仅通过 scenes 建立可展示的场景，孤立 nodes 不能替代它。
+    withoutScenes,
+    // FLOAT 偏移未按四字节对齐，GLTFLoader 创建 TypedArray 时会失败。
+    { ...json, accessors: [{ bufferView: 0, byteOffset: 1, componentType: 5126, count: 2, type: 'VEC3' }] },
   ];
   for (const [index, candidate] of cases.entries()) {
     const hasBin = candidate !== json;

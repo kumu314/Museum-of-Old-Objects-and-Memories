@@ -98,6 +98,7 @@ function parseContainer(buffer: Buffer): { json: Record<string, unknown>; binChu
     const chunkType = buffer.readUInt32LE(offset + 4);
     const dataStart = offset + 8;
     const dataEnd = dataStart + chunkLength;
+    if (chunkLength % 4 !== 0) invalid('GLB 分块长度必须按四字节对齐。');
     if (!Number.isSafeInteger(dataEnd) || dataEnd > buffer.byteLength) invalid('GLB 分块长度越界。');
     if (parsed === undefined) {
       if (chunkType !== JSON_CHUNK) invalid('GLB 第一个分块必须是 JSON。');
@@ -174,6 +175,11 @@ function validateAccessors(json: Record<string, unknown>, bufferViewCount: numbe
     if (view === undefined) invalid(`GLB 的 accessors[${index}].bufferView 索引越界。`);
     const elementSize = (COMPONENT_SIZES[componentType as number] ?? 0) * (TYPE_LENGTHS[type as string] ?? 0);
     const byteOffset = integerField(accessor, 'byteOffset', `accessors[${index}].byteOffset`) ?? 0;
+    const viewOffset = integerField(view, 'byteOffset', `bufferViews[${viewIndex}].byteOffset`) ?? 0;
+    const componentSize = COMPONENT_SIZES[componentType as number] ?? 1;
+    if (byteOffset % componentSize !== 0 || (viewOffset + byteOffset) % componentSize !== 0) {
+      invalid(`GLB 的 accessors[${index}] 字节偏移未按分量大小对齐。`);
+    }
     const viewByteLength = integerField(view, 'byteLength', `bufferViews[${viewIndex}].byteLength`) ?? 0;
     const stride = view.byteStride;
     if (typeof stride === 'number') {
@@ -291,7 +297,7 @@ export function validateGlb(bytes: Uint8Array, maxBytes: number): HunyuanGlbStat
   validateMeshes(json, recordArray(json.accessors, 'accessors').length, materials.length);
   validateMaterialsAndTextures(json);
 
-  // 场景可达性：默认场景（或全部根节点）必须能走到至少一个带 POSITION 的 primitive。
+  // GLTFLoader 从 scenes 建立展示场景，孤立 nodes 不会生成 gltf.scene。
   const nodes = recordArray(json.nodes, 'nodes');
   const scenes = recordArray(json.scenes, 'scenes');
   let rootIndices: number[];
@@ -303,8 +309,6 @@ export function validateGlb(bytes: Uint8Array, maxBytes: number): HunyuanGlbStat
     rootIndices = nodeIndicesOf(scenes[sceneIndex as number], `scenes[${String(sceneIndex)}].nodes`, nodes.length);
   } else if (scenes.length > 0) {
     rootIndices = nodeIndicesOf(scenes[0], 'scenes[0].nodes', nodes.length);
-  } else if (nodes.length > 0) {
-    rootIndices = nodes.map((_, index) => index);
   } else {
     invalid('GLB 没有可加载的场景节点。');
   }

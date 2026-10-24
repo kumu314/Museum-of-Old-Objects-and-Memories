@@ -31,14 +31,14 @@ HUNYUAN_REGION=
 供应商返回的结果 URL 属于不可信输入。`downloadGlb` 默认策略（`assertProviderResultUrl`）在发出任何请求前强制执行：
 
 1. 仅接受 HTTPS，拒绝 URL 内嵌凭据和非 443 端口。
-2. 主机必须是腾讯 COS 虚拟主机格式 `<bucket>-<appid>.cos.<region>.myqcloud.com`（按 DNS 标签边界匹配，签名 query 原样保留）。真实响应的桶域名尚未核实，首次真实调用后需要复核；如腾讯改变结果来源，通过配置 `resultUrlPolicy` 显式调整，生产不得放宽。
-3. 主机解析出的全部地址必须在公网范围：环回、RFC1918、链路本地（含 169.254.169.254 元数据）、CGNAT、组播、保留段、IPv4-mapped IPv6 等一律拒绝；解析失败同样拒绝。
+2. 主机仅接受 `cos.<region>.myqcloud.com` / `cos.<region>.tencentcos.cn` 地域端点及其 `<bucket>-<appid>.` 存储桶端点（按 DNS 标签边界匹配，签名 query 原样保留）。地域端点见[查询接口示例](https://cloud.tencent.com/document/api/1804/123448)，新旧域名见 [COS 官方说明](https://cloud.tencent.com/document/product/436/67768)。真实响应的桶域名仍需首次真实调用后复核；不得放宽为任意域名。
+3. 主机解析出的全部地址必须在公网范围：环回、RFC1918、链路本地（含 169.254.169.254 元数据）、CGNAT、组播、保留段一律拒绝；IPv4-mapped IPv6 按内嵌 IPv4 判断，解析失败同样拒绝。
 4. 重定向保持禁用（`redirect: 'error'`），不存在绕过策略的跳转。
 5. 剩余风险：fetch 建立连接时会再次解析 DNS，理论上存在针对已允许域名的 DNS rebinding 窗口；COS 权威解析由腾讯控制，风险可接受，已记录在代码注释。
 
 ## 响应大小上限
 
-API JSON 响应（1 MiB）与 GLB 下载（`maxDownloadBytes`，默认 64 MiB）都在流式读取过程中执行字节上限：先核对 `Content-Length`，再逐块累计，超限立即 `cancel()` 终止连接，不先完整缓冲再判断。
+API JSON 响应（1 MiB）与 GLB 下载（`maxDownloadBytes`，默认 64 MiB）都在流式读取过程中执行字节上限：先核对 `Content-Length`，再逐块累计，超限立即终止读取，不先完整缓冲再判断。请求结束时统一中止未完成的响应体，保证 HTTP 错误和声明长度超限的提前拒绝同样会关闭连接。
 
 ## 用法边界
 
@@ -63,7 +63,7 @@ if (job.status === 'DONE') {
 - Pro 默认返回 OBJ、GLB。不要在请求中传 `ResultFormat=GLB`；官方 Pro 页列的 `ResultFormat` 只有 STL/USDZ/FBX，GLB 需要从 `ResultFile3Ds` 按 `Type` 选择。
 - `JobId` 和结果 URL 官方均为 24 小时有效。C 必须持久化任务并尽快下载；供应商 URL 不能作为永久分享地址。
 - 适配器不自动重试提交；付费提交结果不明时先按已有 JobId 查询。查询失败、超时和 `FAIL` 分别由上层映射，不能把未知状态当成功。
-- 下载结果经过 GLB 容器与可加载性校验：文件头、分块、`asset.version`、必需扩展能力表、scene→node→mesh→primitive→POSITION accessor→bufferView→BIN 的引用完整性、索引与字节边界、外部资源引用。必需扩展按当前裸 `GLTFLoader` 能力收敛：只允许 `KHR_materials_unlit`；Draco、Meshopt、KTX2/Basis 即使供应商漏写声明也会按实际使用位置拒绝；未知必需扩展默认拒绝。测试基准是包含真实几何的最小三角形 GLB，并用项目实际版本的 `GLTFLoader.parseAsync` 冒烟验证。这不能替代 A/D 的资源预算和浏览器验收。
+- 下载结果经过 GLB 容器与基本场景结构校验：文件头、分块与分量偏移对齐、`asset.version`、必需扩展能力表、scene→node→mesh→primitive→POSITION accessor→bufferView→BIN 的引用完整性、索引与字节边界、外部资源引用。缺少展示场景时拒绝。必需扩展按当前裸 `GLTFLoader` 能力收敛：只允许 `KHR_materials_unlit`；Draco、Meshopt、KTX2/Basis 即使供应商漏写声明也会按实际使用位置拒绝；未知必需扩展默认拒绝。测试基准是包含真实几何的最小三角形 GLB，并用项目实际版本的 `GLTFLoader.parseAsync` 冒烟验证。该同步检查不是完整 glTF 合规或纹理解码验证，不能替代 D 入库前的完整解析、资源预算、规范化和 A/D 的浏览器验收。
 - 结果坐标、正面、原点和尺度没有供应商保证。D 在入库前按开发书 §9.6 规范化到 +Z、Y-up、底部中心和有依据的米制尺寸；未知尺度必须标记，不能宣称真实物理尺寸。
 - 当前没有调用真实腾讯云 API；测试使用本地假上游，不能当作生成成功证据。
 
