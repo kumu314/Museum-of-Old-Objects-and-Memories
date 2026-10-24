@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
@@ -182,14 +182,9 @@ test('private preparation retains complete unique files; cleanup never removes r
   const publicDirectory = join(fakeApp, 'public');
   const alias = join(workspace, 'public-alias');
   await mkdir(publicDirectory, { recursive: true });
-  try {
-    // Windows may require Developer Mode for symlinks; a directory junction tests the same alias.
-    await symlink(publicDirectory, alias, process.platform === 'win32' ? 'junction' : 'dir');
-  } catch (error) {
-    if (process.platform === 'win32' && error instanceof Error && 'code' in error &&
-      (error.code === 'EPERM' || error.code === 'EACCES')) return;
-    throw error;
-  }
+  // A directory junction needs no elevation on Windows; both forms must actually point at public.
+  await symlink(publicDirectory, alias, process.platform === 'win32' ? 'junction' : 'dir');
+  assert.equal(await realpath(alias), await realpath(publicDirectory));
   const originalCwd = process.cwd();
   try {
     process.chdir(fakeApp);
