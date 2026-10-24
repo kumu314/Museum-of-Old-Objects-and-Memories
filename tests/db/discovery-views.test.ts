@@ -11,6 +11,7 @@ import {
   getMuseum,
   publishMuseum,
   readLeaderboard,
+  readShare,
   readRegionDistribution,
   recordMuseumView,
   stopSharing,
@@ -62,11 +63,12 @@ function exhibitInput(expectedMuseumVersion: number): CreateExhibitInput {
  * 走真实的发布事务而不是直接拼 SQL：`share_enabled`/`current_snapshot_id`/token 哈希
  * 之间的约束由发布逻辑维护，手工插行容易造出库里根本不可能出现的状态。
  */
-async function publishedMuseum(db: PoolClient, ownerId: string, title: string, regionCity: RegionCity | null): Promise<{ museumId: string; token: string }> {
+async function publishedMuseum(db: PoolClient, ownerId: string, title: string, regionCity: RegionCity | null, discoveryListed = true): Promise<{ museumId: string; token: string }> {
   const museum = await createMuseum(ownerId, { title, description: '' }, db);
+  assert.equal(museum.discoveryListed, false);
   let version = museum.version;
-  if (regionCity !== null) {
-    version = (await updateMuseum(ownerId, museum.id, { title, description: '', regionCity, expectedVersion: version }, db)).version;
+  if (regionCity !== null || discoveryListed) {
+    version = (await updateMuseum(ownerId, museum.id, { title, description: '', regionCity, discoveryListed, expectedVersion: version }, db)).version;
   }
   const image = randomUUID();
   await db.query(`INSERT INTO assets(id,museum_id,original_name,kind,mime,byte_size,storage_key,width,height,sha256,created_by)
@@ -228,5 +230,39 @@ test('发布后修改草稿标题不会泄露到榜单，重新发布后才更�
     assert.equal(await title(), '已发布标题');
     await publishMuseum(owner.id, museum.museumId, draft.version, db);
     assert.equal(await title(), '尚未公开的私密标题');
+  });
+});
+
+
+test('发现收录需明确同意，撤回不关闭参观链接，旧客户端缺省保留授权', async () => {
+  await inRollback(async (db) => {
+    const owner = await account(db, 'consent-owner');
+    const visitor = await account(db, 'consent-visitor');
+    const museum = await publishedMuseum(db, owner.id, '仅持链接访问的馆', '洛阳', false);
+    const draft = await getMuseum(owner.id, museum.museumId, db);
+    assert.equal(draft.discoveryListed, false);
+    assert.equal(await viewCountOf(db, museum.museumId), undefined);
+    assert.equal((await readRegionDistribution(db)).cities.find(({ city }) => city === '洛阳')?.museumCount, 0);
+    const listed = await updateMuseum(owner.id, museum.museumId, {
+      title: draft.title, description: draft.description, expectedVersion: draft.version, regionCity: '洛阳', discoveryListed: true,
+    }, db);
+    assert.equal(listed.discoveryListed, true);
+    assert.equal(await viewCountOf(db, museum.museumId), 0);
+    assert.equal((await readRegionDistribution(db)).cities.find(({ city }) => city === '洛阳')?.museumCount, 1);
+    const preserved = await updateMuseum(owner.id, museum.museumId, {
+      title: listed.title, description: listed.description, expectedVersion: listed.version,
+    }, db);
+    assert.equal(preserved.discoveryListed, true);
+    const revoked = await updateMuseum(owner.id, museum.museumId, {
+      title: preserved.title, description: preserved.description, expectedVersion: preserved.version, discoveryListed: false,
+    }, db);
+    assert.equal(revoked.discoveryListed, false);
+    assert.equal(await viewCountOf(db, museum.museumId), undefined);
+    assert.equal((await readRegionDistribution(db)).cities.find(({ city }) => city === '洛阳')?.museumCount, 0);
+    assert.equal((await readShare(visitor.id, museum.token, db)).id, museum.museumId);
+    const stillRevoked = await updateMuseum(owner.id, museum.museumId, {
+      title: revoked.title, description: revoked.description, expectedVersion: revoked.version,
+    }, db);
+    assert.equal(stillRevoked.discoveryListed, false);
   });
 });

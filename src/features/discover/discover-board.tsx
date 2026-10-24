@@ -36,7 +36,7 @@ export function DiscoverBoard({ mapKey, board, distribution }: {
       </header>
 
       <p className={styles.demoBanner} role="note">
-        <strong>口径</strong>　只统计已发布且正在分享的展馆，排除馆主本人对自家展馆的查看。
+        <strong>口径</strong>　只统计馆主已同意收录、已发布且正在分享的展馆，排除馆主本人对自家展馆的查看。
         未做去重，也不声称防刷或独立访客统计：同一人刷新多次会被记为多次。
       </p>
 
@@ -98,7 +98,7 @@ export function DiscoverBoard({ mapKey, board, distribution }: {
 
           {board.totalMuseums === 0 ? (
             <p className={styles.empty}>
-              还没有已发布的展馆。展馆发布并开启参观链接后，才会出现在这里。
+              还没有同意收录的已发布展馆。馆主明确同意收录、发布并开启参观链接后，才会出现在这里。
             </p>
           ) : visible.length === 0 ? (
             <p className={styles.empty}>这个筛选下还没有展馆。</p>
@@ -132,7 +132,7 @@ export function DiscoverBoard({ mapKey, board, distribution }: {
           同一座馆只会出现在一个城市。
         </p>
         <p>
-          只为已发布且正在分享的展馆计数：未发布的草稿与已停止分享的展馆不会出现在本页。
+          本页只展示馆主已同意收录、已发布且正在分享的展馆；撤回收录同意后立即退出本页，参观链接不受影响。
         </p>
       </footer>
     </main>
