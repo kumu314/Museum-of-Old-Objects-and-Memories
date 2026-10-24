@@ -56,6 +56,11 @@ export function ModelGenerationFields({ museumId, exhibitId, exhibitVersion, dir
         setJob(next);
         setPollError(null);
         finished = next.status === 'FAIL' || next.status === 'DONE';
+        // 生成完成即已自动入柜；触发一次幂等采纳以刷新工作台，
+        // 让展柜立即改为展示生成的模型。
+        if (next.status === 'DONE' && next.modelAssetId !== null && exhibitId !== null) {
+          void onAdopt(next.id);
+        }
       } catch (error) {
         if (controller.signal.aborted) return;
         setPollError(`状态刷新失败，正在重试：${describeFailure(error)}`);

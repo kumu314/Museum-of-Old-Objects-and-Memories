@@ -241,8 +241,8 @@ test('提交去重、轮询推进到 DONE，模型资产私有落盘并通过校
   assert.equal(file.byteLength, row.byte_size);
   assert.ok(row.storage_key.endsWith('/model.glb'));
 
-  // 同展品已有 DONE 任务：重复提交复用结果，不重复扣积分。
-  const again = await requestSingleModelGeneration(setup.actor, setup.museum.id, setup.exhibit.id, request(setup), pool);
+  // 同 requestId 重复提交：走去重路径复用结果，不重复扣积分。
+  const again = await requestSingleModelGeneration(setup.actor, setup.museum.id, setup.exhibit.id, input, pool);
   assert.equal(again.id, submitted.id);
   assert.equal(again.status, 'DONE');
 });
@@ -333,8 +333,10 @@ test('独立连接推进纹理只提交一次；完成后新来源版本创建�
     assert.equal(results[0]?.modelAssetId, results[1]?.modelAssetId);
     assert.equal((await pool.query('SELECT id FROM model_assets WHERE job_id=$1', [submitted.id])).rowCount, 1);
     await pool.query('UPDATE exhibits SET version=version+1 WHERE id=$1', [setup.exhibit.id]);
+    // 自动入柜在 DONE 时已把版本再 +1：新提交前按库内最新版本发起。
+    const currentVersion = (await pool.query<{ version: number }>('SELECT version FROM exhibits WHERE id=$1', [setup.exhibit.id])).rows[0]?.version ?? 0;
     const next = await requestSingleModelGeneration(setup.actor, setup.museum.id, setup.exhibit.id,
-      { ...request(setup), expectedVersion: setup.exhibit.version + 1 }, pool);
+      { ...request(setup), expectedVersion: currentVersion }, pool);
     assert.notEqual(next.id, submitted.id);
     assert.equal(proxy.geometrySubmits, 2);
   } finally { await otherPool.end(); }
@@ -425,36 +427,48 @@ test('云 API 通道：配置齐全时走官方 Pro 协议，任务记录 provid
 });
 
 
-test('采纳完成的生成模型：展品记录模型资产、版本递增且旧确认失效', async (context) => {
+test('生成完成即自动入柜：模型挂到展品、版本递增、旧确认失效，重复采纳幂等', async (context) => {
   const setup = await fixture(context);
   const state: ProxyState = { geometryStatus: 2, textureStatus: 2, glbWithMaterial: true };
   await fakeProxy(context, state);
   const job = await requestSingleModelGeneration(setup.actor, setup.museum.id, setup.exhibit.id, request(setup), pool);
   const done = await getModelGenerationJob(setup.actor, setup.museum.id, setup.exhibit.id, job.id, pool);
   assert.equal(done.status, 'DONE');
+  // 自动入柜：DONE 即已挂接模型、版本 +1、旧确认失效，无需手动采纳。
+  const row = await pool.query<{ generated_model_asset_id: string; version: number; confirmed_version: number | null }>(
+    'SELECT generated_model_asset_id, version, confirmed_version FROM exhibits WHERE id=$1', [setup.exhibit.id]);
+  assert.equal(row.rows[0]?.generated_model_asset_id, done.modelAssetId);
+  assert.equal(row.rows[0]?.version, (setup.exhibit.version ?? 0) + 1);
+  assert.equal(row.rows[0]?.confirmed_version, null);
+  // 幂等：重复采纳（即使带旧版本号）返回当前展品，不撞版本冲突。
   const { adoptGeneratedModel } = await import('../../src/server/core/model-generation');
-  await pool.query('UPDATE exhibits SET confirmed_version=version,confirmed_by=$2,confirmed_at=now(),confirmation_note=$3 WHERE id=$1', [setup.exhibit.id, setup.actor, '已确认']);
-  const adopted = await adoptGeneratedModel(setup.actor, setup.museum.id, setup.exhibit.id, done.id, setup.exhibit.version, pool);
-  const confirmation = await pool.query('SELECT confirmed_by FROM exhibits WHERE id=$1', [setup.exhibit.id]);
-  assert.equal(confirmation.rows[0]?.confirmed_by, null);
-  assert.equal(adopted.generatedModelAssetId, done.modelAssetId);
-  assert.equal(adopted.version, setup.exhibit.version + 1);
-  assert.equal(adopted.confirmedVersion, null);
-  // 旧版本不能再次采纳；模型引用保持到下一次显式操作。
-  await assert.rejects(adoptGeneratedModel(setup.actor, setup.museum.id, setup.exhibit.id, done.id, setup.exhibit.version, pool),
-    (error: unknown) => error instanceof HttpError && error.failure.code === 'VERSION_CONFLICT');
+  const repeated = await adoptGeneratedModel(setup.actor, setup.museum.id, setup.exhibit.id, done.id, setup.exhibit.version, pool);
+  assert.equal(repeated.generatedModelAssetId, done.modelAssetId);
+  assert.equal(repeated.version, (setup.exhibit.version ?? 0) + 1);
 });
 
 
-test('过期生成结果即使照片不变也不能在新版本采纳', async (context) => {
+test('生成期间照片已变更：跳过自动入柜，手动采纳也被拒绝', async (context) => {
   const setup = await fixture(context);
   await fakeProxy(context, { geometryStatus: 2, textureStatus: 2, glbWithMaterial: true });
   const job = await requestSingleModelGeneration(setup.actor, setup.museum.id, setup.exhibit.id, request(setup), pool);
+  // 模拟生成期间用户换掉了建模照片：更新 model_input 与展品版本。
+  const second = randomUUID();
+  await withTransaction(async (db) => {
+    await db.query(`INSERT INTO assets(id,museum_id,original_name,kind,mime,byte_size,storage_key,width,height,sha256,created_by)
+      VALUES($1,$2,'changed.webp','image','image/webp',100,$3,256,256,$4,$5)`,
+      [second, setup.museum.id, `${second}/display.webp`, '1'.repeat(64), setup.actor]);
+    await db.query(`UPDATE exhibits SET model_input=jsonb_set(model_input,'{imageAssetId}',to_jsonb($2::text)),
+      version=version+1 WHERE id=$1`, [setup.exhibit.id, second]);
+  }, pool);
   await getModelGenerationJob(setup.actor, setup.museum.id, setup.exhibit.id, job.id, pool);
-  await pool.query('UPDATE exhibits SET version=version+1 WHERE id=$1', [setup.exhibit.id]);
+  // 照片已变更：自动入柜跳过，模型不入柜。
+  const row = await pool.query<{ generated_model_asset_id: string | null }>(
+    'SELECT generated_model_asset_id FROM exhibits WHERE id=$1', [setup.exhibit.id]);
+  assert.equal(row.rows[0]?.generated_model_asset_id ?? null, null);
   const { adoptGeneratedModel } = await import('../../src/server/core/model-generation');
   await assert.rejects(adoptGeneratedModel(setup.actor, setup.museum.id, setup.exhibit.id, job.id, setup.exhibit.version + 1, pool),
-    (error: unknown) => error instanceof HttpError && error.failure.code === 'VERSION_CONFLICT');
+    (error: unknown) => error instanceof HttpError && error.failure.code === 'VALIDATION_ERROR');
 });
 
 test('JSON 反代配置实际用于提交与查询，并保留测试来源策略', async (context) => {
