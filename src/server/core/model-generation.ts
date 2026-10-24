@@ -14,18 +14,37 @@ import { getPool, withTransaction } from '../db/pool';
 import { getServerConfig } from '../config';
 import { prepareGeneratedModel, resolveAssetPath } from '../assets/storage';
 import { createHunyuan3DClient, Hunyuan3DError } from '../integrations/hunyuan3d';
-import { readHunyuanCloudConfig } from '../integrations/hunyuan3d/config';
+import { readForcedProvider, readHunyuanCloudConfig, readSettingsProxyBaseUrl } from '../integrations/hunyuan3d/config';
 import { createHunyuanWebProxyClient } from '../integrations/hunyuan3d-proxy';
 import { readHunyuanProxyConfig } from '../integrations/hunyuan3d-proxy/config';
 import type { Hunyuan3DClient } from '../integrations/hunyuan3d/types';
 import { HttpError } from '../http';
-import { assertVersion, assetRecord, exhibitRecord, invalid, museumRecord, notFound, requireActor } from './records';
+import { assertVersion, assetRecord, bumpMuseum, exhibitRecord, invalid, museumRecord, notFound, requireActor } from './records';
 
 /** 网络调用在事务外；提交结果未知保留 SUBMITTING，核对上游前不再付费提交。 */
 function selectedProvider(): 'hunyuan-cloud' | 'hunyuan-proxy' {
+  // 通道锁定：.local/model-provider.json 优先，其次 HUNYUAN_PROVIDER；
+  // 都未指定时按可用性自动选择（云 API 优先）。
+  const forced = readForcedProvider();
+  if (forced === 'hunyuan-proxy') {
+    proxyConfig();
+    return 'hunyuan-proxy';
+  }
+  if (forced === 'hunyuan-cloud') {
+    if (!readHunyuanCloudConfig()) {
+      throw new HttpError({ code: 'GENERATION_UNAVAILABLE', message: '已指定云 API 通道，但密钥/地域配置缺失。' });
+    }
+    return 'hunyuan-cloud';
+  }
   if (readHunyuanCloudConfig()) return 'hunyuan-cloud';
-  readHunyuanProxyConfig();
+  proxyConfig();
   return 'hunyuan-proxy';
+}
+
+function proxyConfig(): ReturnType<typeof readHunyuanProxyConfig> {
+  const baseUrl = readSettingsProxyBaseUrl();
+  if (baseUrl !== undefined) return readHunyuanProxyConfig({ ...process.env, HUNYUAN_PROXY_BASE_URL: baseUrl });
+  return readHunyuanProxyConfig();
 }
 
 function providerForJob(provider: string, pool: Pool, jobId: string): Hunyuan3DClient {
@@ -40,7 +59,7 @@ function providerForJob(provider: string, pool: Pool, jobId: string): Hunyuan3DC
 
 function proxyClient(pool: Pool, jobId: string): Hunyuan3DClient {
   return createHunyuanWebProxyClient({
-    ...readHunyuanProxyConfig(),
+    ...proxyConfig(),
     // 持久化 claim 在发送纹理请求前完成；多进程与重启后也不会重复提交。
     async claimTextureSubmission(geometryId) {
       const claimed = await pool.query(
@@ -101,10 +120,29 @@ async function loadStats(db: PoolClient, modelAssetId: string | null): Promise<R
   return modelGlbStatsSchema.parse(row.stats);
 }
 
-function describeFailure(error: unknown): { code: string; message: string } {
+/**
+ * 把上游失败翻译成可操作提示。上游错误码只保留形如 `ResourceUnavailable.NotExist`
+ * 的安全标识（不含自由文本），便于在任务表里定位；额度/未开通/地域/鉴权分开展示。
+ */
+export function describeGenerationFailure(error: unknown): { code: string; message: string } {
   if (error instanceof Hunyuan3DError) {
+    const upstream = error.upstreamCode ?? '';
+    const safeUpstream = /^(?:\d{1,12}|[A-Za-z][A-Za-z0-9.]{0,60})$/.test(upstream) ? upstream : undefined;
+    if (/^ResourceUnavailable\.NotExist$/i.test(upstream)) {
+      return { code: upstream, message: '该账号未开通混元生3D 或资源不可用：请在腾讯云控制台开通本服务并领取额度，地域使用 ap-guangzhou。' };
+    }
+    if (/^UnsupportedRegion$/i.test(upstream)) {
+      return { code: upstream, message: '该地域不支持混元生3D：请把地域改为 ap-guangzhou。' };
+    }
+    if (/^AuthFailure/i.test(upstream)) {
+      return { code: safeUpstream ?? error.code, message: '云 API 鉴权失败：请检查 SecretId/SecretKey 与子账号是否具备混元生3D 权限。' };
+    }
+    if (/insufficient|balance|quota|limit|exceeded/i.test(upstream)) {
+      return { code: /^[A-Za-z][A-Za-z0-9.]{0,60}$/.test(upstream) ? upstream : 'QUOTA_EXHAUSTED',
+        message: '当前 API 额度已用完。请在服务端更换 API 凭据（.local/model-provider.json）或补充额度后重试。' };
+    }
     const messages: Record<string, string> = {
-      CONFIG_INVALID: '三维生成服务配置无效，请检查本机反代。',
+      CONFIG_INVALID: '三维生成服务配置无效，请检查服务端配置。',
       INPUT_INVALID: '照片不满足生成要求（每边 128–5000 像素、JPEG/PNG/WebP、不超过 6MB）。',
       UPSTREAM_ERROR: '混元上游拒绝了请求，请稍后重试或更换照片。',
       TIMEOUT: '三维生成服务请求超时，请稍后重试。',
@@ -114,9 +152,7 @@ function describeFailure(error: unknown): { code: string; message: string } {
       RESULT_URL_REJECTED: '生成结果地址未通过来源校验，本次任务已终止。',
       JOB_FAILED: '上游任务执行失败，可重新生成。',
     };
-    const message = messages[error.code] ?? '三维生成服务暂时不可用，请稍后重试。';
-    // 上游任意文本不可进入 API 或数据库错误字段。
-    return { code: error.upstreamCode && /^\d{1,12}$/.test(error.upstreamCode) ? error.upstreamCode : error.code, message };
+    return { code: safeUpstream ?? error.code, message: messages[error.code] ?? '三维生成服务暂时不可用，请稍后重试。' };
   }
   if (error instanceof HttpError) return { code: 'GENERATION_UNAVAILABLE', message: error.message };
   return { code: 'GENERATION_UNAVAILABLE', message: '三维生成服务暂时不可用，请稍后重试。' };
@@ -204,10 +240,11 @@ export async function requestSingleModelGeneration(
     if (stored.asset.kind !== 'image') invalid('生成需要图片素材。');
     const bytes = new Uint8Array(await readFile(resolveAssetPath(uploadDir, stored.storageKey)));
     submissionStarted = true;
-    const { jobId } = await providerForJob(provider, pool, claim.jobId).submitImage({
+    const requests = {
       image: { bytes, mime: stored.asset.contentType as 'image/webp', width: stored.asset.width, height: stored.asset.height },
       enablePbr: true,
-    });
+    };
+    const { jobId } = await providerForJob(provider, pool, claim.jobId).submitImage(requests);
     externalAccepted = true;
     await withTransaction(async (db) => {
       await db.query(
@@ -217,7 +254,7 @@ export async function requestSingleModelGeneration(
   } catch (error) {
     const rejected = !externalAccepted && (!submissionStarted || (error instanceof Hunyuan3DError &&
       (['CONFIG_INVALID', 'INPUT_INVALID'].includes(error.code) || error.upstreamCode !== undefined)));
-    const failure = rejected ? describeFailure(error) : {
+    const failure = rejected ? describeGenerationFailure(error) : {
       code: 'SUBMIT_UNKNOWN', message: '提交结果未知，请由管理员核对上游任务后处理，当前不会再次提交。',
     };
     await withTransaction(async (db) => {
@@ -325,7 +362,7 @@ async function advanceJob(actorId: string, museumId: string, exhibitId: string, 
       throw error;
     }
     if (error instanceof Hunyuan3DError && ['INVALID_GLB', 'RESULT_MISSING', 'RESULT_URL_REJECTED', 'DOWNLOAD_FAILED'].includes(error.code)) {
-      const failure = describeFailure(error);
+      const failure = describeGenerationFailure(error);
       await withTransaction(async (db) => {
         await failJob(db, jobId, failure.code, failure.message);
       }, pool);
@@ -351,4 +388,33 @@ export async function getLatestModelGenerationJob(
   }, pool);
   if (latest === null) return null;
   return getModelGenerationJob(actorId, museumId, exhibitId, latest, pool);
+}
+
+/**
+ * 采纳已完成的生成模型到展柜。只替换工作台的展示模型引用，不改照片与讲述：
+ * 展品版本 +1、旧确认失效（与人工修改一致），公开快照仍需重新发布。
+ * 公开参观页在快照支持模型前继续使用照片。
+ */
+export async function adoptGeneratedModel(
+  actorId: string, museumId: string, exhibitId: string, jobId: string, expectedVersion: number,
+  pool: Pool = getPool(),
+) {
+  return withTransaction(async (db) => {
+    await requireActor(db, actorId);
+    await museumRecord(db, actorId, museumId, true);
+    const current = await exhibitRecord(db, museumId, exhibitId);
+    assertVersion(current.version, expectedVersion);
+    const job = await loadJob(db, museumId, exhibitId, jobId);
+    if (job.status !== 'DONE' || job.modelAssetId === null) invalid('只能采纳已完成的生成任务。');
+    assertVersion(current.version, job.sourceVersion);
+    if (current.modelInput.mode !== 'single' || job.inputAssetId !== current.modelInput.imageAssetId) {
+      invalid('当前展品的建模照片已变更，请重新生成后再采纳。');
+    }
+    await db.query(
+      `UPDATE exhibits SET generated_model_asset_id=$2, version=version+1, confirmed_version=NULL,
+         confirmation_note=NULL, confirmed_by=NULL, confirmed_at=NULL, updated_at=now()
+       WHERE id=$1 AND museum_id=$3`, [exhibitId, job.modelAssetId, museumId]);
+    await bumpMuseum(db, museumId);
+    return exhibitRecord(db, museumId, exhibitId);
+  }, pool);
 }

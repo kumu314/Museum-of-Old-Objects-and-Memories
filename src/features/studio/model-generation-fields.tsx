@@ -12,9 +12,10 @@ import { apiRequest, describeFailure, jsonRequest } from './api';
 
 const STATUS_LABELS = { SUBMITTING: '提交中…', WAIT: '已受理，排队中…', RUN: '生成中…', FAIL: '失败', DONE: '已完成' } as const;
 
-export function ModelGenerationFields({ museumId, exhibitId, exhibitVersion, dirty, input, photoAssetId, disabled, onChange, onBusy, onError }: {
+export function ModelGenerationFields({ museumId, exhibitId, exhibitVersion, dirty, input, photoAssetId, disabled, onChange, onBusy, onError, onAdopt }: {
   museumId: string; exhibitId: string | null; exhibitVersion: number | null; dirty: boolean; input: ModelInput; photoAssetId: string | null; disabled: boolean;
   onChange: (input: ModelInput) => void; onBusy: (busy: boolean) => void; onError: (error: string | null) => void;
+  onAdopt: (jobId: string) => Promise<void>;
 }) {
   const assetPath = `/api/museums/${encodeURIComponent(museumId)}/assets`;
   const [storedJob, setJob] = useState<ModelGenerationJob | null>(null);
@@ -129,6 +130,10 @@ export function ModelGenerationFields({ museumId, exhibitId, exhibitVersion, dir
     {!active && generateBlockReason && <p className="wb-hint">{generateBlockReason}</p>}
     {pollError && <p role="status" className="wb-hint">{pollError}</p>}
     {statusText && <p role="status">{statusText}{job?.status === 'DONE' && job.modelAssetId && <> · <a href={modelAssetPath(museumId, job.modelAssetId)} download={`model-${job.id}.glb`}>下载 GLB</a></>}</p>}
-    {job?.status === 'DONE' && job.stats && <p>结果规模：{job.stats.meshCount} 网格 / {job.stats.materialCount} 材质 / {Math.round(job.stats.byteLength / 1024)} KB。入柜采纳与发布接入将在后续版本开放。</p>}
+    {job?.status === 'DONE' && job.stats && <p>结果规模：{job.stats.meshCount} 网格 / {job.stats.materialCount} 材质 / {Math.round(job.stats.byteLength / 1024)} KB。</p>}
+    {job?.status === 'DONE' && job.modelAssetId && <div className="wb-actions">
+      <button type="button" className="wb-secondary" disabled={disabled || dirty} onClick={() => { void onAdopt(job.id); }}>采纳入柜 · 替换照片展示</button>
+      {dirty && <span className="wb-hint">先保存草稿后再采纳。</span>}
+    </div>}
   </section>;
 }

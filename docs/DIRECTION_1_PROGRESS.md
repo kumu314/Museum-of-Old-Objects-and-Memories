@@ -17,6 +17,9 @@
 
 ## 已实现的代码
 
+> 编号注记：2026-10-24 深夜主仓库并行合入 0008_discovery_views 等方向二迁移，方向一四个迁移重编号为 `0013_museum_access`—`0016_memoir_records`（内容不变）；下文表格按当时编号记录。
+
+
 | 范围 | 入口 | 实际行为 |
 | --- | --- | --- |
 | 共享契约 | `src/contracts/discovery.ts`、`social.ts`、`memoir.ts`、`direction1-demo.ts`；现有 `primitives.ts`、`errors.ts`、`index.ts` 增量扩展 | 严格输入白名单、公开投影、版本/操作标识、三态访问、社交与自传数据；类型从 Zod 推导，无第二套 fixture 类型 |

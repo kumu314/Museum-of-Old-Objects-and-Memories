@@ -158,3 +158,6 @@
 .workbench-share-link .wb-actions { margin-top: 12px; }
 .workbench-pending-list { list-style: none; padding: 0; margin: 12px 0; display: grid; gap: 5px; }
 .workbench-pending-list button { font-size: 12px; overflow-wrap: anywhere; }
+
+.workbench-discovery-consent { display: flex; align-items: flex-start; gap: 10px; line-height: 1.8; }
+.memory-workbench .workbench-discovery-consent input { flex: 0 0 auto; width: 18px; height: 18px; margin: 5px 0 0; padding: 0; accent-color: var(--wb-brass); }

@@ -48,9 +48,9 @@
 
 ## 迁移与运行边界
 
-`0008_museum_access.sql` 以 access_mode 为权威，保留 share_enabled 为受触发器约束的兼容投影。原有效分享转 link_only，其他馆保持 private，零自动公开；旧 token 的哈希与快照不变。私密时清除 token/epoch，公开时必须有封存的当前本馆快照。旧二进制只写 share_enabled 会失败，不能混用旧服务写入器。
+`0013_museum_access.sql` 以 access_mode 为权威，保留 share_enabled 为受触发器约束的兼容投影。原有效分享转 link_only，其他馆保持 private，零自动公开；旧 token 的哈希与快照不变。私密时清除 token/epoch，公开时必须有封存的当前本馆快照。旧二进制只写 share_enabled 会失败，不能混用旧服务写入器。
 
-`0009_discovery_directory.sql` 增加空的演示名单、主动填写的昵称、关注、收藏、馆/快照标签和无正文回执。`0010_museum_comments.sql` 增加留言、根线程约束、设置、禁评及回执结果标识。`0011_memoir_records.sql` 增加在线自传与可删除的独立章节发布记录。旧迁移未重写。
+`0014_discovery_directory.sql` 增加空的演示名单、主动填写的昵称、关注、收藏、馆/快照标签和无正文回执。`0015_museum_comments.sql` 增加留言、根线程约束、设置、禁评及回执结果标识。`0016_memoir_records.sql` 增加在线自传与可删除的独立章节发布记录。旧迁移未重写。
 
 迁移只在本机新建的隔离 PostgreSQL 18 集群中运行；未操作原开发库或生产库。实际部署前仍需按项目手册准备配套备份、恢复验证、迁移顺序和应用切换。不能在旧代码与新代码混跑时迁移该访问模型。
 

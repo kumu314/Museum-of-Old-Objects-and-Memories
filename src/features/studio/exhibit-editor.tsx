@@ -127,6 +127,19 @@ export function ExhibitEditor({ museum, initial, slotIndex, resetKey, cabinet, p
     } catch (failure) { setError(describeFailure(failure)); }
     finally { pending(null); }
   }
+  async function adoptModel(jobId: string) {
+    if (!saved) return;
+    pending('采纳模型');
+    setError(null);
+    try {
+      const updated = await apiRequest(`${path}/${saved.id}/model/jobs/${jobId}/adopt`, exhibitDraftSchema, jsonRequest('POST', { expectedVersion: saved.version }));
+      setSaved(updated); setFields(editable(updated, slotIndex)); onDirty(false);
+      setMessage('模型已采纳，展柜将改为展示生成的模型；确认与发布仍需重新完成。');
+      await onSaved(updated);
+    } catch (error) { setError(describeFailure(error)); }
+    finally { pending(null); }
+  }
+
   async function generate() {
     if (!saved || disabled || dirty || draftEdited) return;
     pending('整理故事'); setError(null); setMessage(null);
@@ -185,7 +198,7 @@ export function ExhibitEditor({ museum, initial, slotIndex, resetKey, cabinet, p
             onAsset={(asset) => change(asset.kind === 'image' ? 'photoAssetId' : 'audioAssetId', asset.id)}
             onBusy={(uploading) => pending(uploading ? '上传素材' : null)} onError={setError} />
           {(fields.photoAssetId || fields.audioAssetId) && <div className="wb-actions">{fields.photoAssetId && <button type="button" className="wb-text-link" onClick={() => change('photoAssetId', null)}>移除图片关联</button>}{fields.audioAssetId && <button type="button" className="wb-text-link" onClick={() => change('audioAssetId', null)}>移除录音关联</button>}</div>}
-          <ModelGenerationFields museumId={museum.id} exhibitId={saved?.id ?? null} exhibitVersion={saved?.version ?? null} dirty={dirty} input={fields.modelInput} photoAssetId={fields.photoAssetId} disabled={disabled} onChange={(input) => change('modelInput', input)} onBusy={(uploading) => pending(uploading ? '上传建模照片' : null)} onError={setError} />
+          <ModelGenerationFields museumId={museum.id} exhibitId={saved?.id ?? null} exhibitVersion={saved?.version ?? null} dirty={dirty} input={fields.modelInput} photoAssetId={fields.photoAssetId} disabled={disabled} onChange={(input) => change('modelInput', input)} onBusy={(uploading) => pending(uploading ? '上传建模照片' : null)} onError={setError} onAdopt={adoptModel} />
           <Field label="素材来源与使用说明" hint="请据实说明照片、录音的来源及允许的使用范围。保存前需填写，随展品公开。"><textarea required rows={2} value={fields.sourceNotice} placeholder="这些照片和录音由谁提供，允许用于什么用途？" onChange={(event) => change('sourceNotice', event.target.value)} /></Field>
           <details className="workbench-details"><summary>年代、格位与展示说明</summary><div className="workbench-fields">
             <Field label="约略年代" hint="记不清可以保留“年代待考”。"><input required maxLength={80} value={fields.era} onChange={(event) => change('era', event.target.value)} /></Field>
@@ -198,7 +211,7 @@ export function ExhibitEditor({ museum, initial, slotIndex, resetKey, cabinet, p
       <section className="workbench-column" id={`${id}-story`} role="tabpanel" aria-labelledby={`${id}-tab-story`} data-active={tab === 'story'}>
         <header className="workbench-section-heading"><h2>关于它，也关于你们</h2><span>02 / 记下回忆</span></header>
         <fieldset disabled={disabled} className="workbench-fields">
-          <Field label="共同回忆 · 原始讲述" hint="按自己的话写，记不清的地方也可以留下。原始讲述和录音文字合计最多 12000 字。"><textarea id={`${id}-story-input`} className="workbench-story-input" rows={8} value={fields.rawStory} placeholder="它与你和谁有关？你们一起经历过什么？为什么想把它留下来？从最想说的那一段开始。" onChange={(event) => change('rawStory', event.target.value)} /></Field>
+          <Field label="共同回忆 · 原始讲述" hint="按自己的话写，记不清的地方也可以留下。原始讲述和录音文字分别保存，当前编辑器中两项合计最多 12000 字。"><textarea id={`${id}-story-input`} className="workbench-story-input" rows={8} value={fields.rawStory} placeholder="它与你和谁有关？你们一起经历过什么？为什么想把它留下来？从最想说的那一段开始。" onChange={(event) => change('rawStory', event.target.value)} /></Field>
           <details className="workbench-details"><summary>添加录音整理文本（可选）</summary><Field label="人工整理的录音文字" hint="与上面的讲述分别保存。当前没有自动转写，请复听录音后填写。"><textarea rows={4} value={fields.transcript ?? ''} onChange={(event) => change('transcript', event.target.value || null)} /></Field></details>
         </fieldset>
         <div className="workbench-story-action"><div><h3>整理成一段展签</h3><p className="wb-hint">只整理你提供的事实，保留不确定的表达。</p></div><button type="button" className="wb-secondary" disabled={disabled || dirty || draftEdited || !saved || saved.sourceSegments.length === 0} onClick={generate}>{busy === '整理故事' ? '正在整理…' : '整理故事'}</button></div>

@@ -89,6 +89,7 @@ export function ContributionBoard() {
       <p className={styles.demoBanner} role="note">
         <strong>DEMO</strong>　本页人物、讲述与邀请全部为演示数据，不是真实用户、真实征集内容或真实授权记录。
         可以切换身份试操作，但这里没有数据库、没有接口，刷新即还原。
+        {' '}<a className={styles.link} href="/coauthor">去我的真实工作台 →</a>
       </p>
 
       <section className={styles.viewerBar} aria-label="演示身份切换">

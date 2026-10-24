@@ -27,7 +27,7 @@
 
 - 依据任务单以当前工作区源码快照建立独立目录 `C:/Users/33552/Desktop/shiwuguan-world-demo`（仓库外），复制时排除 `.git`、`node_modules`、`.next`、`.local`、`dist`、`.env*`；保留 `pnpm-lock.yaml`。
 - 依赖：Node 26.12.0（`C:/Users/33552/.local/node-tools/node-v26.12.0-win-x64/node.exe`）+ pnpm 12.14.0（默认 PATH 的 pnpm shim 损坏，经 `pnpm.cjs`/`pnpm.mjs` 真实入口调用），`pnpm install --frozen-lockfile` 安装，未升级任何依赖。
-- 数据库：`.local/pg-tools` 内 PostgreSQL 18.6 新建专属集群 `pgdata-worlddemo-qa`，监听 `127.0.0.1:17726`（任务单分配端口，启动前确认空闲）；迁移 0001–0011 全部应用；未触碰 17682、5432、17714、17716 或原仓库数据库/上传目录。
+- 数据库：`.local/pg-tools` 内 PostgreSQL 18.6 新建专属集群 `pgdata-worlddemo-qa`，监听 `127.0.0.1:17726`（任务单分配端口，启动前确认空闲）；迁移 0001–0011 全部应用（当时编号；后因主仓库并行迁移重编号，方向一四个迁移现为 0013–0016）；未触碰 17682、5432、17714、17716 或原仓库数据库/上传目录。
 - 预览：独立目录内 `next dev --webpack` 监听 `127.0.0.1:17724`（任务单分配端口，启动前确认空闲）；`APP_ORIGIN=http://127.0.0.1:17724`，独立上传目录 `~/.local/worlddemo-qa-uploads`。
 - 浏览器验收账号为本次新建的合成账号 `worldqa01`（密码仅存在于本次隔离库与会话内，不入库、不入 Git），另在浏览器注册流程中实际注册成功一次。
 

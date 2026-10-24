@@ -28,6 +28,7 @@ const editableExhibit = {
 };
 
 const draft = exhibitDraftSchema.parse({
+  generatedModelAssetId: null,
   ...editableExhibit,
   id: exhibitId,
   museumId,
@@ -53,7 +54,7 @@ test('公开投影只含展示字段，公开边界拒绝内部讲述、AI草稿
 
 test('本人预览可展示尚未确认的草稿，但序列化数据不带原始讲述或建模输入', () => {
   const museum = museumDraftSchema.parse({ id: museumId, title: '私有预览', description: '全馆简介', version: 1, publishedVersion: null, shareEnabled: false,
-    accessMode: 'private', accessEpoch: null, createdAt: timestamp, updatedAt: timestamp, exhibits: [{ ...draft, caption: '', modelKey: 'photo-plane' }] });
+accessMode: 'private', accessEpoch: null, regionCity: null, discoveryListed: false, createdAt: timestamp, updatedAt: timestamp, exhibits: [{ ...draft, caption: '', modelKey: 'photo-plane' }] });
   const display = toMuseumDisplay(museum);
   assert.equal(display.exhibits[0]?.caption, '');
   assert.equal(publicMuseumSchema.safeParse({ ...display, publishedAt: timestamp }).success, false);

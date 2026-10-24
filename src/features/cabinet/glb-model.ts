@@ -8,7 +8,9 @@ export const glbModelSourceSchema = z.strictObject({
   assetId: z.string().min(1), version: z.string().min(1), url: z.string().min(1),
 });
 export type GlbModelSource = z.infer<typeof glbModelSourceSchema>;
-export const modelBudget = { bytes: 32 * 1024 * 1024, triangles: 250_000, textureDimension: 4096, texturePixels: 32_000_000 } as const;
+// 演示临时上限：云 API Pro 默认输出约 38–40 MB、50 万面，原 32 MiB/25 万面
+// 会直接拒绝真实结果。目标设备的最终预算仍待 A/D 实测后冻结（见 MODEL_HANDOFF）。
+export const modelBudget = { bytes: 64 * 1024 * 1024, triangles: 600_000, textureDimension: 4096, texturePixels: 32_000_000 } as const;
 export interface ModelStats { triangles: number; textures: number; texturePixels: number }
 
 export function resolveModelUrl(input: string, base: string): string {
@@ -28,7 +30,7 @@ const embeddedDocument = z.looseObject({
 });
 /** A bounded, embedded-only GLB gate; full asset validation still belongs to C/D. */
 export function checkGlbContainer(buffer: ArrayBuffer): void {
-  if (buffer.byteLength > modelBudget.bytes) throw new Error('模型文件超过 32 MiB，请降低模型精度。');
+  if (buffer.byteLength > modelBudget.bytes) throw new Error('模型文件超过 64 MiB，请降低模型精度。');
   if (buffer.byteLength < 20) throw new Error('模型不是完整的 GLB 文件。');
   const view = new DataView(buffer);
   if (view.getUint32(0, true) !== 0x46546c67 || view.getUint32(4, true) !== 2 || view.getUint32(8, true) !== buffer.byteLength) throw new Error('模型不是有效的 GLB 2.0 文件。');
@@ -51,7 +53,7 @@ export function checkGlbContainer(buffer: ArrayBuffer): void {
 export async function readModelResponse(response: Response, signal: AbortSignal): Promise<ArrayBuffer> {
   if (!response.ok) throw new Error(`模型读取失败（HTTP ${response.status}）。`);
   if (Number(response.headers.get('content-length')) > modelBudget.bytes) {
-    await response.body?.cancel(); throw new Error('模型文件超过 32 MiB，请降低模型精度。');
+    await response.body?.cancel(); throw new Error('模型文件超过 64 MiB，请降低模型精度。');
   }
   if (!response.body) throw new Error('模型响应没有内容。');
   const reader = response.body.getReader();
@@ -68,7 +70,7 @@ export async function readModelResponse(response: Response, signal: AbortSignal)
       signal.throwIfAborted();
       if (result.done) break;
       size += result.value.byteLength;
-      if (size > modelBudget.bytes) { await reader.cancel(); throw new Error('模型文件超过 32 MiB，请降低模型精度。'); }
+      if (size > modelBudget.bytes) { await reader.cancel(); throw new Error('模型文件超过 64 MiB，请降低模型精度。'); }
       parts.push(result.value);
     }
   } finally {
