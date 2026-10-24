@@ -15,7 +15,7 @@ if "$NODE" scripts/scan-noise.mjs; then echo "  → 通过"; else echo "  → �
 
 echo
 echo "== 2/3 提交信息检查（$COMMIT_RANGE）=="
-if "$NODE" scripts/lint-commit.mjs --range "$COMMIT_RANGE"; then
+if "$NODE" --test scripts/lint-commit.test.mjs && "$NODE" scripts/lint-commit.mjs --range "$COMMIT_RANGE"; then
   echo "  → 通过"
 else
   echo "  → 失败"
