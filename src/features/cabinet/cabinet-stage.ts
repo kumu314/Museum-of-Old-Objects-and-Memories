@@ -143,7 +143,7 @@ export function mountCabinetStage(canvas: HTMLCanvasElement, items: readonly Cab
   dropIndicator.visible = false; dropIndicator.renderOrder = 20; scene.add(dropIndicator);
   let renderer: WebGLRenderer | null = null;
   let contextControl: WEBGL_lose_context | null = null;
-  let failureReason: WebglFailure | 'canvas-context' | null = null;
+  let failureReason: WebglFailure | 'canvas-context' | 'restore-timeout' | null = null;
   let glassEnvironmentTarget: WebGLRenderTarget | null = null;
   let environmentTarget: WebGLRenderTarget | null = null;
   let surfaceStatus: SurfaceStatus = 'unavailable';
@@ -181,7 +181,7 @@ export function mountCabinetStage(canvas: HTMLCanvasElement, items: readonly Cab
   }));
 
   function notifySurface(status: SurfaceStatus) { surfaceStatus = status; options.onSurfaceStatus(status); }
-  function failWebgl(reason: WebglFailure | 'canvas-context') {
+  function failWebgl(reason: WebglFailure | 'canvas-context' | 'restore-timeout') {
     failureReason = reason;
     // 只报结论，不把 Three 内部的 Error 对象再抛到控制台：这条路径是预期内的降级。
     console.warn(`三维展柜不可用（${reason}），已降级为静态界面`);
@@ -372,7 +372,7 @@ export function mountCabinetStage(canvas: HTMLCanvasElement, items: readonly Cab
     if (restoreDeadline !== null) window.clearTimeout(restoreDeadline);
     restoreDeadline = window.setTimeout(() => {
       restoreDeadline = null;
-      if (!destroyed && renderer === null) failWebgl('context-lost');
+      if (!destroyed && renderer === null) failWebgl('restore-timeout');
     }, 1500);
   }
   function onContextLost(event: Event) {

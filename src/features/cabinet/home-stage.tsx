@@ -17,15 +17,22 @@ const idleStatuses: Record<string, AssetStatus> = {
 };
 
 export function HomeCabinetStage() {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const hostRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<StageApi | null>(null);
   const [surface, setSurface] = useState<SurfaceStatus | 'loading'>('loading');
   const [assets, setAssets] = useState<Record<string, AssetStatus>>(idleStatuses);
   const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (canvas === null) return;
+    const host = hostRef.current;
+    if (host === null) return;
+    // 画布与 WebGL 上下文是永久绑定的：要重新初始化就只能换一张画布。
+    // StrictMode 双挂载、点重试、HMR 都会重跑这里，复用同一张只会拿回已丢失的上下文。
+    const canvas = document.createElement('canvas');
+    canvas.className = 'block w-full';
+    canvas.style.aspectRatio = '1.06 / 1';
+    canvas.setAttribute('aria-label', '六格木柜三维展柜：陈列相机、磁带、拍立得与信封');
+    host.prepend(canvas);
     const ids = items.map((item) => item.id);
     const controller = createInspectionController(ids);
     const stage = mountCabinetStage(canvas, items, controller, {
@@ -34,18 +41,17 @@ export function HomeCabinetStage() {
       onAssetStatus: (id, status) => setAssets((current) => ({ ...current, [id]: status })),
     });
     stageRef.current = stage;
-    return () => { stage.destroy(); stageRef.current = null; };
+    return () => { stage.destroy(); canvas.remove(); stageRef.current = null; };
   }, [attempt]);
 
   const unavailable = surface === 'unavailable' || surface === 'context-lost';
   const loading = surface === 'loading' || Object.values(assets).some((status) => status === 'loading');
   const anyFailed = Object.values(assets).some((status) => status === 'failed');
 
-  return <div className="relative" style={{
+  return <div ref={hostRef} className="relative" style={{
     maskImage: 'radial-gradient(102% 98% at 50% 46%, black 40%, rgba(0,0,0,.45) 62%, transparent 80%)',
     WebkitMaskImage: 'radial-gradient(102% 98% at 50% 46%, black 40%, rgba(0,0,0,.45) 62%, transparent 80%)',
   }}>
-    <canvas ref={canvasRef} className="block w-full" style={{ aspectRatio: '1.06 / 1' }} aria-label="六格木柜三维展柜：陈列相机、磁带、拍立得与信封" />
     {loading && !unavailable && <p role="status" className="absolute inset-x-0 bottom-4 text-center text-sm text-[#B7A994]">正在布置展柜…</p>}
     {unavailable && <div className="absolute inset-0 grid place-items-center rounded-xl border border-[#3A2D20] bg-[#19140F]">
       <div className="max-w-sm px-8 text-center">
