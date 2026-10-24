@@ -1,10 +1,11 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { publicMuseumSchema, type PublicMuseum } from '../../contracts/museum';
+import { publicMuseumSchema, type PublicExhibit, type PublicMuseum } from '../../contracts/museum';
 import { shareNotFoundMessage } from '../../contracts/errors';
 import type { AssetStatus, SurfaceStatus, mountCabinetStage } from '../cabinet/cabinet-stage';
 import { ApiFailure, apiRequest } from '../studio/api';
+import { cabinetPageCount, exhibitsOnPage } from '../studio/cabinet-pages';
 import { loginDestination } from '../studio/login-destination';
 import { createInspectionController } from './inspection-controller';
 import { publicStageItems, shareAssetUrl } from './public-stage-items';
@@ -59,16 +60,35 @@ export function SharedMuseum({ token, initialMuseum }: { token: string; initialM
 }
 
 function MuseumViewer({ museum, token, checking, onRefresh }: { museum: PublicMuseum; token: string; checking: boolean; onRefresh: () => void }) {
-  const [controller] = useState(() => createInspectionController(museum.exhibits.map(({ id }) => id)));
+  const [page, setPage] = useState(0);
+  const pageCount = cabinetPageCount(museum.exhibits);
+  const exhibits = useMemo(() => exhibitsOnPage(museum.exhibits, page), [museum.exhibits, page]);
+
+  return <main className={styles.museum}>
+    <div className="gallery-backdrop" aria-hidden="true"><div className="gallery-backdrop__vignette" /></div>
+    <header className={styles.header}><div><div className={styles.brand}><p className={styles.brandTitle}>拾物馆</p><span aria-hidden="true">·</span><h1>{museum.title}</h1></div>{museum.description && <p className={styles.description}>{museum.description}</p>}</div><button className={styles.refresh} disabled={checking} onClick={onRefresh}>{checking ? '正在核对…' : '重新读取展馆'}</button></header>
+    {/* Changing pages unmounts the old audio and stage, then starts a fresh overview. */}
+    <MuseumCabinetPage key={page} exhibits={exhibits} token={token} />
+    {pageCount > 1 && <nav className={styles.pagination} aria-label="展柜翻页">
+      <button type="button" disabled={page === 0} onClick={() => setPage(page - 1)}>← 上一页</button>
+      <span aria-live="polite">第 {page + 1} 页 / {pageCount} 页</span>
+      <button type="button" disabled={page === pageCount - 1} onClick={() => setPage(page + 1)}>下一页 →</button>
+    </nav>}
+    <footer className={styles.footer}>请按物主允许的范围分享与使用</footer>
+  </main>;
+}
+
+function MuseumCabinetPage({ exhibits, token }: { exhibits: readonly PublicExhibit[]; token: string }) {
+  const [controller] = useState(() => createInspectionController(exhibits.map(({ id }) => id)));
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
-  const items = useMemo(() => publicStageItems(museum.exhibits, token), [museum.exhibits, token]);
+  const items = useMemo(() => publicStageItems(exhibits, token), [exhibits, token]);
   const canvas = useRef<HTMLCanvasElement>(null);
   const story = useRef<HTMLElement>(null);
   const inspectionGuide = useRef<HTMLDivElement>(null);
   const stage = useRef<ReturnType<typeof mountCabinetStage> | null>(null);
   const [surface, setSurface] = useState<SurfaceStatus | 'loading'>('loading');
   const [assets, setAssets] = useState<ReadonlyMap<string, AssetStatus>>(() => new Map());
-  const selected = museum.exhibits.find(({ id }) => id === state.selectedId);
+  const selected = exhibits.find(({ id }) => id === state.selectedId);
   const selectedStatus = selected ? assets.get(selected.id) : undefined;
   const hasSelection = state.phase !== 'overview';
 
@@ -97,9 +117,7 @@ function MuseumViewer({ museum, token, checking, onRefresh }: { museum: PublicMu
   useEffect(() => { story.current?.scrollTo({ top: 0 }); }, [state.selectedId]);
 
   const phaseText = { overview: '展柜总览', focusing: '正在取出', inspecting: '', returning: '正在放回' };
-  return <main className={styles.museum}>
-    <div className="gallery-backdrop" aria-hidden="true"><div className="gallery-backdrop__vignette" /></div>
-    <header className={styles.header}><div><div className={styles.brand}><p className={styles.brandTitle}>拾物馆</p><span aria-hidden="true">·</span><h1>{museum.title}</h1></div>{museum.description && <p className={styles.description}>{museum.description}</p>}</div><button className={styles.refresh} disabled={checking} onClick={onRefresh}>{checking ? '正在核对…' : '重新读取展馆'}</button></header>
+  return <>
     <section className={styles.exhibition} aria-label="旧物展柜" data-phase={state.phase}>
       <div className={styles.stage}>
         <canvas ref={canvas} className={styles.canvas} style={{ visibility: surface === 'ready' ? 'visible' : 'hidden' }} tabIndex={0} aria-label="三维展柜；选择旧物取出，方向键旋转，加减键缩放，Esc 放回" />
@@ -110,7 +128,6 @@ function MuseumViewer({ museum, token, checking, onRefresh }: { museum: PublicMu
       {selected && <aside ref={story} className={`${styles.story} inspection-card`} aria-label="展品故事"><ExhibitStory key={selected.id} exhibit={selected} photoUrl={selected.photoAssetId === null ? null : shareAssetUrl(token, selected.photoAssetId)} audioUrl={selected.audioAssetId === null ? null : shareAssetUrl(token, selected.audioAssetId)} active={state.phase !== 'returning'} />{selectedStatus === 'failed' && <button onClick={() => stage.current?.retryModel(selected.id)}>重新加载模型</button>}</aside>}
     </section>
     <p className={styles.guide} data-inspecting={state.phase === 'inspecting'}>点击展柜中的旧物，取出查看立体细节并倾听物主讲述</p>
-    <nav className={styles.catalog} data-fallback={surface !== 'ready'} aria-label="选择展品">{[...museum.exhibits].sort((a, b) => a.slotIndex - b.slotIndex).map((exhibit) => <button key={exhibit.id} aria-pressed={exhibit.id === state.selectedId} onClick={() => controller.select(exhibit.id)}><span className={styles.slot}>{String(exhibit.slotIndex + 1).padStart(2, '0')}</span><span><strong>{exhibit.name}</strong><small>{exhibit.era}</small></span><span aria-hidden="true">↗</span></button>)}</nav>
-    <footer className={styles.footer}>请按物主允许的范围分享与使用</footer>
-  </main>;
+    <nav className={styles.catalog} data-fallback={surface !== 'ready'} aria-label="选择展品">{[...exhibits].sort((a, b) => a.slotIndex - b.slotIndex).map((exhibit) => <button key={exhibit.id} aria-pressed={exhibit.id === state.selectedId} onClick={() => controller.select(exhibit.id)}><span className={styles.slot}>{String(exhibit.slotIndex + 1).padStart(2, '0')}</span><span><strong>{exhibit.name}</strong><small>{exhibit.era}</small></span><span aria-hidden="true">↗</span></button>)}</nav>
+  </>;
 }

@@ -148,7 +148,7 @@ test('六格式HTTP验收：真实编码文件上传、私有读取、快照读�
       assert.ok(photo); assert.ok(voice);
       const exhibitResponse = await request(`/api/museums/${museumId}/exhibits`, 'POST', {
         name: `媒体验收 ${index + 1}`, era: '合成测试', slotIndex: index, modelKey: 'photo-plane',
-        caption: '合成媒体文件，仅用于验证上传、读取与分享撤销。', photoAssetId: photo.asset.id, audioAssetId: voice.asset.id,
+        caption: '合成媒体文件，仅用于验证上传、读取与分享撤销。', photoAssetId: photo.asset.id, audioAssetId: voice.asset.id, modelInput: { mode: 'single', imageAssetId: null },
         approximation: '实拍薄片验收', sourceNotice: '合成图与正弦波，不含物主内容。', rawStory: '', transcript: null,
         sourceSegments: [], expectedMuseumVersion: (await museum()).version,
       });

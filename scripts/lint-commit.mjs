@@ -18,8 +18,9 @@ const TYPES = [
 ];
 
 const HEADER = new RegExp(`^(${TYPES.join('|')})(\\([a-z0-9-]+\\))?: (\\S.*)$`);
+const GENERATED_MERGE_HEADER = /^Merge (?:(?:remote-tracking )?branch(?:es)?|pull request|tag|commit)\s.+$/;
 
-function checkOne(raw) {
+function checkOne(raw, isMerge = false) {
   const errors = [];
   const lines = raw.replace(/\r\n/g, '\n').split('\n');
 
@@ -28,6 +29,9 @@ function checkOne(raw) {
   if (!content) return ['提交信息为空'];
 
   const [header] = content.split('\n');
+
+  // Git 自动生成的合并标题采用独立格式，且必须有真实合并元数据。
+  if (isMerge && GENERATED_MERGE_HEADER.test(header)) return errors;
 
   const m = header.match(HEADER);
   if (!m) {
@@ -49,12 +53,26 @@ function readFile(p) {
   }
 }
 
-function rangeMessages(range) {
-  const out = execFileSync('git', ['log', '--format=%B%x00', range], {
+function rangeCommits(range) {
+  const out = execFileSync('git', ['log', '--format=%P%x00%B%x00', range], {
     encoding: 'utf8',
     maxBuffer: 10 * 1024 * 1024,
   });
-  return out.split('\0').map((s) => s.trim()).filter(Boolean);
+  const fields = out.split('\0');
+  const commits = [];
+  for (let i = 0; i + 1 < fields.length; i += 2) {
+    const parents = fields[i].trim().split(/\s+/).filter(Boolean);
+    commits.push({ message: fields[i + 1].trim(), isMerge: parents.length > 1 });
+  }
+  return commits;
+}
+
+function mergeInProgress() {
+  const mergeHeadPath = execFileSync('git', ['rev-parse', '--git-path', 'MERGE_HEAD'], {
+    encoding: 'utf8',
+  }).trim();
+  const mergeHeads = readFile(mergeHeadPath);
+  return mergeHeads !== null && mergeHeads.trim().length > 0;
 }
 
 const args = process.argv.slice(2);
@@ -74,10 +92,7 @@ if (file) {
     console.error(`读不到 ${file}`);
     process.exit(2);
   }
-  // 合并提交 / revert 自动放行
-  if (/^Merge (branch|pull request)/.test(raw.trim())) process.exit(0);
-
-  const errs = checkOne(raw);
+  const errs = checkOne(raw, mergeInProgress());
   if (errs.length) {
     failures++;
     console.error('\n✗ 提交信息没通过检查：\n');
@@ -95,18 +110,18 @@ if (file) {
 }
 
 if (range) {
-  let msgs;
+  let commits;
   try {
-    msgs = rangeMessages(range);
+    commits = rangeCommits(range);
   } catch (e) {
     console.error(`⚠ 无法读取提交范围 ${range}（${e.code || e.message}）`);
     process.exit(2);
   }
-  for (const msg of msgs) {
-    const errs = checkOne(msg);
+  for (const { message, isMerge } of commits) {
+    const errs = checkOne(message, isMerge);
     if (errs.length) {
       failures++;
-      console.error(`\n✗ ${msg.split('\n')[0]}`);
+      console.error(`\n✗ ${message.split('\n')[0]}`);
       for (const e of errs) console.error(`   • ${e}`);
     }
   }
@@ -114,7 +129,7 @@ if (range) {
     console.error(`\n${failures} 条提交信息不合格\n`);
     process.exit(1);
   }
-  console.log(`✓ ${msgs.length} 条提交信息全部通过`);
+  console.log(`✓ ${commits.length} 条提交信息全部通过`);
   process.exit(0);
 }
 

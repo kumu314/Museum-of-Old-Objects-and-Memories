@@ -60,7 +60,7 @@ test('HTTP制作发布与分享撤销：会话、CAS、确认、快照和统一�
     const base = `/api/museums/${museumId}`;
     await expectError(await request('/api/museums/not-a-uuid'), 404, 'NOT_FOUND');
     const exhibitFields = { name: '复古相机', era: '年代待考', slotIndex: 0, modelKey: 'camera-01', caption: '这是一件用于验收的演示展品。',
-      photoAssetId: null, audioAssetId: null, approximation: '候选演示模型', sourceNotice: '自动化验收，不代表真实物主记录。',
+      photoAssetId: null, audioAssetId: null, modelInput: { mode: 'single', imageAssetId: null }, approximation: '候选演示模型', sourceNotice: '自动化验收，不代表真实物主记录。',
       rawStory: '内部原文不应公开', transcript: null, sourceSegments: [{ id: 'raw-1', text: '内部原文不应公开', source: 'rawStory' }] };
     const added = await request(`${base}/exhibits`, 'POST', { ...exhibitFields, expectedMuseumVersion: initial.version });
     assert.equal(added.status, 201);

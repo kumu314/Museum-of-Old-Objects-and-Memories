@@ -27,7 +27,7 @@ export function dates(row: Record<string, unknown>) {
 
 export const exhibitColumns = `id, museum_id AS "museumId", name, era, slot_index AS "slotIndex", model_key AS "modelKey",
   caption, photo_asset_id AS "photoAssetId", audio_asset_id AS "audioAssetId", approximation, source_notice AS "sourceNotice",
-  raw_story AS "rawStory", transcript, source_segments AS "sourceSegments", version, confirmed_version AS "confirmedVersion",
+  raw_story AS "rawStory", transcript, source_segments AS "sourceSegments", model_input AS "modelInput", version, confirmed_version AS "confirmedVersion",
   confirmation_note AS "confirmationNote", confirmed_at AS "confirmedAt", created_at AS "createdAt", updated_at AS "updatedAt"`;
 
 export async function requireActor(client: PoolClient, actorId: string): Promise<void> {

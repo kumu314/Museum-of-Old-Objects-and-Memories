@@ -39,7 +39,7 @@ async function twoAccounts(work: (db: PoolClient, owner: Account, stranger: Acco
 
 function exhibitInput(expectedMuseumVersion: number): CreateExhibitInput {
   return { name: '旧车票', era: '年代待考', slotIndex: 0, modelKey: 'ticket', caption: '归属测试展签',
-    photoAssetId: null, audioAssetId: null, approximation: '候选演示模型', sourceNotice: '仅作归属测试',
+    photoAssetId: null, audioAssetId: null, modelInput: { mode: 'single', imageAssetId: null }, approximation: '候选演示模型', sourceNotice: '仅作归属测试',
     rawStory: '内部原文不可公开', transcript: null,
     sourceSegments: [{ id: 'raw-1', text: '内部原文不可公开', source: 'rawStory' }], expectedMuseumVersion };
 }

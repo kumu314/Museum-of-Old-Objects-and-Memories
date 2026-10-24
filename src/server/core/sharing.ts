@@ -1,7 +1,7 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type { PoolClient } from 'pg';
 import { z } from 'zod';
-import { idSchema, publicMuseumSchema, publishResultSchema, shareNotFoundMessage, shareTokenSchema, toPublicExhibit } from '../../contracts';
+import { cabinetPosition, displayPhotoRequiredMessage, idSchema, missingDisplayPhoto, publicMuseumSchema, publishResultSchema, shareNotFoundMessage, shareTokenSchema, toPublicExhibit } from '../../contracts';
 import { HttpError } from '../http';
 import { inTransaction, museumDraft } from './museums';
 import { assertVersion, assetRecord, exhibitRecords, invalid, museumRecord, requireActor, validateAssets } from './records';
@@ -21,6 +21,8 @@ export function publishMuseum(actorId: string, museumId: string, expectedVersion
     assertVersion(museum.version, expectedVersion);
     const exhibits = await exhibitRecords(db, museumId);
     if (exhibits.length === 0) invalid('请先添加至少一件展品。');
+    const missingPhoto = exhibits.find(missingDisplayPhoto);
+    if (missingPhoto) invalid(`${cabinetPosition(missingPhoto.slotIndex)}「${missingPhoto.name}」：${displayPhotoRequiredMessage}`);
     const unconfirmedExhibitIds = exhibits.filter((item) => item.confirmedVersion !== item.version).map(({ id }) => id);
     if (unconfirmedExhibitIds.length) {
       throw new HttpError({ code: 'NOT_CONFIRMED', message: '请先确认列出的展品后再发布。', details: { unconfirmedExhibitIds } });

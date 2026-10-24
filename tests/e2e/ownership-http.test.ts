@@ -80,7 +80,7 @@ test('归属隔离HTTP：两个账号的列表、直接构造 ID 与素材上传
 
     const added = await request(`/api/museums/${museumId}/exhibits`, 'POST', {
       name: '旧车票', era: '年代待考', slotIndex: 0, modelKey: 'ticket', caption: '归属隔离验收展签',
-      photoAssetId: null, audioAssetId: null, approximation: '候选演示模型', sourceNotice: '自动化归属验收，不代表真实物主记录。',
+      photoAssetId: null, audioAssetId: null, modelInput: { mode: 'single', imageAssetId: null }, approximation: '候选演示模型', sourceNotice: '自动化归属验收，不代表真实物主记录。',
       rawStory: '内部原文不应公开', transcript: null,
       sourceSegments: [{ id: 'raw-1', text: '内部原文不应公开', source: 'rawStory' }],
       expectedMuseumVersion: (await museum()).version,
@@ -108,7 +108,7 @@ test('归属隔离HTTP：两个账号的列表、直接构造 ID 与素材上传
       await hiddenError(await otherRequest(museumPath, 'DELETE', { expectedVersion: current.version })),
       await hiddenError(await otherRequest(`${museumPath}/exhibits`, 'POST', {
         name: '越权展品', era: '年代待考', slotIndex: 1, modelKey: 'cassette', caption: '越权',
-        photoAssetId: null, audioAssetId: null, approximation: '候选演示模型', sourceNotice: '越权测试',
+        photoAssetId: null, audioAssetId: null, modelInput: { mode: 'single', imageAssetId: null }, approximation: '候选演示模型', sourceNotice: '越权测试',
         rawStory: '', transcript: null, sourceSegments: [], expectedMuseumVersion: current.version,
       })),
       await hiddenError(await otherRequest(`${museumPath}/publish`, 'POST', { expectedVersion: current.version })),

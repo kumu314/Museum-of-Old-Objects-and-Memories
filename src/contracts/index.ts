@@ -4,3 +4,4 @@ export * from './ai';
 export * from './museum';
 export * from './assets';
 export * from './session';
+export * from './model-generation';

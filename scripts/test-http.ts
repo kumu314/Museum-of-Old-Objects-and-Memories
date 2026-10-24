@@ -121,7 +121,7 @@ try {
   console.log('Isolated HTTP regression server ready; API and share route compiled.');
   const tests = spawn(process.execPath, ['--import', 'tsx', '--test', '--test-concurrency=1', '--test-timeout=180000',
     'tests/e2e/api-core.test.ts', 'tests/e2e/assets-http.test.ts', 'tests/e2e/ownership-http.test.ts',
-    'tests/e2e/registration-http.test.ts'], { cwd: root, env: environment, stdio: 'inherit' });
+    'tests/e2e/registration-http.test.ts', 'tests/e2e/share-access.test.ts', 'tests/e2e/owner-museum.test.ts'], { cwd: root, env: environment, stdio: 'inherit' });
   const code = await new Promise<number>((done, reject) => { tests.once('error', reject); tests.once('exit', (value) => done(value ?? 1)); });
   if (code !== 0) throw new Error(`HTTP regression failed with exit code ${code}.`);
 } catch (error) {

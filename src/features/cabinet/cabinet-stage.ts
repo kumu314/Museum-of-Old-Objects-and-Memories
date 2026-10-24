@@ -20,6 +20,7 @@ import { createGallerySurroundings } from './gallery-surroundings.ts';
 import { overviewOffset } from './overview-motion.ts';
 import { updateBrassPlaqueText } from './brass-plaque.ts';
 import type { CabinetArrangement } from './cabinet-arrangement.ts';
+import { createFrameClock } from './frame-clock.ts';
 
 // Rendering inputs only. The public snapshot remains owned by C's shared schema.
 export type CabinetStageItem = { readonly id: string; readonly slot: number; readonly plaqueText?: string } & (
@@ -32,6 +33,7 @@ export type AssetStatus = 'loading' | 'ready' | 'failed';
 type Controller = ReturnType<typeof createInspectionController>;
 export interface StageRenderStats { readonly cpuMs: number; readonly calls: number; readonly triangles: number; readonly textures: number; readonly geometries: number; readonly timestamp: number; readonly renderer: string }
 interface StageOptions {
+  readonly onSlotSelect?: (slot: number) => void;
   readonly onInspectionLayout?: (centerX: number, guideTop: number) => void;
   readonly onSlotDrop?: (id: string, targetSlot: number) => void;
   readonly onRenderStats?: (stats: StageRenderStats) => void;
@@ -124,7 +126,7 @@ export function mountCabinetStage(canvas: HTMLCanvasElement, items: readonly Cab
   let surfaceStatus: SurfaceStatus = 'unavailable';
   let frame = 0;
   let restoreTimer: number | null = null;
-  let lastTime = 0;
+  const frameClock = createFrameClock();
   let destroyed = false;
   let zoom = 1;
   let yaw = 0;
@@ -157,8 +159,7 @@ export function mountCabinetStage(canvas: HTMLCanvasElement, items: readonly Cab
   function render(time: number) {
     frame = 0;
     if (destroyed || renderer === null || surfaceStatus !== 'ready') return;
-    const delta = lastTime === 0 ? 1 / 60 : Math.min((time - lastTime) / 1000, 0.05);
-    lastTime = time;
+    const delta = frameClock.delta(time);
     const alpha = reducedMotion.matches ? 1 : 1 - Math.exp(-11 * delta);
     const state = controller.getSnapshot();
     const active = state.phase === 'focusing' || state.phase === 'inspecting';
@@ -238,7 +239,10 @@ export function mountCabinetStage(canvas: HTMLCanvasElement, items: readonly Cab
         renderer: String(gl.getParameter(debug === null ? gl.RENDERER : debug.UNMASKED_RENDERER_WEBGL)) });
     } else renderer.render(scene, camera);
     if (moving) invalidate();
-    else if (state.phase === 'returning' || (state.phase === 'focusing' && displayModels.some((model) => model.item.id === state.selectedId && model.status === 'ready'))) controller.finishTransition(state.transitionId);
+    else {
+      frameClock.reset();
+      if (state.phase === 'returning' || (state.phase === 'focusing' && displayModels.some((model) => model.item.id === state.selectedId && model.status === 'ready'))) controller.finishTransition(state.transitionId);
+    }
   }
   function resize() {
     if (renderer === null) return;
@@ -300,6 +304,7 @@ export function mountCabinetStage(canvas: HTMLCanvasElement, items: readonly Cab
   function onContextLost(event: Event) {
     cancelDrag();
     event.preventDefault(); if (frame !== 0) cancelAnimationFrame(frame); frame = 0;
+    frameClock.reset();
     if (restoreTimer !== null) window.clearTimeout(restoreTimer); restoreTimer = null;
     notifySurface('context-lost');
   }
@@ -311,7 +316,7 @@ export function mountCabinetStage(canvas: HTMLCanvasElement, items: readonly Cab
       if (destroyed) return;
       try {
         if (renderer !== null) contextControl = renderer.getContext().getExtension('WEBGL_lose_context');
-        rebuildEnvironment(); notifySurface('ready'); lastTime = 0; resize();
+        rebuildEnvironment(); notifySurface('ready'); frameClock.reset(); resize();
       }
       catch (error: unknown) { console.warn('无法恢复三维展示', error); renderer?.dispose(); renderer = null; notifySurface('unavailable'); }
     }, 0);
@@ -433,8 +438,10 @@ export function mountCabinetStage(canvas: HTMLCanvasElement, items: readonly Cab
   function onPointerLeave() { setHoveredSlot(null); }
   function onMotionPreferenceChange() { pointerOffset.set(0, 0); invalidate(); }
   function pick(event: PointerEvent) {
+    if (options.onSlotSelect && controller.getSnapshot().phase !== 'overview') return;
     if (controller.getSnapshot().phase === 'overview') {
       const slot = slotAtPointer(event);
+      if (slot !== null && options.onSlotSelect) { options.onSlotSelect(slot); return; }
       const model = displayModels.find((entry) => entry.slot === slot);
       if (model !== undefined) { controller.select(model.item.id); return; }
     }

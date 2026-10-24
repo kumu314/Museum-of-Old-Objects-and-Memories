@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import type { PoolClient } from 'pg';
-import { museumDraftSchema, museumSummarySchema, type CreateMuseumInput, type UpdateMuseumInput,
+import { displayPhotoRequiredMessage, missingDisplayPhoto, modelInputAssetIds, museumDraftSchema, museumSummarySchema, type CreateMuseumInput, type UpdateMuseumInput,
   type CreateExhibitInput, type UpdateExhibitInput, type ConfirmExhibitInput } from '../../contracts';
 import { withTransaction } from '../db/pool';
+import { HttpError } from '../http';
 import { assertVersion, dates, exhibitRecord, exhibitRecords, museumRecord, requireActor, validateAssets,
   bumpMuseum, invalid, assetRecord } from './records';
 
@@ -37,9 +38,23 @@ export function getMuseum(actorId: string, museumId: string, client?: PoolClient
 export function assertMuseumAccess(actorId: string, museumId: string, client?: PoolClient) {
   return inTransaction(async (db) => { await requireActor(db, actorId); await museumRecord(db, actorId, museumId); }, client);
 }
+export function getOwnMuseum(actorId: string, client?: PoolClient) {
+  return inTransaction(async (db) => {
+    await requireActor(db, actorId);
+    const result = await db.query<{ id: string }>('SELECT id FROM museums WHERE created_by=$1 AND deleted_at IS NULL', [actorId]);
+    if (result.rows.length > 1) throw new Error('One active museum per account migration is required.');
+    const row = result.rows[0];
+    return row ? museumDraft(db, actorId, row.id) : null;
+  }, client);
+}
 export function createMuseum(actorId: string, input: CreateMuseumInput, client?: PoolClient) {
   return inTransaction(async (db) => {
     await requireActor(db, actorId);
+    // Serialize repeated creation per account; the unique index also protects
+    // writes outside this service.
+    await db.query('SELECT id FROM team_members WHERE id=$1 FOR UPDATE', [actorId]);
+    const existing = await db.query('SELECT id FROM museums WHERE created_by=$1 AND deleted_at IS NULL', [actorId]);
+    if (existing.rowCount) throw new HttpError({ code: 'MUSEUM_EXISTS', message: '你已有自己的展馆，请进入现有展馆继续收录。' });
     const id = randomUUID();
     await db.query('INSERT INTO museums(id,title,description,created_by) VALUES($1,$2,$3,$4)', [id, input.title, input.description, actorId]);
     return museumDraft(db, actorId, id);
@@ -67,7 +82,10 @@ async function ensureFreeSlot(db: PoolClient, museumId: string, slotIndex: numbe
 }
 function editableValues(input: CreateExhibitInput | UpdateExhibitInput) {
   return [input.name, input.era, input.slotIndex, input.modelKey, input.caption, input.photoAssetId, input.audioAssetId,
-    input.approximation, input.sourceNotice, input.rawStory, input.transcript, JSON.stringify(input.sourceSegments)];
+    input.approximation, input.sourceNotice, input.rawStory, input.transcript, JSON.stringify(input.sourceSegments), JSON.stringify(input.modelInput)];
+}
+async function validateModelInput(db: PoolClient, museumId: string, input: CreateExhibitInput | UpdateExhibitInput) {
+  for (const id of new Set(modelInputAssetIds(input.modelInput))) await validateAssets(db, museumId, id, null);
 }
 export function createExhibit(actorId: string, museumId: string, input: CreateExhibitInput, client?: PoolClient) {
   return inTransaction(async (db) => {
@@ -75,9 +93,10 @@ export function createExhibit(actorId: string, museumId: string, input: CreateEx
     assertVersion((await museumRecord(db, actorId, museumId, true)).version, input.expectedMuseumVersion);
     await ensureFreeSlot(db, museumId, input.slotIndex, null);
     await validateAssets(db, museumId, input.photoAssetId, input.audioAssetId);
+    await validateModelInput(db, museumId, input);
     const id = randomUUID();
     await db.query(`INSERT INTO exhibits(name,era,slot_index,model_key,caption,photo_asset_id,audio_asset_id,approximation,source_notice,
-      raw_story,transcript,source_segments,id,museum_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`, [...editableValues(input), id, museumId]);
+      raw_story,transcript,source_segments,model_input,id,museum_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`, [...editableValues(input), id, museumId]);
     await bumpMuseum(db, museumId);
     return exhibitRecord(db, museumId, id);
   }, client);
@@ -89,9 +108,10 @@ export function updateExhibit(actorId: string, museumId: string, id: string, inp
     assertVersion((await exhibitRecord(db, museumId, id)).version, input.expectedVersion);
     await ensureFreeSlot(db, museumId, input.slotIndex, id);
     await validateAssets(db, museumId, input.photoAssetId, input.audioAssetId);
+    await validateModelInput(db, museumId, input);
     await db.query(`UPDATE exhibits SET name=$1,era=$2,slot_index=$3,model_key=$4,caption=$5,photo_asset_id=$6,audio_asset_id=$7,
-      approximation=$8,source_notice=$9,raw_story=$10,transcript=$11,source_segments=$12,version=version+1,confirmed_version=NULL,
-      confirmed_by=NULL,confirmed_at=NULL,confirmation_note=NULL,updated_at=now() WHERE id=$13 AND museum_id=$14`, [...editableValues(input), id, museumId]);
+      approximation=$8,source_notice=$9,raw_story=$10,transcript=$11,source_segments=$12,model_input=$13,version=version+1,confirmed_version=NULL,
+      confirmed_by=NULL,confirmed_at=NULL,confirmation_note=NULL,updated_at=now() WHERE id=$14 AND museum_id=$15`, [...editableValues(input), id, museumId]);
     await bumpMuseum(db, museumId);
     return exhibitRecord(db, museumId, id);
   }, client);
@@ -112,6 +132,7 @@ export function confirmExhibit(actorId: string, museumId: string, id: string, in
     await museumRecord(db, actorId, museumId, true);
     const exhibit = await exhibitRecord(db, museumId, id);
     assertVersion(exhibit.version, input.expectedVersion);
+    if (missingDisplayPhoto(exhibit)) invalid(displayPhotoRequiredMessage);
     if (exhibit.confirmedVersion === exhibit.version) return exhibit;
     if (!exhibit.caption.trim()) invalid('请先填写展签，再记录物主对当前内容的确认。');
     await db.query('UPDATE exhibits SET confirmed_version=version,confirmed_by=$1,confirmed_at=now(),confirmation_note=$2,updated_at=now() WHERE id=$3 AND museum_id=$4', [actorId, input.confirmationNote, id, museumId]);
