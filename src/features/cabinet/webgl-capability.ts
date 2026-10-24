@@ -1,8 +1,8 @@
-// WebGL2 能力预检：把"环境根本没有可用三维上下文"挡在 Three 之前。
+// WebGL2 上下文判据：把"句柄在、能力不在"这种形态识别出来。
 //
 // 真实故障形态不是 getContext 返回 null，而是返回一个句柄、但 getContextAttributes()
 // 为 null（无 GPU / 软件光栅被禁用 / headless 预览环境）。Three 的 WebGLRenderer
-// 构造器会直接读 attributes.alpha，于是抛 TypeError 而不是走可恢复的失败分支。
+// 构造器会直接读 attributes.alpha，于是抛 TypeError 而不是走可恢复的失败路径。
 
 export type WebglFailure = 'no-context' | 'threw' | 'context-lost' | 'no-attributes';
 export type WebglCapability = { readonly supported: true } | { readonly supported: false; readonly reason: WebglFailure };
@@ -30,10 +30,13 @@ export function webglFailure(context: ContextProbe): WebglFailure | null {
 export function clearWebglProbe() { proven = false; }
 
 /**
- * 在独立 canvas 上探测 WebGL2 能力。
+ * 在独立 canvas 上探测环境是否具备 WebGL2 能力，仅用于失败归因。
  *
- * 不复用目标 canvas：一个 canvas 一旦成功 getContext，后续无论传什么 attribs 都返回
- * 同一个上下文对象，坏掉之后就再也救不回来——这正是"重试"按钮无效的原因。
+ * 不要拿它当放行条件：虚拟化 / 软件光栅环境下，脱离文档的临时画布与真实 DOM 画布
+ * 可能给出不同结果，用一次假阴性否决真实画布会把本来能渲染的展柜判死。
+ *
+ * 也不复用目标 canvas：一个 canvas 一旦成功 getContext，后续无论传什么 attribs 都返回
+ * 同一个上下文对象，污染目标画布会让重试失去意义。
  */
 export function probeWebgl2(): WebglCapability {
   if (proven) return { supported: true };

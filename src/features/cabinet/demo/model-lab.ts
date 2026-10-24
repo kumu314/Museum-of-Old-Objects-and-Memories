@@ -70,10 +70,11 @@ function blockWebglContexts() {
     else Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', native);
   };
 }
-function mount(key: Key = 'textured', blockWebgl = false) {
+function mount(key: Key = 'textured', blockWebgl = false, reuseCanvas = false) {
   assert(stage === null, '旧查看器尚未卸载');
   currentStatus = 'loading'; woodStatus = 'loading'; stats = null; lastError = '';
-  canvas = document.createElement('canvas'); canvas.tabIndex = 0; canvas.setAttribute('aria-label', '检查台三维画布'); area.replaceChildren(canvas);
+  if (reuseCanvas) assert(canvas instanceof HTMLCanvasElement, '没有可复用的画布');
+  else { canvas = document.createElement('canvas'); canvas.tabIndex = 0; canvas.setAttribute('aria-label', '检查台三维画布'); area.replaceChildren(canvas); }
   const restore = blockWebgl ? blockWebglContexts() : null;
   controller = createInspectionController([id]);
   stage = mountCabinetStage(canvas, [{ id, slot: 1, plaqueText: 'QA 测试资产', modelKey: 'glb', source: source(key) }], controller, {
@@ -171,6 +172,19 @@ async function initialWebgl() {
   record('首次 WebGL 失败与三次重试', { passed: true, listenersBefore, listenersAfterRecovery: listenerCount(), diagnostics: stage.getDiagnostics() });
 }
 
+// StrictMode 双挂载、HMR、重试都会复用同一张画布，卸载时的 forceContextLoss 必须可逆。
+async function remount() {
+  if (stage) destroy();
+  mount(); await settled();
+  destroy();
+  mount('textured', false, true);
+  await until(() => stage?.getDiagnostics().surface === 'ready', '复用画布后没有恢复');
+  assert(stage !== null, '复用画布后没有查看器');
+  const diagnostics = stage.getDiagnostics();
+  assert(diagnostics.capability === 'supported', `复用画布后仍是降级态：${diagnostics.capability}`);
+  record('卸载后复用同一张画布', { passed: true, diagnostics });
+}
+
 async function touch() {
   assert(stage, '没有查看器'); controller.select(id); await until(() => controller.getSnapshot().phase === 'inspecting', '进入检视');
   const current = stage; current.resetView(); const before = current.getDiagnostics();
@@ -202,8 +216,8 @@ async function touch() {
   mount(); await settled();
 }
 
-const actions = { fixtures, delay: () => delayed(false), unmount: () => delayed(true), switches, mounts, touch, initial: initialWebgl,
-  all: async () => { await fixtures(); await delayed(false); await delayed(true); await switches(); await mounts(); await touch(); await initialWebgl(); } };
+const actions = { fixtures, delay: () => delayed(false), unmount: () => delayed(true), switches, mounts, remount, touch, initial: initialWebgl,
+  all: async () => { await fixtures(); await delayed(false); await delayed(true); await switches(); await mounts(); await remount(); await touch(); await initialWebgl(); } };
 for (const [name, action] of Object.entries(actions)) element(name).addEventListener('click', () => {
   const buttons = document.querySelectorAll('button'); buttons.forEach((button) => { button.disabled = true; }); status.textContent = '检查中…';
   void action().then(() => { status.textContent = '检查通过，详细记录见下方'; }).catch((error: unknown) => {
