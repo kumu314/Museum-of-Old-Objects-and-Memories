@@ -5,6 +5,7 @@ import { Pool, type PoolClient } from 'pg';
 import type { CreateExhibitInput } from '../../src/contracts';
 import {
   confirmExhibit,
+  rotateShareToken,
   contribute,
   createExhibit,
   createMuseum,
@@ -76,9 +77,10 @@ async function publishedMuseum(db: PoolClient, ownerId: string, title: string): 
   const exhibit = await createExhibit(ownerId, museum.id, { ...exhibitInput('搪瓷缸', 0, museum.version), photoAssetId: image }, db);
   await confirmExhibit(ownerId, museum.id, exhibit.id, { expectedVersion: exhibit.version, confirmationNote: '公开讲述测试确认' }, db);
   const current = (await getMuseum(ownerId, museum.id, db)).version;
-  const published = await publishMuseum(ownerId, museum.id, current, db);
-  assert.ok(published.token, '首次发布必须返回参观 token。');
-  return { museumId: museum.id, exhibitId: exhibit.id, token: published.token };
+  // 方向一语义：发布只生成快照不发 token；显式开启持链接访问并签发参观 token。
+  await publishMuseum(ownerId, museum.id, current, db);
+  const link = await rotateShareToken(ownerId, museum.id, current, db);
+  return { museumId: museum.id, exhibitId: exhibit.id, token: link.token };
 }
 
 const stories = { story: '这只缸是我父亲 1968 年从厂里带回来的。', sourceNote: '2026 年 10 月，家中访谈，本人讲述' };

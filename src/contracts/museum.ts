@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { sourceSegmentsSchema } from './ai';
-import { regionCitySchema } from './discovery';
+import { museumAccessModeSchema, regionCitySchema } from './discovery';
 import { modelInputSchema } from './model-generation';
 import { successResponseSchema } from './errors';
 import { captionSchema, eraSchema, exhibitNameSchema, idSchema, modelKeySchema,
@@ -89,6 +89,8 @@ export const museumSummarySchema = z.strictObject({
   version: versionSchema,
   publishedVersion: versionSchema.nullable(),
   shareEnabled: z.boolean(),
+  accessMode: museumAccessModeSchema,
+  accessEpoch: idSchema.nullable(),
   /**
    * 地区只到城市一级，`null` 表示馆主未标注：不参与地图聚合，但仍可出现在榜单里。
    * 这里**不进** `publicMuseumSchema`（发布快照）：位置是馆的属性，不是某一版内容的属性，
