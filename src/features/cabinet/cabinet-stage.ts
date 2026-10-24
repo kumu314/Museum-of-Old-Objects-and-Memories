@@ -1,7 +1,7 @@
 import {
   ACESFilmicToneMapping, AmbientLight, Box3, BufferGeometry, Color, DirectionalLight,
   Group, Line, LineBasicMaterial, Material, Matrix4, Mesh, MeshBasicMaterial, PerspectiveCamera, Plane, PlaneGeometry,
-  SpotLight, Quaternion, Raycaster, RepeatWrapping, Scene,
+  SpotLight, Quaternion, Raycaster, RepeatWrapping, Scene, BoxGeometry,
   SRGBColorSpace, Texture, Vector2, Vector3, WebGLRenderer, MeshPhysicalMaterial, MeshStandardMaterial,
   type Object3D, type WebGLRenderTarget,
 } from 'three';
@@ -21,20 +21,24 @@ import type { CabinetArrangement } from './cabinet-arrangement.ts';
 
 // Rendering inputs only. The public snapshot remains owned by C's shared schema.
 export interface CabinetStageItem { readonly id: string; readonly slot: number; readonly modelKey: CabinetModelKey }
+export type CabinetRenderItem = CabinetStageItem | {
+  readonly id: string; readonly slot: number; readonly modelKey: 'photo-plane'; readonly photoUrl: string;
+};
 export type SurfaceStatus = 'ready' | 'unavailable' | 'context-lost';
 export type AssetStatus = 'loading' | 'ready' | 'failed';
 type Controller = ReturnType<typeof createInspectionController>;
 export interface StageRenderStats { readonly cpuMs: number; readonly calls: number; readonly triangles: number; readonly textures: number; readonly geometries: number; readonly timestamp: number; readonly renderer: string }
 interface StageOptions {
+  readonly onSlotSelect?: (slot: number) => void;
   readonly onSlotDrop?: (id: string, targetSlot: number) => void;
   readonly onRenderStats?: (stats: StageRenderStats) => void;
   readonly onSurfaceStatus: (status: SurfaceStatus) => void;
   readonly inspectionInset: () => number;
   readonly onAssetStatus: (id: string, status: AssetStatus) => void;
 }
-interface DisplayModel { readonly item: CabinetStageItem; readonly group: Group; slot: number; status: AssetStatus | 'idle' }
+interface DisplayModel { readonly item: CabinetRenderItem; readonly group: Group; slot: number; status: AssetStatus | 'idle' }
 
-export function mountCabinetStage(canvas: HTMLCanvasElement, items: readonly CabinetStageItem[], controller: Controller, options: StageOptions) {
+export function mountCabinetStage(canvas: HTMLCanvasElement, items: readonly CabinetRenderItem[], controller: Controller, options: StageOptions) {
   const scene = new Scene();
   const camera = new PerspectiveCamera(26, 1, 0.1, 100);
   const raycaster = new Raycaster();
@@ -57,6 +61,7 @@ export function mountCabinetStage(canvas: HTMLCanvasElement, items: readonly Cab
     };
   }
   scene.add(buildCabinetBody({ wood: woodMaterial, interior: innerMaterial }, new Map(items.map((item) => {
+    if (item.modelKey === 'photo-plane') return [item.slot, '实拍照片 · 平面展示'];
     const model = modelManifest[item.modelKey];
     return [item.slot, `${model.displayName} · ${model.eraLabel}`];
   }))));
@@ -170,7 +175,8 @@ export function mountCabinetStage(canvas: HTMLCanvasElement, items: readonly Cab
   function render(time: number) {
     frame = 0;
     if (destroyed || renderer === null || surfaceStatus !== 'ready') return;
-    const delta = lastTime === 0 ? 1 / 60 : Math.min((time - lastTime) / 1000, 0.05);
+    // Exponential interpolation uses elapsed time so low frame rates do not stretch a return indefinitely.
+    const delta = lastTime === 0 ? 1 / 60 : (time - lastTime) / 1000;
     lastTime = time;
     const alpha = reducedMotion.matches ? 1 : 1 - Math.exp(-11 * delta);
     const state = controller.getSnapshot();
@@ -318,13 +324,26 @@ export function mountCabinetStage(canvas: HTMLCanvasElement, items: readonly Cab
     let model: Group | null = null;
     try {
       const signal = AbortSignal.any([resourceAbort.signal, AbortSignal.timeout(15000)]);
-      const definition = modelManifest[display.item.modelKey];
-      const response = await fetch(definition.path, { signal });
-      if (!response.ok) throw new Error(`模型请求失败：${response.status}`);
-      const buffer = await response.arrayBuffer();
-      signal.throwIfAborted();
-      model = (await new GLTFLoader().parseAsync(buffer, '')).scene;
-      if (definition.modelKey === 'camera-01') refineCameraMaterials(model);
+      if (display.item.modelKey === 'photo-plane') {
+        const response = await fetch(display.item.photoUrl, { signal, credentials: 'same-origin', cache: 'no-store' });
+        if (!response.ok) throw new Error(`照片请求失败：${response.status}`);
+        const bitmap = await createImageBitmap(await response.blob(), { imageOrientation: 'flipY' });
+        if (destroyed || signal.aborted) { bitmap.close(); signal.throwIfAborted(); return; }
+        const texture = new Texture(bitmap);
+        texture.colorSpace = SRGBColorSpace; texture.needsUpdate = true;
+        model = new Group();
+        const paper = new MeshBasicMaterial({ color: '#b9ae96' });
+        const front = new MeshBasicMaterial({ map: texture });
+        model.add(new Mesh(new BoxGeometry(bitmap.width / bitmap.height, 1, 0.008), [paper, paper, paper, paper, front, paper]));
+      } else {
+        const definition = modelManifest[display.item.modelKey];
+        const response = await fetch(definition.path, { signal });
+        if (!response.ok) throw new Error(`模型请求失败：${response.status}`);
+        const buffer = await response.arrayBuffer();
+        signal.throwIfAborted();
+        model = (await new GLTFLoader().parseAsync(buffer, '')).scene;
+        if (definition.modelKey === 'camera-01') refineCameraMaterials(model);
+      }
       signal.throwIfAborted();
       if (destroyed) { disposeResources(model); return; }
       model.updateMatrixWorld(true);
@@ -405,8 +424,10 @@ export function mountCabinetStage(canvas: HTMLCanvasElement, items: readonly Cab
   function onPointerLeave() { setHoveredSlot(null); }
   function onMotionPreferenceChange() { pointerOffset.set(0, 0); invalidate(); }
   function pick(event: PointerEvent) {
+    if (options.onSlotSelect && controller.getSnapshot().phase !== 'overview') return;
     if (controller.getSnapshot().phase === 'overview') {
       const slot = slotAtPointer(event);
+      if (slot !== null && options.onSlotSelect) { options.onSlotSelect(slot); return; }
       const model = displayModels.find((entry) => entry.slot === slot);
       if (model !== undefined) { controller.select(model.item.id); return; }
     }

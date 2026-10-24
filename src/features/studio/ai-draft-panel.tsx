@@ -1,19 +1,26 @@
 import { useState } from 'react';
 import type { AiDraft } from '../../contracts/ai';
 import type { ExhibitDraft } from '../../contracts/museum';
-import { Field, inputClass, panelClass, primaryClass } from './ui';
+import { Field } from './ui';
 
-export function AiDraftPanel({ draft, saved, busy, dirty, onAdopt }: {
-  draft: AiDraft; saved: ExhibitDraft; busy: boolean; dirty: boolean; onAdopt: (caption: string) => void;
+export function AiDraftPanel({ draft, saved, busy, dirty, onAdopt, onDirty, onDismiss }: {
+  draft: AiDraft; saved: ExhibitDraft; busy: boolean; dirty: boolean;
+  onAdopt: (caption: string) => void; onDirty: (dirty: boolean) => void; onDismiss: () => void;
 }) {
   const [caption, setCaption] = useState(draft.output.caption);
   const stale = draft.sourceVersion !== saved.version;
-  return <section className={`${panelClass} mt-6`} aria-label="AI 草稿对照">
-    <h3 className="text-lg">AI 草稿 · 待人工审阅</h3><p className="mt-2 text-xs text-stone-400">依据展品版本 {draft.sourceVersion} 整理。来源标识正确不等于事实已经核实。</p>
-    <div className="mt-5 grid gap-5 sm:grid-cols-2"><div><h4 className="text-sm text-stone-300">已保存展签</h4><p className="mt-3 whitespace-pre-wrap text-sm leading-7 text-stone-400">{saved.caption || '尚未填写'}</p></div><Field label="审阅并修订 AI 草稿"><textarea className={inputClass} rows={6} value={caption} onChange={(event) => setCaption(event.target.value)} disabled={busy} /></Field></div>
-    {draft.output.questions.length > 0 && <div className="mt-4"><h4 className="text-sm text-stone-300">建议补充核对</h4><ul className="mt-2 list-inside list-disc space-y-1 text-sm leading-6 text-stone-400">{draft.output.questions.map((question, index) => <li key={index}>{question}</li>)}</ul></div>}
-    <details className="mt-4 text-sm text-stone-400"><summary className="cursor-pointer">查看引用的讲述片段</summary>{draft.output.sourceSegmentIds.map((id) => <p key={id} className="mt-3 whitespace-pre-wrap leading-6">{saved.sourceSegments.find((segment) => segment.id === id)?.text ?? '此片段已随来源版本变化，请重新整理。'}</p>)}</details>
-    <p className="mt-4 text-sm text-amber-100/70">{stale ? '来源版本已变化，不能采纳这份草稿。请重新整理。' : dirty ? '编辑区有未保存内容。请先保存，再重新整理或核对来源版本。' : '采纳后仍需针对新版本确认。'}</p>
-    <button className={`${primaryClass} mt-4`} type="button" disabled={busy || dirty || stale} onClick={() => onAdopt(caption)}>采纳修订后的展签</button>
+  const length = Array.from(caption.trim()).length;
+  let adoptionHint = '采纳会保存为新版本，仍需你明确确认。';
+  if (dirty) adoptionHint = '讲述有未保存修改，请先保存并核对来源版本。';
+  if (stale) adoptionHint = '来源版本已变化，不能采纳。请先保留修订，再重新整理。';
+  return <section className="workbench-ai-draft" aria-label="AI 草稿对照">
+    <div className="wb-row"><h3>AI 整理草稿</h3><span className="wb-badge">待人工审阅</span></div>
+    <p className="wb-hint">依据展品版本 v{draft.sourceVersion} 整理。引用来源不代表事实已经核实。</p>
+    <Field label="审阅并修订草稿"><textarea rows={6} value={caption} aria-invalid={length > 120} onChange={(event) => { setCaption(event.target.value); onDirty(event.target.value !== draft.output.caption); }} disabled={busy} /></Field>
+    <p className={`workbench-count ${length > 120 ? 'wb-error' : ''}`}>{length} / 120 字</p>
+    {draft.output.questions.length > 0 && <div className="workbench-followup"><h4>还可以核对</h4><ul>{draft.output.questions.map((question, index) => <li key={index}>{question}</li>)}</ul></div>}
+    <details className="workbench-details"><summary>核对草稿引用的讲述片段</summary>{draft.output.sourceSegmentIds.map((id) => <blockquote key={id}>{saved.sourceSegments.find((segment) => segment.id === id)?.text ?? '来源片段已变化，请重新整理。'}<cite>来源片段 · {id}</cite></blockquote>)}</details>
+    <p className="wb-hint">{adoptionHint}</p>
+    <div className="wb-actions"><button className="wb-secondary" type="button" disabled={busy || dirty || stale || length === 0 || length > 120} onClick={() => onAdopt(caption)}>采纳修订后的展签</button><button className="wb-text-link" type="button" disabled={busy} onClick={onDismiss}>放弃这份草稿</button></div>
   </section>;
 }

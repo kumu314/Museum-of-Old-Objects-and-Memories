@@ -5,9 +5,12 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { z } from 'zod';
 import { museumDraftSchema, updateMuseumInputSchema, type ExhibitDraft, type MuseumDraft } from '../../contracts/museum';
+import { publishResultSchema, shareTokenSchema } from '../../contracts/session';
 import { ApiFailure, apiRequest, describeFailure, jsonRequest } from './api';
+import { CabinetPreview } from './cabinet-preview';
 import { ExhibitEditor } from './exhibit-editor';
-import { buttonClass, Field, inputClass, Notice, panelClass, primaryClass } from './ui';
+import { Field, Notice } from './ui';
+import './workbench.css';
 
 export function MuseumWorkbench({ museumId }: { museumId: string }) {
   const router = useRouter();
@@ -17,7 +20,7 @@ export function MuseumWorkbench({ museumId }: { museumId: string }) {
   useEffect(() => {
     const controller = new AbortController();
     apiRequest(`/api/museums/${encodeURIComponent(museumId)}`, museumDraftSchema, { signal: controller.signal })
-      .then((museum) => { if (!controller.signal.aborted) setInitial(museum); })
+      .then((museum) => { if (!controller.signal.aborted) { setInitial(museum); setError(null); } })
       .catch((failure: unknown) => {
         if (controller.signal.aborted) return;
         if (failure instanceof ApiFailure && failure.failure.code === 'UNAUTHORIZED') router.replace('/login');
@@ -26,7 +29,14 @@ export function MuseumWorkbench({ museumId }: { museumId: string }) {
     return () => controller.abort();
   }, [museumId, retry, router]);
   if (initial) return <MuseumEditor key={museumId} initial={initial} />;
-  return <main className="mx-auto max-w-5xl p-8"><Link className="text-amber-100 underline" href="/studio">返回展馆列表</Link><p className="mt-8">正在读取展馆…</p><Notice error={error} />{error && <button className={buttonClass} onClick={() => setRetry((value) => value + 1)}>重新读取</button>}</main>;
+  return <main className="memory-workbench"><header className="workbench-brandbar"><Link className="workbench-brand" href="/studio"><strong>拾物馆</strong></Link></header>
+    <div className="workbench-empty"><h1>{error ? '暂时无法读取展馆' : '正在打开你的展柜…'}</h1><Notice error={error} />
+      {error && <button className="wb-secondary" onClick={() => { setError(null); setRetry((value) => value + 1); }}>重新读取</button>}
+      <p><Link className="wb-text-link" href="/studio">返回我的展馆</Link></p></div></main>;
+}
+
+function firstEmptySlot(museum: MuseumDraft) {
+  return Array.from({ length: 6 }, (_, index) => index).find((slot) => !museum.exhibits.some((item) => item.slotIndex === slot)) ?? 0;
 }
 
 function MuseumEditor({ initial }: { initial: MuseumDraft }) {
@@ -36,7 +46,7 @@ function MuseumEditor({ initial }: { initial: MuseumDraft }) {
   const [title, setTitle] = useState(initial.title);
   const [description, setDescription] = useState(initial.description);
   const [selection, setSelection] = useState(initial.exhibits[0]?.id ?? 'new');
-  const [newSlot, setNewSlot] = useState(0);
+  const [newSlot, setNewSlot] = useState(() => firstEmptySlot(initial));
   const [editorGeneration, setEditorGeneration] = useState(0);
   const [editorDirty, setEditorDirty] = useState(false);
   const [editorBusy, setEditorBusy] = useState(false);
@@ -44,7 +54,7 @@ function MuseumEditor({ initial }: { initial: MuseumDraft }) {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [refreshRequired, setRefreshRequired] = useState(false);
-  const [unconfirmed, setUnconfirmed] = useState<string[]>([]);
+  const [shareUrl, setShareUrl] = useState<string | null>(null);
   const metadataDirty = title !== metadataBase.title || description !== metadataBase.description;
   const anyDirty = metadataDirty || editorDirty;
   const busy = action !== null || editorBusy;
@@ -58,10 +68,7 @@ function MuseumEditor({ initial }: { initial: MuseumDraft }) {
     return () => window.removeEventListener('beforeunload', warn);
   }, [anyDirty]);
 
-  function fail(failure: unknown) {
-    setError(describeFailure(failure));
-    if (failure instanceof ApiFailure && failure.failure.code === 'NOT_CONFIRMED') setUnconfirmed(failure.failure.details.unconfirmedExhibitIds);
-  }
+  function fail(failure: unknown) { setError(describeFailure(failure)); }
   async function refreshState() {
     try { setMuseum(await apiRequest(path, museumDraftSchema)); setRefreshRequired(false); }
     catch (failure) { setRefreshRequired(true); setError(`操作已完成，但展馆状态尚未刷新。请重新读取后再继续操作。${describeFailure(failure)}`); }
@@ -73,19 +80,21 @@ function MuseumEditor({ initial }: { initial: MuseumDraft }) {
       const result = await apiRequest(path, museumDraftSchema);
       setMuseum(result); setMetadataBase({ title: result.title, description: result.description, version: result.version }); setTitle(result.title); setDescription(result.description);
       if (!result.exhibits.some(({ id }) => id === selection)) setSelection(result.exhibits[0]?.id ?? 'new');
-      setNewSlot(Array.from({ length: 6 }, (_, index) => index).find((slot) => !result.exhibits.some((item) => item.slotIndex === slot)) ?? 0);
-      setEditorGeneration((value) => value + 1); setEditorDirty(false); setRefreshRequired(false); setUnconfirmed([]);
+      setNewSlot(firstEmptySlot(result)); setEditorGeneration((value) => value + 1);
+      setEditorDirty(false); setRefreshRequired(false);
     } catch (failure) { fail(failure); }
     finally { setAction(null); }
   }
-  function choose(exhibit: ExhibitDraft | undefined, slotIndex: number) {
+  function chooseSlot(slotIndex: number) {
+    if (busy || refreshRequired) return;
+    const exhibit = museum.exhibits.find((item) => item.slotIndex === slotIndex);
     if (selection === exhibit?.id || (selection === 'new' && !exhibit && slotIndex === newSlot)) return;
-    if (editorDirty && !window.confirm('当前展品还有未保存输入。确定切换并放弃这些输入吗？')) return;
+    if (editorDirty && !window.confirm('当前旧物还有未保存输入。确定切换并放弃这些输入吗？')) return;
     setSelection(exhibit?.id ?? 'new'); setNewSlot(slotIndex); setEditorDirty(false); setEditorGeneration((value) => value + 1);
   }
   async function savedExhibit(exhibit: ExhibitDraft) {
     setMuseum((current) => ({ ...current, exhibits: [...current.exhibits.filter(({ id }) => id !== exhibit.id), exhibit].sort((a, b) => a.slotIndex - b.slotIndex) }));
-    setSelection(exhibit.id); setUnconfirmed((ids) => ids.filter((id) => id !== exhibit.id));
+    setSelection(exhibit.id);
     await refreshState();
   }
   async function deletedExhibit() {
@@ -95,7 +104,7 @@ function MuseumEditor({ initial }: { initial: MuseumDraft }) {
   async function saveMetadata(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setAction('保存展馆'); setError(null); setMessage(null);
     try {
-      // Other exhibit edits may advance the museum version without changing these fields.
+      // Exhibit edits can advance the museum version without changing its metadata.
       const version = museum.title === metadataBase.title && museum.description === metadataBase.description ? museum.version : metadataBase.version;
       const result = await apiRequest(path, museumDraftSchema, jsonRequest('PATCH', updateMuseumInputSchema.parse({ title, description, expectedVersion: version })));
       setMuseum(result); setMetadataBase({ title: result.title, description: result.description, version: result.version }); setTitle(result.title); setDescription(result.description); setMessage('展馆资料已保存。');
@@ -103,10 +112,11 @@ function MuseumEditor({ initial }: { initial: MuseumDraft }) {
     finally { setAction(null); }
   }
   async function stopSharing() {
-    setAction('stop'); setError(null); setMessage(null);
+    if (!window.confirm('停止分享后，旧链接的新请求将无法访问。确定停止吗？')) return;
+    setAction('停止分享'); setError(null); setMessage(null);
     try {
       await apiRequest(`${path}/share`, z.strictObject({ ok: z.literal(true) }), jsonRequest('DELETE', { expectedVersion: museum.version }));
-      setMessage('已停止分享，旧链接的数据和素材新请求已失效。');
+      setShareUrl(null); setMessage('已停止分享，旧链接的数据和素材新请求已失效。');
       await refreshState();
     } catch (failure) { fail(failure); }
     finally { setAction(null); }
@@ -118,23 +128,61 @@ function MuseumEditor({ initial }: { initial: MuseumDraft }) {
     catch (failure) { fail(failure); }
     finally { setAction(null); }
   }
-  return <main className="mx-auto max-w-7xl px-5 py-8 sm:px-10">
-    <header className="flex flex-wrap items-center justify-between gap-4 border-b border-stone-700 pb-6"><div><Link href="/studio" className="text-sm text-amber-100/70" onClick={(event) => { if (anyDirty && !window.confirm('本页有未保存输入，仍要返回展馆列表吗？')) event.preventDefault(); }}>← 展馆列表</Link><h1 className="mt-3 font-serif text-3xl">{museum.title}</h1><p className="mt-2 text-xs text-stone-500">草稿版本 {museum.version} · {museum.shareEnabled ? '分享已启用' : '分享未启用'}{museum.publishedVersion !== null ? ` · 发布版本 ${museum.publishedVersion}` : ''}</p></div><button className={buttonClass} disabled={busy} onClick={reload}>重新读取</button></header>
+  async function publish() {
+    if (busy || anyDirty || refreshRequired) return;
+    setAction('发布'); setError(null); setMessage(null);
+    try {
+      const result = await apiRequest(`${path}/publish`, publishResultSchema, jsonRequest('POST', { expectedVersion: museum.version }));
+      if (result.token) setShareUrl(`${window.location.origin}/share/${result.token}`);
+      setMessage(`已发布版本 v${result.version}。草稿后续修改不会直接改变本次发布内容。`);
+      await refreshState();
+    } catch (failure) { fail(failure); }
+    finally { setAction(null); }
+  }
+  async function rotateShare() {
+    if (busy || anyDirty || refreshRequired) return;
+    if (!window.confirm('更换链接后，旧链接的新请求将无法访问。确定更换吗？')) return;
+    setAction('更换链接'); setError(null); setMessage(null);
+    try {
+      const result = await apiRequest(`${path}/share`, z.strictObject({ token: shareTokenSchema }), jsonRequest('POST', { expectedVersion: museum.version }));
+      setShareUrl(`${window.location.origin}/share/${result.token}`); setMessage('新链接已生成，旧链接已失效。');
+      await refreshState();
+    } catch (failure) { fail(failure); }
+    finally { setAction(null); }
+  }
+  async function copyShare() {
+    if (!shareUrl) return;
+    try { await navigator.clipboard.writeText(shareUrl); setMessage('参观链接已复制。'); }
+    catch { setError('暂时无法自动复制，请从参观链接输入框中选中并复制。'); }
+  }
+  const pendingExhibits = museum.exhibits.filter((item) => item.confirmedVersion !== item.version);
+  const publishDisabled = busy || anyDirty || refreshRequired || museum.exhibits.length === 0 || pendingExhibits.length > 0;
+  const publishing = <section className="workbench-publishing" aria-label="展馆发布与分享"><h3>把这份回忆分享出去</h3>
+    <p className="wb-hint">{museum.exhibits.length === 0 ? '从一件旧物开始。收录、核对并确认后，再发布给想念的人。' : `${museum.exhibits.length - pendingExhibits.length} / ${museum.exhibits.length} 件旧物已确认。`}</p>
+    {pendingExhibits.length > 0 && <ul className="workbench-pending-list">{pendingExhibits.map((item) => <li key={item.id}><button type="button" className="wb-text-link" disabled={busy || refreshRequired} onClick={() => chooseSlot(item.slotIndex)}>待确认 · 第 {item.slotIndex + 1} 格 {item.name}</button></li>)}</ul>}
+    <p className="wb-hint">发布后，持有链接即可访问已确认的展品、照片与原声。原始讲述和 AI 草稿不公开。</p>
+    {anyDirty && <p className="wb-hint">请先处理本页尚未保存的输入或确认记录。</p>}
+    <button type="button" className="wb-primary wb-full" disabled={publishDisabled} onClick={publish}>{action === '发布' ? '正在发布…' : '生成快照并发布分享'}</button>
+    {shareUrl && museum.shareEnabled && <div className="workbench-share-link"><Field label="当前参观链接"><input readOnly value={shareUrl} onFocus={(event) => event.target.select()} /></Field><div className="wb-actions"><button type="button" className="wb-secondary" onClick={copyShare}>复制链接</button><a className="wb-text-link" href={shareUrl} target="_blank" rel="noreferrer">打开参观页 ↗</a></div></div>}
+    {museum.shareEnabled && !shareUrl && <p className="wb-hint">分享已启用。已有链接可继续使用；如未保留，可更换链接取得新的参观地址。</p>}
+    {museum.publishedVersion !== null && <div className="wb-actions"><button type="button" className="wb-text-link" disabled={busy || anyDirty || refreshRequired} onClick={rotateShare}>更换参观链接</button>{museum.shareEnabled && <button type="button" className="wb-text-link" disabled={busy || anyDirty || refreshRequired} onClick={stopSharing}>停止分享</button>}</div>}
+  </section>;
+
+  return <main className="memory-workbench">
+    <header className="workbench-brandbar"><div className="workbench-brand"><span className="workbench-seal" aria-hidden="true">拾</span><strong>拾物馆</strong><span className="workbench-breadcrumb">旧物收录与故事确认工作台</span></div>
+      <div className="workbench-brand-actions"><span>{museum.title}</span><Link className="wb-text-link" href="/studio" onClick={(event) => { if (anyDirty && !window.confirm('本页有未保存输入，仍要返回展馆列表吗？')) event.preventDefault(); }}>我的展馆</Link><button className="wb-text-link" disabled={busy} onClick={reload}>重新读取</button></div></header>
     <Notice error={error} message={message} />
-    {refreshRequired && <p className="mb-4 text-sm text-amber-100">请使用“重新读取”核对状态。已成功的写入不会自动重试。</p>}
-    <div className="mt-7 grid items-start gap-7 xl:grid-cols-[340px_1fr]">
-      <aside className="space-y-6">
-        <form className={`${panelClass} space-y-4`} onSubmit={saveMetadata}><h2 className="text-lg">展馆资料</h2><Field label="展馆名称"><input className={inputClass} required value={title} onChange={(event) => setTitle(event.target.value)} disabled={busy} /></Field><Field label="展馆简介"><textarea className={inputClass} rows={3} value={description} onChange={(event) => setDescription(event.target.value)} disabled={busy} /></Field><button className={buttonClass} disabled={busy || !metadataDirty || refreshRequired}>保存展馆资料</button></form>
-        <section className={panelClass}><h2 className="text-lg">六格展柜</h2><p className="mt-2 text-xs leading-5 text-stone-500">选择格位编辑。位置与参观展柜一致。</p><div className="mt-4 grid grid-cols-3 gap-2">{Array.from({ length: 6 }, (_, index) => {
-          const exhibit = museum.exhibits.find((item) => item.slotIndex === index);
-          const active = exhibit ? selection === exhibit.id : selection === 'new' && newSlot === index;
-          return <button key={index} type="button" aria-pressed={active} disabled={busy} onClick={() => choose(exhibit, index)} className={`min-h-24 rounded-lg border p-2 text-left text-xs leading-5 transition ${active ? 'border-amber-200 bg-amber-100/10' : 'border-stone-700 hover:border-stone-400'} ${exhibit && unconfirmed.includes(exhibit.id) ? 'ring-2 ring-red-300/60' : ''}`}><span className="block text-stone-500">{index < 3 ? '上排' : '下排'} {index % 3 + 1}</span><span className="mt-1 block">{exhibit?.name ?? '＋ 收录旧物'}</span>{exhibit && <span className={`block ${exhibit.confirmedVersion === exhibit.version ? 'text-amber-100/60' : 'text-red-200/70'}`}>{exhibit.confirmedVersion === exhibit.version ? '已确认' : '待确认'}</span>}</button>;
-        })}</div>{unconfirmed.length > 0 && <p className="mt-3 text-xs text-red-200">请依次处理红色标记的未确认展品。</p>}</section>
-        <section className={panelClass}><h2 className="text-lg">发布与分享</h2><p className="mt-3 text-sm leading-6 text-stone-400">参观页尚未开放，暂不能发布或交付参观链接。现有分享仍可停止。</p><div className="mt-4 flex flex-wrap gap-3"><button className={primaryClass} disabled>发布当前版本（暂未开放）</button><button className={buttonClass} disabled={busy || anyDirty || refreshRequired || !museum.shareEnabled} onClick={stopSharing}>停止分享</button></div>
-        </section>
-        <button className={`${buttonClass} text-red-200/70`} disabled={busy || anyDirty || refreshRequired} onClick={removeMuseum}>删除展馆草稿并停止分享</button>
-      </aside>
-      <ExhibitEditor key={`${selection}:${selection === 'new' ? newSlot : ''}:${editorGeneration}`} museum={museum} initial={selected} slotIndex={newSlot} onSaved={savedExhibit} onDeleted={deletedExhibit} onDirty={setEditorDirty} onBusy={setEditorBusy} />
-    </div>
+    {refreshRequired && <p role="alert" className="wb-hint">请先使用“重新读取”核对状态。已成功的写入不会自动重试。</p>}
+    <ExhibitEditor resetKey={`${selection}:${editorGeneration}`} museum={museum} initial={selected} slotIndex={newSlot}
+      blocked={action !== null || refreshRequired} onSaved={savedExhibit} onDeleted={deletedExhibit} onDirty={setEditorDirty} onBusy={setEditorBusy}
+      cabinet={<CabinetPreview exhibits={museum.exhibits} selectedSlot={selected?.slotIndex ?? newSlot} disabled={busy || refreshRequired} onSelectSlot={chooseSlot} assetBase={`${path}/assets`} />}
+      publishing={publishing} />
+    <details className="workbench-details workbench-museum-settings"><summary>展馆资料与管理</summary>
+      <form onSubmit={saveMetadata}><Field label="展馆名称"><input required maxLength={120} value={title} onChange={(event) => setTitle(event.target.value)} disabled={busy || refreshRequired} /></Field>
+        <Field label="展馆简介"><textarea rows={3} value={description} onChange={(event) => setDescription(event.target.value)} disabled={busy || refreshRequired} /></Field>
+        <div><button className="wb-secondary" disabled={busy || !metadataDirty || refreshRequired}>保存展馆资料</button></div></form>
+      <p className="wb-hint">草稿版本 {museum.version}{museum.publishedVersion !== null ? ` · 已发布版本 ${museum.publishedVersion}` : ' · 尚未发布'} · {museum.shareEnabled ? '分享已启用' : '分享未启用'}</p>
+      <div className="wb-actions"><button className="wb-text-link wb-danger" disabled={busy || anyDirty || refreshRequired} onClick={removeMuseum}>删除展馆草稿并停止分享</button></div>
+    </details>
   </main>;
 }

@@ -1,0 +1,109 @@
+'use client';
+
+import { useEffect, useEffectEvent, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import type { AssetStatus, SurfaceStatus, mountCabinetStage } from '../cabinet/cabinet-stage';
+import { createInspectionController } from '../viewer/inspection-controller';
+import { cabinetItems, type CabinetExhibit } from './cabinet-items';
+
+export function CabinetPreview({ exhibits, selectedSlot, disabled, onSelectSlot, assetBase, mode = 'edit' }: {
+  exhibits: readonly CabinetExhibit[]; selectedSlot: number; disabled: boolean;
+  onSelectSlot: (slot: number) => void; assetBase: string; mode?: 'edit' | 'visit';
+}) {
+  const canvas = useRef<HTMLCanvasElement>(null);
+  const viewport = useRef<HTMLDivElement>(null);
+  const inspectButton = useRef<HTMLButtonElement>(null);
+  const stage = useRef<ReturnType<typeof mountCabinetStage> | null>(null);
+  const items = useMemo(() => cabinetItems(exhibits, assetBase), [exhibits, assetBase]);
+  const controller = useMemo(() => createInspectionController(items.map((item) => item.id)), [items]);
+  const inspection = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
+  const [surfaceState, setSurface] = useState<{ controller: typeof controller; value: SurfaceStatus | 'loading' }>({ controller, value: 'loading' });
+  const [assetState, setAssetStates] = useState<{ controller: typeof controller; values: Readonly<Record<string, AssetStatus>> }>({ controller, values: {} });
+  const surface = surfaceState.controller === controller ? surfaceState.value : 'loading';
+  const assetStates = assetState.controller === controller ? assetState.values : {};
+  const [expanded, setExpanded] = useState(false);
+  const [sceneRetry, setSceneRetry] = useState(0);
+  const selected = exhibits.find((exhibit) => exhibit.slotIndex === selectedSlot);
+  const selectedItem = items.find((item) => item.id === selected?.id);
+  const selectSlot = useEffectEvent((slot: number) => { if (!disabled) onSelectSlot(slot); });
+
+  useEffect(() => {
+    let cancelled = false;
+    const element = canvas.current;
+    if (!element) return;
+    import('../cabinet/cabinet-stage').then(({ mountCabinetStage: mount }) => {
+      if (cancelled) return;
+      const instance = mount(element, items, controller, {
+        onSlotSelect: (slot) => selectSlot(slot), inspectionInset: () => 0,
+        onSurfaceStatus: (value) => { if (!cancelled) setSurface({ controller, value }); },
+        onAssetStatus: (id, status) => {
+          if (cancelled) return;
+          setAssetStates((current) => ({ controller, values: { ...(current.controller === controller ? current.values : {}), [id]: status } }));
+        },
+      });
+      instance.setArrangement(exhibits.filter((exhibit) => items.some((item) => item.id === exhibit.id))
+        .map((exhibit) => ({ id: exhibit.id, slot: exhibit.slotIndex, plaqueText: Array.from(exhibit.name).slice(0, 24).join('') })));
+      stage.current = instance;
+    }).catch(() => { if (!cancelled) setSurface({ controller, value: 'unavailable' }); });
+    return () => { cancelled = true; stage.current?.destroy(); stage.current = null; };
+  }, [items, controller, exhibits, sceneRetry]);
+
+  useEffect(() => controller.subscribe(() => {
+    if (controller.getSnapshot().phase === 'overview') {
+      setExpanded(false); inspectButton.current?.focus({ preventScroll: true });
+    }
+  }), [controller]);
+
+  useEffect(() => {
+    if (!expanded) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = previous; };
+  }, [expanded]);
+
+  function inspect() {
+    if (!selected || !selectedItem || disabled || surface !== 'ready' || assetStates[selected.id] !== 'ready') return;
+    setExpanded(true); controller.select(selected.id); canvas.current?.focus({ preventScroll: true });
+  }
+  function close() {
+    controller.returnToOverview();
+    if (controller.getSnapshot().phase === 'overview') { setExpanded(false); inspectButton.current?.focus(); }
+  }
+
+  function retrySurface() {
+    if (stage.current) { stage.current.retry(); return; }
+    setSurface({ controller, value: 'loading' }); setSceneRetry((value) => value + 1);
+  }
+  let surfaceMessage = '当前无法显示三维展柜，仍可用下方格位选择旧物。';
+  if (surface === 'loading') surfaceMessage = '正在打开木质展柜…';
+  if (surface === 'context-lost') surfaceMessage = '三维画面暂时中断，照片和故事仍可使用。';
+
+  return <div className="workbench-cabinet">
+    <div ref={viewport} className={`workbench-cabinet-viewport ${expanded ? 'workbench-inspection' : ''}`}
+      role={expanded ? 'dialog' : 'group'} aria-modal={expanded ? true : undefined} aria-label={expanded ? `检视${selected?.name ?? '旧物'}` : '实时六格展柜'}
+      onKeyDown={(event) => {
+        if (!expanded) return;
+        if (event.key === 'Escape') { event.preventDefault(); close(); }
+        if (event.key !== 'Tab') return;
+        const targets = viewport.current?.querySelectorAll<HTMLButtonElement | HTMLCanvasElement>('button:not(:disabled),canvas');
+        if (!targets?.length) return;
+        const list = Array.from(targets);
+        const index = list.findIndex((element) => element === document.activeElement);
+        const next = (index + (event.shiftKey ? -1 : 1) + list.length) % list.length;
+        event.preventDefault(); list[next]?.focus();
+      }}>
+      <canvas ref={canvas} tabIndex={expanded ? 0 : -1} aria-label="旧物三维展柜，使用下方格位按钮选择旧物；检视时方向键旋转，加减键缩放" />
+      {expanded && <><div className="workbench-inspection-controls"><button type="button" className="wb-secondary" onClick={close}>← 返回展柜</button><span>{selected?.name}</span><button type="button" className="wb-secondary" onClick={() => stage.current?.resetView()}>重置角度</button></div><p className="workbench-inspection-help">拖动旋转 · 滚轮缩放 · 方向键与加减键也可操作 · Esc 返回</p></>}
+      {surface !== 'ready' && <div className="workbench-cabinet-status" role="status"><p>{surfaceMessage}</p>
+        {surface !== 'loading' && <button type="button" className="wb-secondary" onClick={retrySurface}>重试三维展示</button>}</div>}
+    </div>
+    <div className="workbench-slot-grid" role="group" aria-label="选择柜格">{Array.from({ length: 6 }, (_, slot) => {
+      const exhibit = exhibits.find((item) => item.slotIndex === slot);
+      return <button key={slot} type="button" disabled={disabled || expanded || (mode === 'visit' && !exhibit)} aria-pressed={selectedSlot === slot} onClick={() => onSelectSlot(slot)}><span>第 {slot + 1} 格</span>{exhibit?.name ?? (mode === 'edit' ? '＋ 收录旧物' : '尚未收录')}</button>;
+    })}</div>
+    <div className="wb-row"><p className="wb-hint">当前选中 · 第 {selectedSlot + 1} 格</p><button ref={inspectButton} type="button" className="wb-text-link" disabled={disabled || !selected || !selectedItem || surface !== 'ready' || assetStates[selected.id] !== 'ready'} onClick={inspect}>检视模型</button></div>
+    {selected && <p className="wb-hint">{selected.modelKey === 'photo-plane' ? '实拍照片平面展示 · 非三维复原' : '内置演示模型 · 非本次照片生成'}</p>}
+    {selected && assetStates[selected.id] === 'failed' && <p className="wb-hint" role="alert">展示素材读取失败，照片与故事仍可使用。<button type="button" className="wb-text-link" onClick={() => stage.current?.retryModel(selected.id)}>重试素材</button></p>}
+    {assetStates['cabinet-material'] === 'failed' && <p className="wb-hint">木纹材质读取失败。展品和文字仍可操作，重新读取页面后可重试。</p>}
+    {inspection.phase === 'returning' && <p className="wb-hint" role="status">正在放回展柜…</p>}
+  </div>;
+}
