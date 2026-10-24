@@ -30,6 +30,17 @@
 .exhibit-story .exhibit-media-note, .exhibit-story .exhibit-media-error { grid-column: 1 / -1; margin: 8px 0 0; color: #a9977e; font-size: 12px; line-height: 1.7; letter-spacing: 0; }
 .exhibit-story .exhibit-media-error { color: #e2b799; }
 .exhibit-story .exhibit-media-error button { padding: 4px 8px; font-size: 12px; }
+.exhibit-story .exhibit-contributions { margin: 20px 0; padding: 16px 0; border-block: 1px solid #4a3b2c99; }
+.exhibit-story .exhibit-contributions summary { color: #c8b69e; font: 14px/1.6 system-ui, sans-serif; letter-spacing: .02em; cursor: pointer; }
+.exhibit-story .exhibit-contributions__list { margin: 14px 0 0; padding: 0; list-style: none; display: grid; gap: 18px; }
+.exhibit-story .exhibit-contributions__list > li { margin: 0; padding: 0 0 0 14px; border-left: 1px solid #8c735559; }
+.exhibit-story .exhibit-contributions__byline { display: flex; align-items: baseline; gap: 8px; margin: 0; }
+.exhibit-contributions__author { color: #e6dac8; font: 14px/1.5 'Noto Serif CJK SC', 'Songti SC', Georgia, serif; letter-spacing: .02em; overflow-wrap: anywhere; }
+.exhibit-contributions__role { padding: 1px 8px; border: 1px solid #8c735566; border-radius: 999px; color: #a9977e; font: 11px/1.6 system-ui, sans-serif; }
+.exhibit-contributions__role[data-role='owner'] { border-color: #c8a87066; color: #d9bd8c; }
+.exhibit-story .exhibit-contributions__story { margin: 8px 0 0; color: #d8cbb8; font-size: 14px; line-height: 1.9; letter-spacing: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.exhibit-story .exhibit-contributions__source { margin: 6px 0 0; color: #94826c; font-size: 12px; line-height: 1.7; letter-spacing: 0; overflow-wrap: anywhere; }
+.exhibit-story .exhibit-contributions__note { margin: 14px 0 0; color: #94826c; font-size: 12px; line-height: 1.7; letter-spacing: 0; }
 .exhibit-photos { text-align: center; }
 .exhibit-photos__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .exhibit-story .exhibit-photos__print { position: relative; display: block; width: 100%; aspect-ratio: 1.12; min-width: 0; padding: 6px; overflow: hidden; border: 0; border-radius: 2px; background: #dfd3c3; box-shadow: 0 4px 12px #0005, inset 0 0 12px #88745840; cursor: zoom-in; }

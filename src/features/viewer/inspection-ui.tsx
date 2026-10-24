@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import type { PublicExhibit } from '../../contracts/museum';
+import type { SharedContribution } from '../../contracts/contributors';
+import { authorLabel } from './shared-contributions';
 import './inspection-ui.css';
 
 type Story = Pick<PublicExhibit, 'name' | 'era' | 'caption' | 'approximation' | 'sourceNotice' | 'modelKey'>;
@@ -20,8 +22,10 @@ export function InspectionGuide() {
   </div>;
 }
 
-export function ExhibitStory({ exhibit, photoUrl, audioUrl, active }: {
+export function ExhibitStory({ exhibit, photoUrl, audioUrl, active, contributions }: {
   exhibit: Story; photoUrl: string | null; audioUrl: string | null; active: boolean;
+  /** 这件展品上已公开的多人讲述。空数组表示没人讲过，不是"加载失败"——失败在调用方就已经降级掉了。 */
+  contributions: readonly SharedContribution[];
 }) {
   const audio = useRef<HTMLAudioElement>(null);
   const dialog = useRef<HTMLDialogElement>(null);
@@ -84,6 +88,17 @@ export function ExhibitStory({ exhibit, photoUrl, audioUrl, active }: {
         if (Number.isFinite(value)) setDuration(value);
       }} onTimeUpdate={(event) => setElapsed(event.currentTarget.currentTime)} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={() => setPlaying(false)} onError={() => setAudioFailed(true)} />}
     </div>
+    {contributions.length > 0 && <details className="exhibit-contributions">
+      <summary>多人讲述 · {contributions.length} 份</summary>
+      <ol className="exhibit-contributions__list">
+        {contributions.map((item) => <li key={item.id}>
+          <p className="exhibit-contributions__byline"><span className="exhibit-contributions__author">{item.authorName}</span><span className="exhibit-contributions__role" data-role={item.authorRole}>{authorLabel(item.authorRole)}</span></p>
+          <p className="exhibit-contributions__story">{item.story}</p>
+          <p className="exhibit-contributions__source">来源 · {item.sourceNote}</p>
+        </li>)}
+      </ol>
+      <p className="exhibit-contributions__note">每份讲述各自署名、各自授权，不做合并，也不生成共同摘要；作者撤回后，重新读取时不再显示。</p>
+    </details>}
     <div className="exhibit-photos">
       {photoUrl !== null && !photoFailed ? <>
         <div className="exhibit-photos__grid">

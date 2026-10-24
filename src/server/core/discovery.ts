@@ -15,6 +15,7 @@ import {
   type RegionCity,
 } from '../../contracts/discovery';
 import { lockDirection1Actor, prepareDirection1Write, requireDemoAccount } from './direction1';
+import { HttpError } from '../http';
 import { inTransaction } from './museums';
 import { assertVersion, assetRecord, invalid, museumRecord, notFound, requireActor } from './records';
 import { newShareToken } from './share-tokens';
@@ -149,11 +150,26 @@ export function updatePublicProfile(actorId: string, input: UpdatePublicProfileI
   return inTransaction(async (db) => {
     await requireDemoAccount(db, actorId);
     const operation = await prepareDirection1Write(db, actorId, input.operationId, 'profile', actorId, [input.expectedVersion, input.nickname]);
-    const current = await profileRecord(db, actorId);
+    // 工作台与世界页都可能首次保存昵称：先锁行再核对版本，后提交者得到 409，
+    // 不能让晚到的请求静默覆盖先提交者。
+    const locked = await db.query<Record<string, unknown>>('SELECT user_id AS "userId",nickname,version,updated_at AS "updatedAt" FROM public_profiles WHERE user_id=$1 FOR UPDATE', [actorId]);
+    const current = locked.rows[0]
+      ? publicProfileSchema.parse({ ...locked.rows[0], updatedAt: locked.rows[0].updatedAt instanceof Date ? locked.rows[0].updatedAt.toISOString() : locked.rows[0].updatedAt })
+      : null;
     if (operation.replayed) return current;
     assertVersion(current?.version ?? 1, input.expectedVersion);
     if (current) await db.query('UPDATE public_profiles SET nickname=$1,version=version+1,updated_at=now() WHERE user_id=$2', [input.nickname, actorId]);
-    else await db.query('INSERT INTO public_profiles(user_id,nickname) VALUES($1,$2)', [actorId, input.nickname]);
+    else {
+      try {
+        await db.query('INSERT INTO public_profiles(user_id,nickname) VALUES($1,$2)', [actorId, input.nickname]);
+      } catch (error) {
+        // 并发首次保存：另一半事务已插入同名资料行，按版本冲突处理。
+        if ((error as { code?: string }).code === '23505') {
+          throw new HttpError({ code: 'VERSION_CONFLICT', message: '昵称刚刚被另一次保存创建，请刷新后核对。' });
+        }
+        throw error;
+      }
+    }
     await operation.finish();
     return profileRecord(db, actorId);
   }, client);
@@ -179,8 +195,11 @@ export function updateMuseumAccess(actorId: string, museumId: string, input: Upd
       // Enabling discovery does not need to reveal a bearer token. The existing
       // share endpoint explicitly issues/rotates a link when one is requested.
       const token = newShareToken();
+      // 退出公开发现（转持链接或私密）必须同时撤销收录同意：否则榜单与地图仍会
+      // 公开标题、城市和浏览量，等于退出后还被公示。
       await db.query(`UPDATE museums SET access_mode=$1,access_epoch=$2,
         share_token_hash=CASE WHEN $1='private' THEN NULL ELSE COALESCE(share_token_hash,$3) END,
+        discovery_listed=CASE WHEN $1='discoverable' THEN discovery_listed ELSE false END,
         version=version+1,updated_at=now() WHERE id=$4`, [input.accessMode,
         input.accessMode === 'private' ? null : randomUUID(), token.hash, museumId]);
     }

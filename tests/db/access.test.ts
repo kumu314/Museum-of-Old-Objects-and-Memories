@@ -3,7 +3,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { after, before, test } from 'node:test';
 import { Pool, type PoolClient } from 'pg';
 import { publicMuseumSchema } from '../../src/contracts';
-import { confirmExhibit, createExhibit, createMuseum, getMuseum, getShareAsset, publishMuseum, readShare, rotateShareToken, stopSharing } from '../../src/server/core';
+import { confirmExhibit, createExhibit, createMuseum, getMuseum, getShareAsset, publishMuseum, getPublicProfile, readLeaderboard, readShare, rotateShareToken, stopSharing, updateMuseum, updateMuseumAccess, updatePublicProfile } from '../../src/server/core';
 import { loadMigrations, migrate } from '../../src/server/db/migrate';
 import { getIsolatedTestDatabaseUrl } from '../../src/server/db/test-database';
 import { HttpError } from '../../src/server/http';
@@ -120,5 +120,50 @@ test('从主线 0007 升级保留有效旧链接与私密状态；访问字段�
     await db.query('ROLLBACK TO SAVEPOINT bad_private');
     await stopSharing(actor, museum, saved.version, db);
     await assert.rejects(readShare(actor, token, db), hasCode('SHARE_NOT_FOUND'));
+  });
+});
+
+test('退出公开发现即撤销收录同意：榜单地图不再展示，参观链接保持有效', async () => {
+  await fixture(async (db, actor) => {
+    const museum = await ready(db, actor);
+    await publishMuseum(actor, museum.id, museum.version, db);
+    const { token } = await rotateShareToken(actor, museum.id, museum.version, db);
+    // 收录前提：登记的演示账号 + 已填公开昵称；标注城市并明确同意收录后开启公开发现。
+    await db.query('INSERT INTO direction1_demo_accounts(user_id) VALUES($1)', [actor]);
+    await updatePublicProfile(actor, { operationId: randomUUID(), expectedVersion: 1, nickname: '演示收录者' }, db);
+    const linked = await getMuseum(actor, museum.id, db);
+    await updateMuseum(actor, museum.id, { title: 'DEMO 私密发布', description: '合成资料', regionCity: '洛阳', discoveryListed: true, expectedVersion: linked.version }, db);
+    const discoverable = await updateMuseumAccess(actor, museum.id, { operationId: randomUUID(), expectedVersion: linked.version + 1, accessMode: 'discoverable' }, db);
+    assert.equal(discoverable.accessMode, 'discoverable');
+    assert.equal((await db.query('SELECT discovery_listed FROM museums WHERE id=$1', [museum.id])).rows[0]?.discovery_listed, true);
+    assert.ok((await readLeaderboard(db)).entries.some((entry) => entry.museumId === museum.id));
+
+    // 退出公开发现（转持链接）：收录同意必须一并撤销，否则退出后仍被榜单公示。
+    await updateMuseumAccess(actor, museum.id, { operationId: randomUUID(), expectedVersion: discoverable.version, accessMode: 'link_only' }, db);
+    const after = await db.query('SELECT discovery_listed,access_mode FROM museums WHERE id=$1', [museum.id]);
+    assert.equal(after.rows[0]?.discovery_listed, false);
+    assert.equal(after.rows[0]?.access_mode, 'link_only');
+    assert.equal((await readLeaderboard(db)).entries.some((entry) => entry.museumId === museum.id), false);
+    assert.equal((await readShare(actor, token, db)).id, museum.id);
+  });
+});
+
+test('昵称保存核对版本：过期 expectedVersion 返回 409，不静默覆盖', async () => {
+  await fixture(async (db, actor) => {
+    await db.query('INSERT INTO direction1_demo_accounts(user_id) VALUES($1)', [actor]);
+    // 首次保存（页面读到的是“无资料”，约定 expectedVersion=1）。
+    const first = await updatePublicProfile(actor, { operationId: randomUUID(), expectedVersion: 1, nickname: '第一次保存' }, db);
+    assert.ok(first);
+    assert.equal(first.version, 1);
+    const second = await updatePublicProfile(actor, { operationId: randomUUID(), expectedVersion: first.version, nickname: '核对后的昵称' }, db);
+    assert.ok(second);
+    assert.equal(second.version, 2);
+    // 另一个页面仍带着首次的 expectedVersion=1 提交：必须得到版本冲突，且不能覆盖已保存的昵称。
+    await assert.rejects(
+      updatePublicProfile(actor, { operationId: randomUUID(), expectedVersion: 1, nickname: '过期覆盖' }, db),
+      hasCode('VERSION_CONFLICT'));
+    const final = await getPublicProfile(actor, db);
+    assert.ok(final);
+    assert.equal(final.nickname, '核对后的昵称');
   });
 });
