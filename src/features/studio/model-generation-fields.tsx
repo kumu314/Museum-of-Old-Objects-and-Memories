@@ -12,8 +12,8 @@ import { apiRequest, describeFailure, jsonRequest } from './api';
 
 const STATUS_LABELS = { SUBMITTING: '提交中…', WAIT: '已受理，排队中…', RUN: '生成中…', FAIL: '失败', DONE: '已完成' } as const;
 
-export function ModelGenerationFields({ museumId, exhibitId, exhibitVersion, input, photoAssetId, disabled, onChange, onBusy, onError }: {
-  museumId: string; exhibitId: string | null; exhibitVersion: number | null; input: ModelInput; photoAssetId: string | null; disabled: boolean;
+export function ModelGenerationFields({ museumId, exhibitId, exhibitVersion, dirty, input, photoAssetId, disabled, onChange, onBusy, onError }: {
+  museumId: string; exhibitId: string | null; exhibitVersion: number | null; dirty: boolean; input: ModelInput; photoAssetId: string | null; disabled: boolean;
   onChange: (input: ModelInput) => void; onBusy: (busy: boolean) => void; onError: (error: string | null) => void;
 }) {
   const assetPath = `/api/museums/${encodeURIComponent(museumId)}/assets`;
@@ -78,7 +78,11 @@ export function ModelGenerationFields({ museumId, exhibitId, exhibitVersion, inp
     ? [{ key: 'single', label: '单张照片', assetId: input.imageAssetId, assign: (id: string | null) => onChange({ mode: 'single', imageAssetId: id }) }]
     : modelViews.map((view) => ({ key: view, label: modelViewLabels[view], assetId: input.views[view], assign: (id: string | null) => onChange({ mode: 'multiview', views: { ...input.views, [view]: id } }) }));
   const canGenerate = input.mode === 'single' && input.imageAssetId !== null && exhibitId !== null && exhibitVersion !== null
-    && !disabled && !active;
+    && !dirty && !disabled && !active;
+  const generateBlockReason = input.mode !== 'single' || active ? null
+    : input.imageAssetId === null ? '请先选择或关联一张建模照片。'
+    : dirty || exhibitId === null || exhibitVersion === null ? '请先点击“保存草稿”（需填写素材来源说明），保存后即可生成。'
+    : null;
   const statusText = job === null ? null
     : job.status === 'FAIL' ? `失败：${job.errorMessage ?? '请稍后重试。'}`
     : job.status === 'DONE' ? '模型已生成（已通过加载与纹理校验）'
@@ -97,6 +101,7 @@ export function ModelGenerationFields({ museumId, exhibitId, exhibitVersion, inp
     {input.mode === 'multiview'
       ? <button type="button" className="wb-secondary" disabled>四视图生成 · 暂未支持</button>
       : <button type="button" className="wb-secondary" disabled={!canGenerate} onClick={() => { void generate(); }}>{active && job ? STATUS_LABELS[job.status] : job?.status === 'FAIL' ? '重新生成 3D 模型' : '生成 3D 模型'}</button>}
+    {!active && generateBlockReason && <p className="wb-hint">{generateBlockReason}</p>}
     {statusText && <p role="status">{statusText}{job?.status === 'DONE' && job.modelAssetId && <> · <a href={modelAssetPath(museumId, job.modelAssetId)} download={`model-${job.id}.glb`}>下载 GLB</a></>}</p>}
     {job?.status === 'DONE' && job.stats && <p>结果规模：{job.stats.meshCount} 网格 / {job.stats.materialCount} 材质 / {Math.round(job.stats.byteLength / 1024)} KB。入柜采纳与发布接入将在后续版本开放。</p>}
   </section>;
