@@ -54,6 +54,21 @@ const CONTEXT_ATTRIBUTES: WebGLContextAttributes = { antialias: true, alpha: tru
 // 只会拿回那个已丢失的上下文。StrictMode 双挂载、HMR、重试都会复用同一个 canvas 元素，
 // 所以把恢复句柄按画布存下来，下一次挂载才救得回来。
 const lostControls = new WeakMap<HTMLCanvasElement, WEBGL_lose_context>();
+// forceContextLoss() 让 isContextLost() 立刻变 true，但 webglcontextlost 事件要到下一个任务
+// 才派发；只有事件被取消之后浏览器才允许 restoreContext。所以"这张画布能不能恢复"必须按画布
+// 记录，不能靠调用顺序猜——猜早了就是 CONTEXT_LOST 的 INVALID_OPERATION。
+const restorableCanvases = new WeakSet<HTMLCanvasElement>();
+const pendingReinitialize = new WeakMap<HTMLCanvasElement, () => void>();
+
+function markRestorable(event: Event) {
+  event.preventDefault();
+  const target = event.target;
+  if (!(target instanceof HTMLCanvasElement)) return;
+  restorableCanvases.add(target);
+  const resume = pendingReinitialize.get(target);
+  pendingReinitialize.delete(target);
+  resume?.();
+}
 
 export function mountCabinetStage(canvas: HTMLCanvasElement, items: readonly CabinetStageItem[], controller: Controller, options: StageOptions) {
   const scene = new Scene();
@@ -306,13 +321,15 @@ export function mountCabinetStage(canvas: HTMLCanvasElement, items: readonly Cab
       const control = lostControls.get(canvas) ?? context.getExtension('WEBGL_lose_context');
       if (control === null) { failWebgl('context-lost'); return; }
       lostControls.set(canvas, control);
-      control.restoreContext();
-      // restored 是异步的；恢复不了就如实降级，别让界面停在既没画面又没提示的状态。
-      if (restoreDeadline !== null) window.clearTimeout(restoreDeadline);
-      restoreDeadline = window.setTimeout(() => {
-        restoreDeadline = null;
-        if (!destroyed && renderer === null) failWebgl('context-lost');
-      }, 1500);
+      if (restorableCanvases.has(canvas)) {
+        // lost 事件已派发且被取消，恢复是合法的。
+        control.restoreContext();
+      } else {
+        // forceContextLoss 让 isContextLost() 立刻变 true，但 lost 事件还在队列里；此时调用
+        // restoreContext 会被浏览器直接拒绝（context restoration not allowed）。挂起等事件落定。
+        pendingReinitialize.set(canvas, () => { if (!destroyed && renderer === null) initializeRenderer(); });
+      }
+      armRestoreDeadline();
       return;
     }
     try {
@@ -350,8 +367,14 @@ export function mountCabinetStage(canvas: HTMLCanvasElement, items: readonly Cab
     }
     notifySurface('ready'); resize();
   }
-  // 卸载时专用：取消 lost 事件才能让这张画布上的上下文在下次挂载时被 restoreContext 要回来。
-  function allowRestore(event: Event) { event.preventDefault(); }
+  // 恢复是异步的；给一个上限，恢复不了就如实降级，别让界面停在既没画面又没提示的状态。
+  function armRestoreDeadline() {
+    if (restoreDeadline !== null) window.clearTimeout(restoreDeadline);
+    restoreDeadline = window.setTimeout(() => {
+      restoreDeadline = null;
+      if (!destroyed && renderer === null) failWebgl('context-lost');
+    }, 1500);
+  }
   function onContextLost(event: Event) {
     cancelDrag();
     event.preventDefault(); if (frame !== 0) cancelAnimationFrame(frame); frame = 0;
@@ -668,9 +691,9 @@ export function mountCabinetStage(canvas: HTMLCanvasElement, items: readonly Cab
       // Three owns additional transmission targets; only context loss releases the whole owner.
       // 恢复句柄在丢失后才最需要，先存进按画布的映射，再丢上下文。
       if (renderer !== null) {
-        // lost 事件不是同步派发的，卸载后原有的 onContextLost 已被移除；没有 preventDefault
-        // 就等于把这张画布永久弃用，下一次挂载（StrictMode 双挂载 / HMR / 重试）只能拿到废上下文。
-        canvas.addEventListener('webglcontextlost', allowRestore, { once: true });
+        // lost 事件不是同步派发的，卸载后原有的 onContextLost 已被移除；必须有人
+        // preventDefault，否则这张画布被永久弃用，下一次挂载的 restoreContext 会被直接拒绝。
+        canvas.addEventListener('webglcontextlost', markRestorable, { once: true });
         if (contextControl !== null) lostControls.set(canvas, contextControl);
       }
       renderer?.forceContextLoss();
