@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>拾物馆 · 三维稳定性检查台</title>
+    <style>
+      :root { color-scheme: dark; font: 14px system-ui,sans-serif; background:#171512; color:#e8dcc7; } * { box-sizing:border-box; } body { margin:0 auto; padding:24px; max-width:1400px; }
+      h1 { font-size:26px; font-weight:500; } p { color:#b9ad98; line-height:1.8; } nav { display:flex; gap:8px; flex-wrap:wrap; margin:20px 0; } button,select { padding:10px; min-height:44px; font:inherit; background:#342b20; border:1px solid #786448; border-radius:6px; color:inherit; } button { cursor:pointer; } button:disabled { opacity:.45; } a { color:#dfba7d; padding:12px; }
+      #area { height:440px; background:radial-gradient(ellipse,#50402a,#171512); } canvas { display:block; width:100%; height:100%; touch-action:none; } output { display:block; margin:12px 0; line-height:1.8; } pre { white-space:pre-wrap; overflow-wrap:anywhere; padding:18px; border:1px solid #5a4934; line-height:1.6; } :focus-visible { outline:2px solid #dfba7d; outline-offset:3px; }
+    </style>
+  </head>
+  <body><h1>三维稳定性检查台</h1><p>程序合成边界资产与已有演示模型，仅用于测试；没有调用生成服务或读取用户素材。计时包含本机加载、解析与陈列，资源数量来自实际渲染器。</p>
+    <nav aria-label="检查项目"><button id="fixtures">检查六类边界模型</button><button id="delay">延迟旧响应测试</button><button id="unmount">加载中退出测试</button><button id="switches">连续切换 30 次</button><button id="mounts">挂载卸载 24 次</button><button id="touch">模拟双指缩放</button><button id="initial">首次 WebGL 与重试</button><button id="all">运行全部检查</button><a href="/qa.html?preview=model&webgl=blocked">首次 WebGL 失败检查</a><a href="/model-preview.html">返回制作预览</a></nav>
+    <output id="status" role="status">检查台准备中</output><div id="area"></div><section aria-label="模型资料"><p>测试资料始终保留：这些几何体用于检查尺寸、落点与失败行为，不代表真实旧物，也不是图生 3D 结果。</p></section>
+    <pre id="report" aria-label="检查记录">尚未运行检查</pre><script type="module" src="/model-lab.ts"></script>
+  </body>
+</html>

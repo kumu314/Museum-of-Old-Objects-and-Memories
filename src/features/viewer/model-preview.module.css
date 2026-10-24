@@ -1,0 +1,31 @@
+.preview { color: #ede4d5; background: #211e1a; border: 1px solid #4b4237; border-radius: 18px; overflow: hidden; display: grid; grid-template-columns: minmax(0, 1fr) 310px; }
+.preview button { border: 1px solid #75654e; border-radius: 8px; padding: 10px 14px; min-height: 44px; color: inherit; background: #342d24; font: inherit; cursor: pointer; }
+.preview button:disabled { opacity: .45; cursor: default; }
+.preview :focus-visible { outline: 2px solid #e4bc7b; outline-offset: 4px; }
+.visual { min-width: 0; height: 600px; position: relative; background: radial-gradient(ellipse at 50% 35%, #504331 0, #191713 74%); }
+.canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+.toolbar { position: absolute; inset: 16px 16px auto; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; font-size: 13px; }
+.toolbar span { padding: 8px; background: #201c17d9; border-radius: 6px; }
+.notice { position: absolute; inset: 28% 8% auto; padding: 28px; text-align: center; background: #211e1af5; border: 1px solid #72624d; border-radius: 12px; }
+.notice p { line-height: 1.7; }
+.controls { padding: 28px 24px; border-left: 1px solid #4b4237; }
+.controls h2 { font-size: 23px; font-weight: 500; margin: 0 0 12px; }
+.controls p { font-size: 13px; color: #bfb4a2; line-height: 1.8; }
+.controls fieldset { border: 0; padding: 0; margin: 26px 0 0; min-width: 0; }
+.controls legend { font-size: 14px; margin-bottom: 18px; }
+.controls label { display: grid; grid-template-columns: 1fr auto; gap: 10px; font-size: 14px; margin-bottom: 20px; }
+.controls output { color: #dfc299; font-variant-numeric: tabular-nums; }
+.controls input { grid-column: 1 / -1; width: 100%; margin: 5px 0; accent-color: #d8b277; min-height: 24px; }
+.actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.actions button { font-size: 13px; }
+.actions .primary { background: #d8b277; color: #211b14; }
+.stats { margin-top: 22px; }
+.fallback { grid-column: 1 / -1; padding: 18px 24px; border-top: 1px solid #4b4237; color: #bfb4a2; font-size: 14px; line-height: 1.8; }
+.fallback p { margin: 5px 0; }
+@media (max-width: 760px) {
+  .preview { grid-template-columns: minmax(0, 1fr); }
+  .visual { height: 440px; }
+  .controls { border-left: 0; border-top: 1px solid #4b4237; padding: 22px; }
+  .toolbar { inset: 12px 10px auto; gap: 6px; }
+  .toolbar button, .toolbar span { font-size: 12px; padding: 8px; }
+}

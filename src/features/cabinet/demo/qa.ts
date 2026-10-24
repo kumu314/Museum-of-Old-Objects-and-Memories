@@ -38,11 +38,17 @@ let contextControl: WEBGL_lose_context | null = null;
 let measurementTimer: number | null = null;
 let modeRevision = 0;
 let htmlRequest: AbortController | null = null;
+let canvasWait: number | null = null;
+let canvasWaitAttempts = 0;
 
 const capture = new URLSearchParams(location.search).has('capture');
+const previewPath = new URLSearchParams(location.search).get('preview') === 'model' ? '/model-preview.html' : '/';
+const blockInitialWebgl = new URLSearchParams(location.search).get('webgl') === 'blocked';
+element('allow-webgl').toggleAttribute('disabled', !blockInitialWebgl);
+if (previewPath !== '/') frame.src = previewPath;
 if (capture) {
   document.body.classList.add('capture');
-  frame.src = '/?metrics=1';
+  frame.src = previewPath === '/' ? '/?metrics=1' : previewPath;
 }
 function resize(): void {
   const scale = capture ? 0.75 : Math.min(1, area.clientWidth / width, area.clientHeight / height);
@@ -85,13 +91,18 @@ function cancelMeasurement(): void {
 }
 
 function onFrameLoad(): void {
+  if (canvasWait !== null) window.clearTimeout(canvasWait);
+  canvasWait = null;
   const frameWindow = frame.contentWindow;
   const frameDocument = frame.contentDocument;
   const surface = canvas();
   if (frameWindow === null || frameDocument === null || surface === null) {
+    // React can mount after iframe load; bound this QA-only wait to five seconds.
+    if (canvasWaitAttempts++ < 100) canvasWait = window.setTimeout(onFrameLoad, 50);
     describeFrame();
     return;
   }
+  canvasWaitAttempts = 0;
   if (frameDocument === documentObserved) return;
   documentObserved = frameDocument;
   cancelMeasurement();
@@ -134,6 +145,15 @@ const reducedMotionFixture = `(() => {
   };
 })();`;
 
+const blockedWebglFixture = `(() => {
+  const native = HTMLCanvasElement.prototype.getContext;
+  let enabled = false;
+  HTMLCanvasElement.prototype.getContext = function(type, ...args) {
+    return !enabled && String(type).startsWith('webgl') ? null : Reflect.apply(native, this, [type, ...args]);
+  };
+  window.addEventListener('qa-enable-webgl', () => { enabled = true; });
+})();`;
+
 async function setMotionMode(nextMode: 'normal' | 'reduced'): Promise<void> {
   const revision = ++modeRevision;
   htmlRequest?.abort();
@@ -143,8 +163,8 @@ async function setMotionMode(nextMode: 'normal' | 'reduced'): Promise<void> {
   mode = nextMode;
   element('motion-normal').setAttribute('aria-pressed', String(mode === 'normal'));
   element('motion-reduced').setAttribute('aria-pressed', String(mode === 'reduced'));
-  if (mode === 'normal') {
-    frame.src = '/';
+  if (mode === 'normal' && !blockInitialWebgl) {
+    frame.src = previewPath;
     frame.removeAttribute('srcdoc');
     result.textContent = '正在重载普通模式；保留系统原生动态偏好';
     return;
@@ -153,18 +173,18 @@ async function setMotionMode(nextMode: 'normal' | 'reduced'): Promise<void> {
   const request = new AbortController();
   htmlRequest = request;
   try {
-    const response = await fetch('/', {
+    const response = await fetch(previewPath, {
       signal: AbortSignal.any([request.signal, AbortSignal.timeout(10000)]),
     });
     if (!response.ok) throw new Error(`预览 HTML 请求失败：${response.status}`);
     const document = new DOMParser().parseFromString(await response.text(), 'text/html');
     if (revision !== modeRevision) return;
     const fixture = document.createElement('script');
-    fixture.textContent = reducedMotionFixture;
-    // 先于 Vite 和产品模块执行，仅改变该 srcdoc 文档的媒体查询。
+    fixture.textContent = (mode === 'reduced' ? reducedMotionFixture : '') + (blockInitialWebgl ? blockedWebglFixture : '');
+    // Faults are confined to this QA iframe and run before product modules.
     document.head.prepend(fixture);
     frame.srcdoc = `<!doctype html>\n${document.documentElement.outerHTML}`;
-    result.textContent = '正在载入 iframe 的减少动态测试 fixture';
+    result.textContent = blockInitialWebgl ? '首次 WebGL 初始化失败 fixture 已启用，仅影响当前 iframe' : '正在载入 iframe 的减少动态测试 fixture';
   } catch (error: unknown) {
     if (revision === modeRevision) {
       result.textContent = `模式切换失败：${error instanceof Error ? error.message : String(error)}`;
@@ -240,14 +260,20 @@ element('restore').addEventListener('click', () => {
   contextControl.restoreContext();
   result.textContent = '已请求恢复 iframe 的 WebGL';
 });
-frame.addEventListener('load', onFrameLoad);
+element('allow-webgl').addEventListener('click', () => {
+  frame.contentWindow?.dispatchEvent(new Event('qa-enable-webgl'));
+  result.textContent = '已允许该 iframe 创建 WebGL，请点击预览中的“重试三维展示”';
+});
+frame.addEventListener('load', () => { canvasWaitAttempts = 0; onFrameLoad(); });
 const resizeObserver = new ResizeObserver(resize);
 resizeObserver.observe(area);
 window.addEventListener('resize', resize);
 window.addEventListener('pagehide', () => {
   cancelMeasurement();
+  if (canvasWait !== null) window.clearTimeout(canvasWait);
   htmlRequest?.abort();
   resizeObserver.disconnect();
 }, { once: true });
 resize();
 if (frame.contentDocument?.readyState === 'complete') onFrameLoad();
+if (blockInitialWebgl) void setMotionMode('normal');
