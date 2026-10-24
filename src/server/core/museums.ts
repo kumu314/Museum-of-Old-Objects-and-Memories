@@ -11,43 +11,52 @@ import { assertVersion, dates, exhibitRecord, exhibitRecords, museumRecord, requ
 export function inTransaction<T>(work: (db: PoolClient) => Promise<T>, client?: PoolClient): Promise<T> {
   return client ? work(client) : withTransaction(work);
 }
-export async function museumDraft(client: PoolClient, museumId: string) {
-  const museum = await museumRecord(client, museumId);
+export async function museumDraft(client: PoolClient, actorId: string, museumId: string) {
+  const museum = await museumRecord(client, actorId, museumId);
   return museumDraftSchema.parse({ ...museum, exhibits: await exhibitRecords(client, museumId) });
 }
 
 export function listMuseums(actorId: string, client?: PoolClient) {
   return inTransaction(async (db) => {
     await requireActor(db, actorId);
+    // 只看自己创建的展馆：工作台列表不能泄露他人展馆的存在、标题与更新时间。
     const result = await db.query<Record<string, unknown>>(`SELECT m.id,m.title,m.description,m.version,p.museum_version AS "publishedVersion",
       m.share_enabled AS "shareEnabled",m.created_at AS "createdAt",m.updated_at AS "updatedAt"
-      FROM museums m LEFT JOIN published_snapshots p ON p.id=m.current_snapshot_id WHERE m.deleted_at IS NULL ORDER BY m.updated_at DESC`);
+      FROM museums m LEFT JOIN published_snapshots p ON p.id=m.current_snapshot_id
+      WHERE m.deleted_at IS NULL AND m.created_by=$1 ORDER BY m.updated_at DESC`, [actorId]);
     return result.rows.map((row) => museumSummarySchema.parse(dates(row)));
   }, client);
 }
 export function getMuseum(actorId: string, museumId: string, client?: PoolClient) {
-  return inTransaction(async (db) => { await requireActor(db, actorId); return museumDraft(db, museumId); }, client);
+  return inTransaction(async (db) => { await requireActor(db, actorId); return museumDraft(db, actorId, museumId); }, client);
+}
+/**
+ * 只做归属判断，不读展品。
+ * 上传路由在解析请求体之前调用它：越权请求不该先被读进内存。
+ */
+export function assertMuseumAccess(actorId: string, museumId: string, client?: PoolClient) {
+  return inTransaction(async (db) => { await requireActor(db, actorId); await museumRecord(db, actorId, museumId); }, client);
 }
 export function createMuseum(actorId: string, input: CreateMuseumInput, client?: PoolClient) {
   return inTransaction(async (db) => {
     await requireActor(db, actorId);
     const id = randomUUID();
     await db.query('INSERT INTO museums(id,title,description,created_by) VALUES($1,$2,$3,$4)', [id, input.title, input.description, actorId]);
-    return museumDraft(db, id);
+    return museumDraft(db, actorId, id);
   }, client);
 }
 export function updateMuseum(actorId: string, id: string, input: UpdateMuseumInput, client?: PoolClient) {
   return inTransaction(async (db) => {
     await requireActor(db, actorId);
-    assertVersion((await museumRecord(db, id, true)).version, input.expectedVersion);
+    assertVersion((await museumRecord(db, actorId, id, true)).version, input.expectedVersion);
     await db.query('UPDATE museums SET title=$1,description=$2,version=version+1,updated_at=now() WHERE id=$3', [input.title, input.description, id]);
-    return museumDraft(db, id);
+    return museumDraft(db, actorId, id);
   }, client);
 }
 export function removeMuseum(actorId: string, id: string, expectedVersion: number, client?: PoolClient) {
   return inTransaction(async (db) => {
     await requireActor(db, actorId);
-    assertVersion((await museumRecord(db, id, true)).version, expectedVersion);
+    assertVersion((await museumRecord(db, actorId, id, true)).version, expectedVersion);
     await db.query('UPDATE museums SET deleted_at=now(),share_enabled=false,share_token_hash=NULL,version=version+1,updated_at=now() WHERE id=$1', [id]);
     return { id };
   }, client);
@@ -63,7 +72,7 @@ function editableValues(input: CreateExhibitInput | UpdateExhibitInput) {
 export function createExhibit(actorId: string, museumId: string, input: CreateExhibitInput, client?: PoolClient) {
   return inTransaction(async (db) => {
     await requireActor(db, actorId);
-    assertVersion((await museumRecord(db, museumId, true)).version, input.expectedMuseumVersion);
+    assertVersion((await museumRecord(db, actorId, museumId, true)).version, input.expectedMuseumVersion);
     await ensureFreeSlot(db, museumId, input.slotIndex, null);
     await validateAssets(db, museumId, input.photoAssetId, input.audioAssetId);
     const id = randomUUID();
@@ -76,7 +85,7 @@ export function createExhibit(actorId: string, museumId: string, input: CreateEx
 export function updateExhibit(actorId: string, museumId: string, id: string, input: UpdateExhibitInput, client?: PoolClient) {
   return inTransaction(async (db) => {
     await requireActor(db, actorId);
-    await museumRecord(db, museumId, true);
+    await museumRecord(db, actorId, museumId, true);
     assertVersion((await exhibitRecord(db, museumId, id)).version, input.expectedVersion);
     await ensureFreeSlot(db, museumId, input.slotIndex, id);
     await validateAssets(db, museumId, input.photoAssetId, input.audioAssetId);
@@ -90,7 +99,7 @@ export function updateExhibit(actorId: string, museumId: string, id: string, inp
 export function removeExhibit(actorId: string, museumId: string, id: string, expectedVersion: number, client?: PoolClient) {
   return inTransaction(async (db) => {
     await requireActor(db, actorId);
-    await museumRecord(db, museumId, true);
+    await museumRecord(db, actorId, museumId, true);
     assertVersion((await exhibitRecord(db, museumId, id)).version, expectedVersion);
     await db.query('UPDATE exhibits SET deleted_at=now(),version=version+1,confirmed_version=NULL,confirmed_by=NULL,confirmed_at=NULL,confirmation_note=NULL,updated_at=now() WHERE id=$1 AND museum_id=$2', [id, museumId]);
     await bumpMuseum(db, museumId);
@@ -100,7 +109,7 @@ export function removeExhibit(actorId: string, museumId: string, id: string, exp
 export function confirmExhibit(actorId: string, museumId: string, id: string, input: ConfirmExhibitInput, client?: PoolClient) {
   return inTransaction(async (db) => {
     await requireActor(db, actorId);
-    await museumRecord(db, museumId, true);
+    await museumRecord(db, actorId, museumId, true);
     const exhibit = await exhibitRecord(db, museumId, id);
     assertVersion(exhibit.version, input.expectedVersion);
     if (exhibit.confirmedVersion === exhibit.version) return exhibit;
@@ -113,7 +122,7 @@ export function confirmExhibit(actorId: string, museumId: string, id: string, in
 export function getPrivateAsset(actorId: string, museumId: string, assetId: string, client?: PoolClient) {
   return inTransaction(async (db) => {
     await requireActor(db, actorId);
-    await museumRecord(db, museumId);
+    await museumRecord(db, actorId, museumId);
     return assetRecord(db, museumId, assetId);
   }, client);
 }

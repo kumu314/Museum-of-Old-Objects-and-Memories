@@ -5,13 +5,14 @@ import { publicMuseumSchema, type PublicMuseum } from '../../contracts/museum';
 import { shareNotFoundMessage } from '../../contracts/errors';
 import type { AssetStatus, SurfaceStatus, mountCabinetStage } from '../cabinet/cabinet-stage';
 import { ApiFailure, apiRequest } from '../studio/api';
+import { loginDestination } from '../studio/login-destination';
 import { createInspectionController } from './inspection-controller';
 import { publicStageItems, shareAssetUrl } from './public-stage-items';
 import { ExhibitStory, InspectionGuide } from './inspection-ui';
 import styles from './shared-museum.module.css';
 import '../cabinet/gallery-backdrop.css';
 
-type ShareState = { status: 'ready'; museum: PublicMuseum } | { status: 'failed'; message: string };
+type ShareState = { status: 'ready'; museum: PublicMuseum } | { status: 'unauthorized' } | { status: 'failed'; message: string };
 
 export function SharedMuseum({ token, initialMuseum }: { token: string; initialMuseum: PublicMuseum }) {
   const [share, setShare] = useState<ShareState>({ status: 'ready', museum: initialMuseum });
@@ -29,8 +30,11 @@ export function SharedMuseum({ token, initialMuseum }: { token: string; initialM
         && current.museum.version === museum.version && current.museum.publishedAt === museum.publishedAt
         ? current : { status: 'ready', museum });
     } catch (error: unknown) {
-      if (!controller.signal.aborted) setShare({ status: 'failed', message: error instanceof ApiFailure && error.failure.code === 'SHARE_NOT_FOUND'
-        ? shareNotFoundMessage : '暂时无法读取展馆，请检查网络后重试。' });
+      if (!controller.signal.aborted) {
+        if (error instanceof ApiFailure && error.failure.code === 'UNAUTHORIZED') setShare({ status: 'unauthorized' });
+        else setShare({ status: 'failed', message: error instanceof ApiFailure && error.failure.code === 'SHARE_NOT_FOUND'
+          ? shareNotFoundMessage : '暂时无法读取展馆，请检查网络后重试。' });
+      }
     } finally {
       if (!controller.signal.aborted) setChecking(false);
     }
@@ -49,6 +53,7 @@ export function SharedMuseum({ token, initialMuseum }: { token: string; initialM
     };
   }, [refresh]);
 
+  if (share.status === 'unauthorized') return <main className={styles.unavailable}><p>拾物馆</p><h1>登录已失效</h1><p>请重新登录后继续参观。</p><a href={`/login?next=${encodeURIComponent(loginDestination(`/share/${token}`))}`}>重新登录并返回参观</a></main>;
   if (share.status === 'failed') return <main className={styles.unavailable}><p>拾物馆</p><h1>{share.message}</h1><p>请向制作人员核对当前链接，或重新读取。</p><button disabled={checking} onClick={() => void refresh()}>{checking ? '正在读取…' : '重新读取展馆'}</button></main>;
   return <MuseumViewer key={`${share.museum.id}:${share.museum.version}:${share.museum.publishedAt}`} museum={share.museum} token={token} checking={checking} onRefresh={() => void refresh()} />;
 }

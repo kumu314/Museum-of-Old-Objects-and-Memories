@@ -84,7 +84,7 @@ test('素材HTTP闭环：真实上传、脱敏、字节边界、快照保护及�
     const replacementAudio = await uploaded(await upload(museumId, wave(2044), 'replacement.wav', 'audio/wav'));
     await error(await upload(museumId, Buffer.concat([audioInput, Buffer.from([0])]), 'too-large.wav', 'audio/wav'), 413, 'PAYLOAD_TOO_LARGE');
     async function audioBody(path: string) {
-      const response = await request(path, 'GET', undefined, false);
+      const response = await request(path);
       assert.equal(response.status, 200); assert.equal(response.headers.get('content-type'), 'audio/wav');
       assert.match(response.headers.get('cache-control') ?? '', /no-store/);
       assert.equal(response.headers.get('x-content-type-options'), 'nosniff');
@@ -119,29 +119,32 @@ test('素材HTTP闭环：真实上传、脱敏、字节边界、快照保护及�
     assert.equal(publication.status, 200); const token = publishResponseSchema.parse(await publication.json()).data.token; assert.ok(token);
     const sharePath = `/api/share/${token}/assets/${photo.id}`;
     const audioPath = `/api/share/${token}/assets/${audio.id}`;
+    await error(await request(sharePath, 'GET', undefined, false), 401, 'UNAUTHORIZED');
+    await error(await request(audioPath, 'GET', undefined, false), 401, 'UNAUTHORIZED');
+    await error(await request(`/api/share/invalid/assets/${photo.id}`, 'GET', undefined, false), 401, 'UNAUTHORIZED');
     await audioBody(audioPath);
-    assert.deepEqual(await imageBody(await request(sharePath, 'GET', undefined, false)), displayed);
-    await imageBody(await request(`${sharePath}?variant=thumbnail`, 'GET', undefined, false));
-    const badVariant = await error(await request(`${sharePath}?variant=original`, 'GET', undefined, false), 404, 'SHARE_NOT_FOUND');
-    const outside = await error(await request(`/api/share/${token}/assets/${replacement.id}`, 'GET', undefined, false), 404, 'SHARE_NOT_FOUND');
+    assert.deepEqual(await imageBody(await request(sharePath)), displayed);
+    await imageBody(await request(`${sharePath}?variant=thumbnail`));
+    const badVariant = await error(await request(`${sharePath}?variant=original`), 404, 'SHARE_NOT_FOUND');
+    const outside = await error(await request(`/api/share/${token}/assets/${replacement.id}`), 404, 'SHARE_NOT_FOUND');
     assert.equal(badVariant.message, outside.message);
     const edited = await request(`/api/museums/${museumId}/exhibits/${exhibit.id}`, 'PATCH', { ...fields, photoAssetId: replacement.id, audioAssetId: replacementAudio.id, expectedVersion: exhibit.version });
     assert.equal(edited.status, 200);
     const updated = exhibitDraftResponseSchema.parse(await edited.json()).data;
-    assert.deepEqual(await imageBody(await request(sharePath, 'GET', undefined, false)), displayed);
+    assert.deepEqual(await imageBody(await request(sharePath)), displayed);
     const removedExhibit = await request(`/api/museums/${museumId}/exhibits/${exhibit.id}`, 'DELETE', { expectedVersion: updated.version });
     assert.equal(removedExhibit.status, 200);
-    assert.deepEqual(await imageBody(await request(sharePath, 'GET', undefined, false)), displayed);
+    assert.deepEqual(await imageBody(await request(sharePath)), displayed);
     await audioBody(audioPath);
     const rotation = await request(`/api/museums/${museumId}/share`, 'POST', { expectedVersion: (await museum(museumId)).version });
     assert.equal(rotation.status, 200); const rotated = shareLinkResponseSchema.parse(await rotation.json()).data.token;
-    const revoked = await error(await request(sharePath, 'GET', undefined, false), 404, 'SHARE_NOT_FOUND');
+    const revoked = await error(await request(sharePath), 404, 'SHARE_NOT_FOUND');
     assert.equal(revoked.message, outside.message);
-    await error(await request(audioPath, 'GET', undefined, false), 404, 'SHARE_NOT_FOUND');
-    await imageBody(await request(`/api/share/${rotated}/assets/${photo.id}`, 'GET', undefined, false));
+    await error(await request(audioPath), 404, 'SHARE_NOT_FOUND');
+    await imageBody(await request(`/api/share/${rotated}/assets/${photo.id}`));
     const stop = await request(`/api/museums/${museumId}/share`, 'DELETE', { expectedVersion: (await museum(museumId)).version }); assert.equal(stop.status, 200);
-    await error(await request(`/api/share/${rotated}/assets/${photo.id}`, 'GET', undefined, false), 404, 'SHARE_NOT_FOUND');
-    await error(await request(`/api/share/${rotated}/assets/${audio.id}`, 'GET', undefined, false), 404, 'SHARE_NOT_FOUND');
+    await error(await request(`/api/share/${rotated}/assets/${photo.id}`), 404, 'SHARE_NOT_FOUND');
+    await error(await request(`/api/share/${rotated}/assets/${audio.id}`), 404, 'SHARE_NOT_FOUND');
   } finally {
     for (const id of museumIds) {
       const current = await museum(id);

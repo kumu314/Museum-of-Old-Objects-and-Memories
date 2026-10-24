@@ -20,3 +20,10 @@ test('configuration rejects missing secrets, public storage and database alias o
   assert.throws(() => parseServerConfig({ ...valid, TEST_DATABASE_URL: valid.DATABASE_URL.replace('127.0.0.1', 'localhost') }));
   assert.throws(() => parseServerConfig({ ...valid, NODE_ENV: 'production' }));
 });
+
+test('自助注册默认开启，可显式关闭，非法取值直接失败', () => {
+  assert.equal(parseServerConfig(valid).selfRegistration, true);
+  assert.equal(parseServerConfig({ ...valid, SELF_REGISTRATION: 'open' }).selfRegistration, true);
+  assert.equal(parseServerConfig({ ...valid, SELF_REGISTRATION: 'closed' }).selfRegistration, false);
+  assert.throws(() => parseServerConfig({ ...valid, SELF_REGISTRATION: 'yes' }));
+});
