@@ -27,7 +27,7 @@ import { newShareToken } from './share-tokens';
  * 少了后两个条件，馆主还没发布的草稿标题就会出现在全站公开榜单上——浏览数当然是 0，
  * 但标题本身已经泄露了。已停止分享的馆同理：链接都失效了，还留在榜上等于继续公示。
  */
-const visibleMuseum = 'm.discovery_listed AND m.deleted_at IS NULL AND m.share_enabled AND m.current_snapshot_id IS NOT NULL';
+const visibleMuseum = "m.discovery_listed AND m.access_mode='discoverable' AND m.deleted_at IS NULL AND m.share_enabled AND m.current_snapshot_id IS NOT NULL";
 
 /**
  * 榜单条数上限。首版馆数很少，取全量最省事，也让「按城市筛选」与地图聚合口径一致；
@@ -157,6 +157,10 @@ export function updatePublicProfile(actorId: string, input: UpdatePublicProfileI
       ? publicProfileSchema.parse({ ...locked.rows[0], updatedAt: locked.rows[0].updatedAt instanceof Date ? locked.rows[0].updatedAt.toISOString() : locked.rows[0].updatedAt })
       : null;
     if (operation.replayed) return current;
+    if (input.expectMissing === true && current) {
+      // 另一页面的首次保存已经创建了资料行：这次“预期缺失”的提交必须 409，而不是覆盖。
+      throw new HttpError({ code: 'VERSION_CONFLICT', message: '昵称已由另一次首次保存创建，请刷新后核对。' });
+    }
     assertVersion(current?.version ?? 1, input.expectedVersion);
     if (current) await db.query('UPDATE public_profiles SET nickname=$1,version=version+1,updated_at=now() WHERE user_id=$2', [input.nickname, actorId]);
     else {

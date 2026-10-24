@@ -148,17 +148,33 @@ test('退出公开发现即撤销收录同意：榜单地图不再展示，参�
   });
 });
 
-test('昵称保存核对版本：过期 expectedVersion 返回 409，不静默覆盖', async () => {
+test('首次保存必须声明预期缺失：两个 expectedVersion=1 的首次保存，后者 409 不覆盖', async () => {
   await fixture(async (db, actor) => {
     await db.query('INSERT INTO direction1_demo_accounts(user_id) VALUES($1)', [actor]);
-    // 首次保存（页面读到的是“无资料”，约定 expectedVersion=1）。
-    const first = await updatePublicProfile(actor, { operationId: randomUUID(), expectedVersion: 1, nickname: '第一次保存' }, db);
+    // 页面 A：读到“无资料”，按 create 语义保存。
+    const first = await updatePublicProfile(actor, { operationId: randomUUID(), expectedVersion: 1, nickname: '页面甲', expectMissing: true }, db);
+    assert.ok(first);
+    assert.equal(first.version, 1);
+    // 页面 B 读到的是同一份“无资料”，随后才提交：声明预期缺失与现状不符，必须 409。
+    await assert.rejects(
+      updatePublicProfile(actor, { operationId: randomUUID(), expectedVersion: 1, nickname: '页面乙', expectMissing: true }, db),
+      hasCode('VERSION_CONFLICT'));
+    const final = await getPublicProfile(actor, db);
+    assert.ok(final);
+    assert.equal(final.nickname, '页面甲');
+  });
+});
+
+test('昵称编辑核对版本：过期 expectedVersion 返回 409，不静默覆盖', async () => {
+  await fixture(async (db, actor) => {
+    await db.query('INSERT INTO direction1_demo_accounts(user_id) VALUES($1)', [actor]);
+    const first = await updatePublicProfile(actor, { operationId: randomUUID(), expectedVersion: 1, nickname: '第一次保存', expectMissing: true }, db);
     assert.ok(first);
     assert.equal(first.version, 1);
     const second = await updatePublicProfile(actor, { operationId: randomUUID(), expectedVersion: first.version, nickname: '核对后的昵称' }, db);
     assert.ok(second);
     assert.equal(second.version, 2);
-    // 另一个页面仍带着首次的 expectedVersion=1 提交：必须得到版本冲突，且不能覆盖已保存的昵称。
+    // 仍带着旧视图 expectedVersion=1 的编辑请求：必须得到版本冲突，且不能覆盖已保存的昵称。
     await assert.rejects(
       updatePublicProfile(actor, { operationId: randomUUID(), expectedVersion: 1, nickname: '过期覆盖' }, db),
       hasCode('VERSION_CONFLICT'));

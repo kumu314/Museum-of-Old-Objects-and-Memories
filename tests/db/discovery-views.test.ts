@@ -12,6 +12,8 @@ import {
   publishMuseum,
   readLeaderboard,
   rotateShareToken,
+  updateMuseumAccess,
+  updatePublicProfile,
   readShare,
   readRegionDistribution,
   recordMuseumView,
@@ -65,6 +67,9 @@ function exhibitInput(expectedMuseumVersion: number): CreateExhibitInput {
  * 之间的约束由发布逻辑维护，手工插行容易造出库里根本不可能出现的状态。
  */
 async function publishedMuseum(db: PoolClient, ownerId: string, title: string, regionCity: RegionCity | null, discoveryListed = true): Promise<{ museumId: string; token: string }> {
+  // 榜单资格统一要求 discoverable：造馆者必须是登记的演示账号且已填公开昵称。
+  await db.query('INSERT INTO direction1_demo_accounts(user_id) VALUES($1)', [ownerId]);
+  await updatePublicProfile(ownerId, { operationId: randomUUID(), expectedVersion: 1, nickname: `榜单-${ownerId.slice(0, 8)}`, expectMissing: true }, db);
   const museum = await createMuseum(ownerId, { title, description: '' }, db);
   assert.equal(museum.discoveryListed, false);
   let version = museum.version;
@@ -83,6 +88,9 @@ async function publishedMuseum(db: PoolClient, ownerId: string, title: string, r
   const published = await publishMuseum(ownerId, museum.id, current, db);
   assert.equal(published.token, null);
   const link = await rotateShareToken(ownerId, museum.id, published.version, db);
+  const linked = (await getMuseum(ownerId, museum.id, db)).version;
+  const discoverable = await updateMuseumAccess(ownerId, museum.id, { operationId: randomUUID(), expectedVersion: linked, accessMode: 'discoverable' }, db);
+  assert.equal(discoverable.accessMode, 'discoverable');
   return { museumId: museum.id, token: link.token };
 }
 
@@ -104,6 +112,28 @@ test('浏览数只算访客，馆主自己反复查看不计入', async () => {
     const events = await db.query('SELECT viewer_id FROM museum_view_events WHERE museum_id=$1', [museum.museumId]);
     assert.equal(events.rowCount, 5);
     assert.equal(await viewCountOf(db, museum.museumId), 3);
+  });
+});
+
+test('资格判断统一要求 discoverable：持链接馆重新勾选收录也不进榜', async () => {
+  await inRollback(async (db) => {
+    const owner = await account(db, 'link-owner');
+    const visitor = await account(db, 'link-visitor');
+    const museum = await publishedMuseum(db, owner.id, '持链接收录测试馆', '洛阳');
+    assert.ok((await readLeaderboard(db)).entries.some((entry) => entry.museumId === museum.museumId));
+    // 退出公开发现转为持链接，再在工作台重新勾选收录：标记可以写，但资格口径统一后不得进榜。
+    const current = (await getMuseum(owner.id, museum.museumId, db)).version;
+    await updateMuseumAccess(owner.id, museum.museumId, { operationId: randomUUID(), expectedVersion: current, accessMode: 'link_only' }, db);
+    const after = (await getMuseum(owner.id, museum.museumId, db)).version;
+    await updateMuseum(owner.id, museum.museumId, { title: '持链接收录测试馆', description: '', regionCity: '洛阳', discoveryListed: true, expectedVersion: after }, db);
+    const flags = await db.query('SELECT discovery_listed,access_mode FROM museums WHERE id=$1', [museum.museumId]);
+    assert.equal(flags.rows[0]?.discovery_listed, true);
+    assert.equal(flags.rows[0]?.access_mode, 'link_only');
+    await recordMuseumView(visitor.id, museum.token, db);
+    assert.equal(await viewCountOf(db, museum.museumId), undefined);
+    const regions = await readRegionDistribution(db);
+    const luoyang = regions.cities.find((bucket) => bucket.city === '洛阳');
+    assert.equal(luoyang?.museumCount ?? 0, 0);
   });
 });
 

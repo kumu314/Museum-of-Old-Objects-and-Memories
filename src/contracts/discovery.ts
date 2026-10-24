@@ -73,7 +73,12 @@ export const museumAccessModeSchema = z.enum(['private', 'link_only', 'discovera
 export const newMuseumAccessMode: MuseumAccessMode = 'private';
 export const publicAuthorSchema = z.strictObject({ userId: idSchema, nickname: textSchema(1, 80) });
 export const publicProfileSchema = publicAuthorSchema.extend({ version: versionSchema, updatedAt: timestampSchema });
-export const updatePublicProfileInputSchema = versionedOperationInputSchema.extend({ nickname: textSchema(1, 80) });
+export const updatePublicProfileInputSchema = versionedOperationInputSchema.extend({
+  nickname: textSchema(1, 80),
+  // 「未创建」与「已存在且版本 1」在数据上无法区分：首次保存必须显式声明预期缺失，
+  // 服务端据此在资料行已存在时返回 409，而不是把并发的另一次首次保存静默覆盖。
+  expectMissing: z.boolean().optional(),
+});
 export const museumTagsSchema = z.array(textSchema(1, 30)).max(10)
   .refine((tags) => new Set(tags).size === tags.length, '标签不得重复。');
 export const updateMuseumTagsInputSchema = versionedOperationInputSchema.extend({ tags: museumTagsSchema });
