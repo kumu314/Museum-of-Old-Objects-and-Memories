@@ -113,7 +113,6 @@ export function readHunyuanCloudConfig(
 ): HunyuanCloudConfiguration | undefined {
   const settings = settingsPath === undefined ? readProviderSettings() : readProviderSettings(settingsPath);
   const insecureResult = environment.HUNYUAN_CLOUD_ALLOW_INSECURE_RESULT === '1';
-  console.error('[debug] readHunyuanCloudConfig insecure=', insecureResult, 'argNODE_ENV=', environment.NODE_ENV, 'processNODE_ENV=', process.env.NODE_ENV, 'path=', settingsPath ?? 'default');
   if (insecureResult && environment.NODE_ENV !== 'test') {
     throw new HttpError({ code: 'GENERATION_UNAVAILABLE', message: '不安全的生成来源开关仅允许测试环境使用。' });
   }
