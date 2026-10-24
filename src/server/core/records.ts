@@ -34,11 +34,17 @@ export async function requireActor(client: PoolClient, actorId: string): Promise
   const result = await client.query('SELECT id FROM team_members WHERE id=$1 AND active', [actorId]);
   if (result.rowCount !== 1) throw new HttpError({ code: 'UNAUTHORIZED', message: '请重新登录制作入口。' });
 }
-export async function museumRecord(client: PoolClient, id: string, lock = false) {
+/**
+ * 归属校验的唯一入口。任何读写展馆的路径都必须先经过这里。
+ *
+ * 他人展馆与他馆不存在返回同一个 NOT_FOUND：区分开就等于提供存在性探测接口。
+ * 调用方必须显式传 actorId，TypeScript 会逼出所有遗漏的旧调用点。
+ */
+export async function museumRecord(client: PoolClient, actorId: string, id: string, lock = false) {
   const result = await client.query<Record<string, unknown>>(`SELECT m.id,m.title,m.description,m.version,
     p.museum_version AS "publishedVersion", m.share_enabled AS "shareEnabled",m.created_at AS "createdAt",m.updated_at AS "updatedAt"
     FROM museums m LEFT JOIN published_snapshots p ON p.id=m.current_snapshot_id
-    WHERE m.id=$1 AND m.deleted_at IS NULL ${lock ? 'FOR UPDATE OF m' : ''}`, [id]);
+    WHERE m.id=$1 AND m.created_by=$2 AND m.deleted_at IS NULL ${lock ? 'FOR UPDATE OF m' : ''}`, [id, actorId]);
   const row = result.rows[0];
   if (!row) notFound();
   return museumSummarySchema.parse(dates(row));
