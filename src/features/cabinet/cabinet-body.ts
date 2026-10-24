@@ -1,5 +1,5 @@
 import {
-  AdditiveBlending, BoxGeometry, BufferGeometry, CanvasTexture, CircleGeometry, ExtrudeGeometry, Shape, DoubleSide, Group, Line, LineDashedMaterial, Mesh, MeshBasicMaterial,
+  AdditiveBlending, BoxGeometry, BufferGeometry, CanvasTexture, CircleGeometry, ExtrudeGeometry, Shape, DoubleSide, Group, Line, LineBasicMaterial, LineSegments, LineDashedMaterial, Mesh, MeshBasicMaterial,
   MeshPhysicalMaterial, MeshStandardMaterial, PlaneGeometry,
   SRGBColorSpace, Vector3, type Material,
 } from 'three';
@@ -80,6 +80,22 @@ function lampHaloTexture() {
   });
 }
 
+function lightConeTexture() {
+  return canvasTexture(256, 384, (context) => {
+    // A blurred cone in cabinet space stays aligned with its lamp during inspection.
+    // One shared static texture gives all six bays the CSS conic-gradient look.
+    context.filter = 'blur(10px)';
+    const beam = context.createLinearGradient(0, 0, 0, 384);
+    beam.addColorStop(0, 'rgba(255,215,140,0.22)');
+    beam.addColorStop(0.35, 'rgba(255,215,140,0.14)');
+    beam.addColorStop(1, 'rgba(255,215,140,0)');
+    context.fillStyle = beam;
+    context.beginPath();
+    context.moveTo(128, 0); context.lineTo(244, 372); context.lineTo(12, 372);
+    context.closePath(); context.fill();
+  });
+}
+
 function glassHighlightTexture() {
   return canvasTexture(128, 512, (context) => {
     const glint = context.createLinearGradient(0, 0, 128, 0);
@@ -108,7 +124,7 @@ function ticketShadowTexture() {
   });
 }
 
-export function buildCabinetBody(materials: CabinetMaterials, labels: ReadonlyMap<number, string>): Group {
+export function buildCabinetBody(materials: CabinetMaterials, labels: ReadonlyMap<number, string>, homePresentation = false): Group {
   const cabinet = new Group();
   cabinet.name = 'walnut-cabinet-body';
 
@@ -215,10 +231,15 @@ export function buildCabinetBody(materials: CabinetMaterials, labels: ReadonlyMa
   wallHaloMaterial.opacity = 0.5;
   const floorGlowMaterial = haloMaterial.clone();
   floorGlowMaterial.opacity = 0.22;
+  const coneMaterial = new MeshBasicMaterial({ map: lightConeTexture(), transparent: true,
+    blending: AdditiveBlending, depthWrite: false, toneMapped: false, side: DoubleSide });
 
   for (let slot = 0; slot < 6; slot += 1) {
     const [x, floorY, z] = slotRestPosition(slot);
     const ceilingY = slot < 3 ? 2.48 : -0.245;
+    const coneHeight = ceilingY - floorY;
+    const cone = overlay(3.1, coneHeight, x, ceilingY - coneHeight / 2, 0.78, coneMaterial);
+    cone.name = `cabinet-light-cone:${slot}`;
     overlay(CELL_SIZE[0] + 0.07, ceilingY - floorY, x, (ceilingY + floorY) / 2, -0.711, occlusionMaterial);
     const floorOcclusion = overlay(CELL_SIZE[0] + 0.07, 1.49, x, slotFloorHeight(slot, 0.01) + 0.004, 0.01, floorOcclusionMaterial);
     floorOcclusion.rotation.x = -Math.PI / 2 + Math.atan(slotFloorSlope(slot));
@@ -299,15 +320,32 @@ export function buildCabinetBody(materials: CabinetMaterials, labels: ReadonlyMa
       marker.computeLineDistances();
       cabinet.add(marker);
       marker.name = `empty-slot-marker:${slot}`;
-      marker.visible = !labels.has(slot);
+      marker.visible = !labels.has(slot) && !homePresentation;
+      if (homePresentation && !labels.has(slot)) {
+        const plus = new LineSegments(new BufferGeometry().setFromPoints([
+          new Vector3(-0.20, 0, 0), new Vector3(0.20, 0, 0),
+          new Vector3(0, -0.20, 0), new Vector3(0, 0.20, 0),
+        ]), new LineBasicMaterial({ color: '#C8A870', transparent: true, opacity: 0.6, toneMapped: false }));
+        plus.position.set(x, (ceilingY + openingFloor) / 2, 0.76);
+        plus.name = `home-empty-plus:${slot}`;
+        cabinet.add(plus);
+      }
     }
   }
 
   for (let slot = 0; slot < 6; slot++) {
-    const plaque = createBrassPlaque(labels.get(slot) ?? '', slot);
+    const plaque = createBrassPlaque(labels.get(slot) ?? (homePresentation ? '添加收藏' : ''), slot);
     plaque.position.set(...slotPlaquePosition(slot));
     if (slot < 3) plaque.scale.y = 0.9;
-    plaque.visible = labels.has(slot);
+    plaque.visible = homePresentation || labels.has(slot);
+    if (homePresentation && slot >= 3) {
+      const body = plaque.getObjectByName(`cabinet-plaque:${slot}`);
+      if (body instanceof Mesh && body.material instanceof MeshStandardMaterial) {
+        body.material.emissive.set('#ffffff');
+        body.material.emissiveMap = body.material.map;
+        body.material.emissiveIntensity = 0.32;
+      }
+    }
     cabinet.add(plaque);
   }
   return cabinet;
