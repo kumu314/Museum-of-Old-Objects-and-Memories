@@ -1,0 +1,263 @@
+.page {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 32px 24px 48px;
+  background: #211d17;
+  color: #eadfc8;
+  min-height: 100svh;
+}
+
+.header { margin-bottom: 18px; }
+
+.eyebrow {
+  margin: 0 0 8px;
+  color: #bfa77e;
+  font-size: 12px;
+  letter-spacing: .13em;
+}
+
+.title {
+  margin: 0;
+  color: #f3e5ce;
+  font: 600 30px/1.4 'Noto Serif CJK SC', 'Songti SC', serif;
+  letter-spacing: .06em;
+}
+
+.lede {
+  max-width: 760px;
+  margin: 12px 0 0;
+  color: #b1a48f;
+  font-size: 14px;
+  line-height: 1.9;
+}
+
+.demoBanner {
+  margin: 18px 0 0;
+  padding: 12px 16px;
+  border: 1px solid #ac90624d;
+  border-left: 3px solid #c7a66e;
+  border-radius: 8px;
+  background: #2a241c;
+  color: #cbb99c;
+  font-size: 13px;
+  line-height: 1.8;
+}
+
+.demoBanner strong { color: #e8c98c; letter-spacing: .12em; }
+
+.viewerBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.viewerLabel { color: #8f8168; font-size: 12px; letter-spacing: .1em; }
+
+.viewerButton {
+  padding: 6px 14px;
+  border: 1px solid #6e5a44b3;
+  border-radius: 999px;
+  background: #1e1610cc;
+  color: #d9cab3;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color 150ms, color 150ms;
+}
+
+.viewerButton small { margin-left: 6px; color: #a08e74; font-size: 11px; }
+.viewerButton:hover { border-color: #c8a870; }
+.viewerButton[data-active='true'] { border-color: #c7a66e; background: #4b382655; color: #f3e5ce; }
+
+.notice {
+  margin: 14px 0 0;
+  padding: 10px 14px;
+  border: 1px dashed #ac906266;
+  border-radius: 8px;
+  color: #d8c8ad;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+  gap: 18px;
+  margin-top: 18px;
+  align-items: start;
+}
+
+@media (max-width: 860px) {
+  .grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+.panel {
+  padding: 18px;
+  border: 1px solid #8c735838;
+  border-radius: 14px;
+  background: #26211999;
+}
+
+.panelHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #8c735833;
+}
+
+.panelTitle {
+  margin: 0;
+  color: #f0e2ca;
+  font: 500 17px/1.5 'Noto Serif CJK SC', 'Songti SC', serif;
+}
+
+.panelNote { margin: 0; color: #8f8168; font-size: 12px; }
+
+.people { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 10px; }
+
+.person {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid #8c735829;
+  border-radius: 10px;
+  background: #1f1a14b3;
+}
+
+.personName { color: #e9dcc6; font-size: 14px; }
+.self { margin-left: 6px; color: #c7a66e; font-size: 11px; }
+.personMeta { display: flex; align-items: center; gap: 10px; }
+.count { color: #8f8168; font-size: 12px; }
+
+.badge {
+  padding: 2px 9px;
+  border-radius: 999px;
+  border: 1px solid #8c735859;
+  color: #c9b696;
+  font-size: 11px;
+  letter-spacing: .06em;
+}
+
+.badge[data-status='owner'] { border-color: #c7a66e7a; color: #e8c98c; }
+.badge[data-status='accepted'] { border-color: #6f8f6a80; color: #a9c6a1; }
+.badge[data-status='pending'] { border-color: #c7a66e66; color: #dcc08a; background: #3a2f1f80; }
+.badge[data-status='declined'],
+.badge[data-status='cancelled'] { border-color: #9a6a5a80; color: #c39a8c; }
+
+.inviteAction {
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px dashed #c7a66e59;
+  border-radius: 10px;
+  background: #2c2418a6;
+}
+
+.inviteAction p { margin: 0 0 10px; color: #c2b096; font-size: 13px; line-height: 1.8; }
+
+.primary {
+  padding: 8px 16px;
+  border: 1px solid #c7a66e;
+  border-radius: 8px;
+  background: #4b3826;
+  color: #f4e7d1;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.primary:hover { background: #5b452e; }
+
+.danger {
+  width: 100%;
+  margin-top: 14px;
+  padding: 9px 14px;
+  border: 1px solid #9a6a5a80;
+  border-radius: 8px;
+  background: transparent;
+  color: #d8a898;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.danger:hover { border-color: #c58a76; color: #eec0b0; }
+
+.muted { margin: 12px 0 0; color: #8b7f6b; font-size: 12px; line-height: 1.8; }
+
+.stories { list-style: none; margin: 14px 0 0; padding: 0; display: grid; gap: 12px; }
+
+.story {
+  padding: 14px;
+  border: 1px solid #8c735833;
+  border-radius: 12px;
+  background: #1f1a14b3;
+}
+
+.storyHead { display: flex; align-items: center; gap: 10px; }
+.author { color: #f0e2ca; font-size: 15px; }
+.role { color: #a08e74; font-size: 11px; letter-spacing: .08em; }
+
+.storyText {
+  margin: 10px 0 0;
+  color: #ded0b8;
+  font: 400 14px/1.95 'Noto Serif CJK SC', 'Songti SC', serif;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.source { margin: 10px 0 0; color: #9a8c74; font-size: 12px; }
+.storyActions { margin-top: 8px; }
+
+.link {
+  padding: 4px 0;
+  border: 0;
+  background: none;
+  color: #c9a273;
+  font: inherit;
+  font-size: 12px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.link:disabled { color: #6d6353; text-decoration: none; cursor: not-allowed; }
+
+.excluded {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid #8c735833;
+}
+
+.excluded h3 { margin: 0; color: #bfae92; font-size: 13px; font-weight: 500; letter-spacing: .06em; }
+.excluded ul { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 6px; }
+
+.excluded li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: #a3937a;
+  font-size: 13px;
+}
+
+.reason { color: #c09a86; font-size: 12px; }
+
+.empty { margin: 16px 0 0; color: #8b7f6b; font-size: 13px; }
+
+.footer {
+  margin-top: 26px;
+  padding-top: 16px;
+  border-top: 1px solid #8c735833;
+  color: #8b7f6b;
+  font-size: 12px;
+  line-height: 1.9;
+}
+
+.footer p { margin: 0 0 8px; }
