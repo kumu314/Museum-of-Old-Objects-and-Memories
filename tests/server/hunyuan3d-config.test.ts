@@ -115,6 +115,8 @@ test('JSON 云配置同样拒绝生产不安全下载与 HTTP 端点，stat 错�
     assert.throws(() => readHunyuanCloudConfig({ NODE_ENV: 'production' }, file), HttpError);
     assert.equal(readHunyuanCloudConfig({ NODE_ENV: 'test' }, file)?.config.endpoint, 'http://127.0.0.1:1234');
     assert.throws(() => readProviderSettings(join(file, 'child.json')), HttpError);
+    assert.throws(() => readProviderSettings(join(file, 'nested', 'child.json')), HttpError);
+    assert.equal(readProviderSettings(join(directory, 'missing', 'nested', 'settings.json')), null);
     assert.equal(readProviderSettings(join(directory, 'absent.json')), null);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
