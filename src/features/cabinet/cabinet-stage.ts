@@ -135,6 +135,8 @@ export function mountCabinetStage(canvas: HTMLCanvasElement, items: readonly Cab
   let frame = 0;
   let restoreTimer: number | null = null;
   let restoreDeadline: number | null = null;
+  // 构造失败后只自动再走一次，避免在真的不可用的环境里空转。
+  let retriedInitialize = false;
   const frameClock = createFrameClock();
   let destroyed = false;
   let zoom = 1;
@@ -169,6 +171,8 @@ export function mountCabinetStage(canvas: HTMLCanvasElement, items: readonly Cab
     // 只报结论，不把 Three 内部的 Error 对象再抛到控制台：这条路径是预期内的降级。
     console.warn(`三维展柜不可用（${reason}），已降级为静态界面`);
     renderer?.dispose(); renderer = null;
+    // 手动重试时重新给一次自动重试的机会。
+    retriedInitialize = false;
     notifySurface('unavailable');
   }
   function invalidate() { if (!destroyed && surfaceStatus === 'ready' && frame === 0) frame = requestAnimationFrame(render); }
@@ -328,7 +332,17 @@ export function mountCabinetStage(canvas: HTMLCanvasElement, items: readonly Cab
       renderer.transmissionResolutionScale = 2 / renderer.getPixelRatio();
       rebuildEnvironment();
       failureReason = null;
+      retriedInitialize = false;
     } catch {
+      // forceContextLoss 之后 isContextLost() 要等 webglcontextlost 事件派发完才变 true。
+      // 这个窗口里构造必然失败，但上下文其实还救得回来：先等一拍重走一次，否则就会
+      // 变成"首次加载降级、手动点一下重试才恢复"。
+      if (!retriedInitialize) {
+        retriedInitialize = true;
+        // 等一拍再重走：此刻 isContextLost() 还没稳定，重试会走错分支。
+        window.setTimeout(() => { if (!destroyed && renderer === null) initializeRenderer(); }, 50);
+        return;
+      }
       // 预检只用于归因，不参与放行：虚拟化环境下脱离文档的画布测不准，真实画布的判定为准，
       // 否则一次假阴性就会把本来能渲染的展柜判死。
       const probe = probeWebgl2();
