@@ -43,7 +43,7 @@ export const contributionInvitationSchema = z.strictObject({
   /** 被邀请人账号。邀请必须指向已存在的账号，否则对方侧无从接受。 */
   inviteeId: idSchema,
   /** 发出邀请时的展示名快照；对方改名不影响历史记录的当时语义。 */
-  inviteeName: textSchema(1, 60),
+  inviteeName: textSchema(1, 80),
   status: invitationStatusSchema,
   invitedAt: timestampSchema,
   /** 回应或收回的时间；`pending` 时必须为空。 */
@@ -64,7 +64,7 @@ export const contributionSchema = z.strictObject({
   id: idSchema,
   exhibitId: idSchema,
   authorId: idSchema,
-  authorName: textSchema(1, 60),
+  authorName: textSchema(1, 80),
   authorRole: contributorRoleSchema,
   /** 讲述正文。每份独立保存，任何合并都发生在展示层之外，不属于契约。 */
   story: textSchema(1, 4_000),
@@ -88,7 +88,7 @@ export const contributionSchema = z.strictObject({
 export const publicContributionSchema = z.strictObject({
   id: idSchema,
   authorId: idSchema,
-  authorName: textSchema(1, 60),
+  authorName: textSchema(1, 80),
   authorRole: contributorRoleSchema,
   story: textSchema(1, 4_000),
   sourceNote: textSchema(1, 200),
@@ -105,7 +105,7 @@ export type ExclusionReason = z.infer<typeof exclusionReasonSchema>;
 
 export const excludedContributionSchema = z.strictObject({
   id: idSchema,
-  authorName: textSchema(1, 60),
+  authorName: textSchema(1, 80),
   reason: exclusionReasonSchema,
 });
 export type ExcludedContribution = z.infer<typeof excludedContributionSchema>;

@@ -148,7 +148,7 @@ export function MyContributions({ initial }: { readonly initial: MyContributions
                     <label className={styles.check}>
                       <input type="checkbox" checked={draft.publishConsent}
                         onChange={(event) => setDraft({ ...draft, publishConsent: event.target.checked })} />
-                      我同意这份内容出现在公开版本里（以后可以单独改）
+                      我同意这份内容出现在公开版本里（提交后可撤回这份讲述）
                     </label>
                     <div className={styles.actions}>
                       <button type="button" className={styles.primary} disabled={busy || draft.story.trim() === '' || draft.sourceNote.trim() === ''}

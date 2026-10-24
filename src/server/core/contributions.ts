@@ -88,6 +88,16 @@ function isUniqueViolation(error: unknown): boolean {
   return typeof error === 'object' && error !== null && (error as { code?: unknown }).code === '23505';
 }
 
+/** 与展馆、展品删除共用馆级锁；拿锁后再读取展品，防止等待期间资源已被删除。 */
+async function lockContributionExhibit(db: PoolClient, museumId: string, exhibitId: string): Promise<string> {
+  const museum = await db.query<{ ownerId: string }>(
+    `SELECT created_by AS "ownerId" FROM museums WHERE id=$1 AND deleted_at IS NULL FOR UPDATE`, [museumId]);
+  const row = museum.rows[0];
+  if (row === undefined) notFound();
+  await exhibitRecord(db, museumId, exhibitId);
+  return row.ownerId;
+}
+
 /**
  * 馆主视角的展品协作状态：全部邀请 + 全部讲述（含已撤回、未同意的）。
  *
@@ -123,7 +133,7 @@ export function inviteContributor(actorId: string, museumId: string, exhibitId: 
   input: CreateInvitationInput, client?: PoolClient): Promise<ContributionInvitation> {
   return inTransaction(async (db) => {
     await requireActor(db, actorId);
-    await museumRecord(db, actorId, museumId);
+    await museumRecord(db, actorId, museumId, true);
     await exhibitRecord(db, museumId, exhibitId);
     const invitee = await db.query<{ id: string; username: string }>(
       'SELECT id, username FROM team_members WHERE username=$1 AND active', [input.username]);
@@ -166,6 +176,12 @@ export function respondInvitation(actorId: string, invitationId: string,
   input: RespondInvitationInput, client?: PoolClient): Promise<ContributionInvitation> {
   return inTransaction(async (db) => {
     await requireActor(db, actorId);
+    const target = await db.query<{ museumId: string; exhibitId: string }>(
+      `SELECT museum_id AS "museumId", exhibit_id AS "exhibitId" FROM contribution_invitations
+       WHERE id=$1 AND invitee_id=$2`, [invitationId, actorId]);
+    const invitation = target.rows[0];
+    if (invitation === undefined) notFound();
+    await lockContributionExhibit(db, invitation.museumId, invitation.exhibitId);
     const found = await db.query<InvitationRow>(
       `SELECT ${invitationColumns} FROM contribution_invitations i
        WHERE i.id=$1 AND i.invitee_id=$2 FOR UPDATE`, [invitationId, actorId]);
@@ -185,11 +201,14 @@ export function respondInvitation(actorId: string, invitationId: string,
 export function cancelInvitation(actorId: string, invitationId: string, client?: PoolClient): Promise<ContributionInvitation> {
   return inTransaction(async (db) => {
     await requireActor(db, actorId);
-    // 归属校验与取行合成一条：越权与不存在必须得到同一个回答。
+    const target = await db.query<{ museumId: string; exhibitId: string }>(
+      `SELECT i.museum_id AS "museumId", i.exhibit_id AS "exhibitId" FROM contribution_invitations i
+       JOIN museums m ON m.id=i.museum_id WHERE i.id=$1 AND m.created_by=$2`, [invitationId, actorId]);
+    const invitation = target.rows[0];
+    if (invitation === undefined) notFound();
+    await lockContributionExhibit(db, invitation.museumId, invitation.exhibitId);
     const found = await db.query<InvitationRow>(
-      `SELECT ${invitationColumns} FROM contribution_invitations i
-       JOIN museums m ON m.id=i.museum_id
-       WHERE i.id=$1 AND m.created_by=$2 AND m.deleted_at IS NULL FOR UPDATE OF i`, [invitationId, actorId]);
+      `SELECT ${invitationColumns} FROM contribution_invitations i WHERE i.id=$1 FOR UPDATE`, [invitationId]);
     const current = found.rows[0];
     if (current === undefined) notFound();
     if (current.status !== 'pending') invalid('只有还没回应的邀请可以收回。');
@@ -213,10 +232,8 @@ export function contribute(actorId: string, museumId: string, exhibitId: string,
   input: CreateContributionInput, client?: PoolClient): Promise<Contribution> {
   return inTransaction(async (db) => {
     await requireActor(db, actorId);
-    await exhibitRecord(db, museumId, exhibitId);
-    const ownership = await db.query(
-      'SELECT 1 FROM museums WHERE id=$1 AND created_by=$2 AND deleted_at IS NULL', [museumId, actorId]);
-    const isOwner = ownership.rowCount === 1;
+    const ownerId = await lockContributionExhibit(db, museumId, exhibitId);
+    const isOwner = ownerId === actorId;
     if (!isOwner) {
       const accepted = await db.query(
         `SELECT 1 FROM contribution_invitations

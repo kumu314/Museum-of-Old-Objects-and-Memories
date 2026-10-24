@@ -13,6 +13,7 @@ import {
   listMyContributions,
   readContributionState,
   removeMuseum,
+  removeExhibit,
   respondInvitation,
   withdrawContribution,
 } from '../../src/server/core';
@@ -297,3 +298,113 @@ test('数据库自己拒绝非法状态：待回应却有回应时间、同一�
        VALUES($1,$2,$3,$4,'x','pending')`, [museumId, exhibitId, guest.id, owner.id]), { code: '23505' });
   });
 });
+
+for (const removed of ['museum', 'exhibit'] as const) {
+  test(`删除 ${removed} 后旧邀请不能回应、收回或继续投稿`, async () => {
+    await inRollback(async (db) => {
+      const owner = await account(db, 'del-owner');
+      const guest = await account(db, 'del-guest');
+      const pendingGuest = await account(db, 'del-pending');
+      const { museumId, exhibitId } = await museumWithExhibit(db, owner.id, 'deleted');
+      const accepted = await inviteContributor(owner.id, museumId, exhibitId, { username: guest.username }, db);
+      await respondInvitation(guest.id, accepted.id, { status: 'accepted' }, db);
+      const pending = await inviteContributor(owner.id, museumId, exhibitId, { username: pendingGuest.username }, db);
+      if (removed === 'museum') {
+        await removeMuseum(owner.id, museumId, 2, db);
+      } else {
+        await removeExhibit(owner.id, museumId, exhibitId, 1, db);
+      }
+      await assert.rejects(respondInvitation(pendingGuest.id, pending.id, { status: 'accepted' }, db), notFound);
+      await assert.rejects(cancelInvitation(owner.id, pending.id, db), notFound);
+      await assert.rejects(inviteContributor(owner.id, museumId, exhibitId, { username: pendingGuest.username }, db), notFound);
+      for (const actorId of [owner.id, guest.id]) {
+        await assert.rejects(contribute(actorId, museumId, exhibitId,
+          { story: '删除后不应保存。', sourceNote: '本人', publishConsent: false }, db), notFound);
+      }
+      assert.equal((await db.query('SELECT 1 FROM contributions WHERE exhibit_id=$1', [exhibitId])).rowCount, 0);
+    });
+  });
+}
+
+test('合法的 80 字符用户名可以接受邀请并保留完整署名', async () => {
+  await inRollback(async (db) => {
+    const owner = await account(db, 'long-owner');
+    const guest = await account(db, 'long-guest');
+    const username = `${guest.id}${'x'.repeat(44)}`;
+    await db.query('UPDATE team_members SET username=$1 WHERE id=$2', [username, guest.id]);
+    const { museumId, exhibitId } = await museumWithExhibit(db, owner.id, 'long-name');
+    const invitation = await inviteContributor(owner.id, museumId, exhibitId, { username }, db);
+    assert.equal(invitation.inviteeName, username);
+    await respondInvitation(guest.id, invitation.id, { status: 'accepted' }, db);
+    const contribution = await contribute(guest.id, museumId, exhibitId,
+      { story: '完整署名。', sourceNote: '本人', publishConsent: true }, db);
+    assert.equal(contribution.authorName, username);
+    const view = toPublicationView(await readContributionState(owner.id, museumId, exhibitId, db));
+    assert.equal(view.contributions[0]?.authorName, username);
+    assert.equal((await listMyContributions(guest.id, db)).contributions[0]?.contribution.authorName, username);
+  });
+});
+
+for (const removed of ['museum', 'exhibit'] as const) {
+  for (const action of ['respond', 'contribute'] as const) {
+    test(`${action} 等待删除 ${removed} 的事务后重新检查资源状态`, async () => {
+      const deleting = await pool.connect();
+      const writing = await pool.connect();
+      let museumId: string | undefined;
+      const accountIds: string[] = [];
+      try {
+        await deleting.query('BEGIN');
+        const owner = await account(deleting, 'race-owner');
+        const guest = await account(deleting, 'race-guest');
+        accountIds.push(owner.id, guest.id);
+        const resource = await museumWithExhibit(deleting, owner.id, 'race');
+        museumId = resource.museumId;
+        const invitation = await inviteContributor(owner.id, museumId, resource.exhibitId, { username: guest.username }, deleting);
+        if (action === 'contribute') await respondInvitation(guest.id, invitation.id, { status: 'accepted' }, deleting);
+        await deleting.query('COMMIT');
+        await deleting.query('BEGIN');
+        if (removed === 'museum') await removeMuseum(owner.id, museumId, 2, deleting);
+        else await removeExhibit(owner.id, museumId, resource.exhibitId, 1, deleting);
+
+        await writing.query('BEGIN');
+        await writing.query("SET LOCAL statement_timeout='5s'");
+        const pidResult = await writing.query<{ pid: number }>('SELECT pg_backend_pid() AS pid');
+        const pid = pidResult.rows[0]?.pid;
+        assert.ok(pid);
+        const work = action === 'respond'
+          ? respondInvitation(guest.id, invitation.id, { status: 'accepted' }, writing)
+          : contribute(guest.id, museumId, resource.exhibitId,
+            { story: '并发写入不应成功。', sourceNote: '本人', publishConsent: false }, writing);
+        // 立刻处理拒绝，避免在等待锁状态期间产生未处理的 Promise rejection。
+        const outcome = work.then(() => ({ ok: true as const }), (error: unknown) => ({ ok: false as const, error }));
+        let blocked = false;
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          const result = await deleting.query<{ blocked: boolean }>(
+            'SELECT cardinality(pg_blocking_pids($1)) > 0 AS blocked', [pid]);
+          if (result.rows[0]?.blocked === true) { blocked = true; break; }
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        // 先释放事务，即使断言失败也不会留下等待本连接的后台请求。
+        await deleting.query('COMMIT');
+        const result = await outcome;
+        assert.ok(blocked, '写入必须等待展馆锁，不能穿过未提交的删除');
+        assert.equal(result.ok, false);
+        if (!result.ok) notFound(result.error);
+        await writing.query('ROLLBACK');
+        assert.equal((await deleting.query('SELECT 1 FROM contributions WHERE museum_id=$1', [museumId])).rowCount, 0);
+      } finally {
+        await deleting.query('ROLLBACK');
+        await writing.query('ROLLBACK');
+        if (museumId !== undefined) {
+          await deleting.query('DELETE FROM contributions WHERE museum_id=$1', [museumId]);
+          await deleting.query('DELETE FROM contribution_invitations WHERE museum_id=$1', [museumId]);
+          await deleting.query('DELETE FROM exhibits WHERE museum_id=$1', [museumId]);
+          await deleting.query('DELETE FROM museums WHERE id=$1', [museumId]);
+        }
+        await deleting.query('DELETE FROM team_members WHERE id=ANY($1::uuid[])', [accountIds]);
+        deleting.release();
+        writing.release();
+      }
+    });
+  }
+}
