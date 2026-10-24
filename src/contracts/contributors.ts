@@ -72,9 +72,9 @@ export const contributionSchema = z.strictObject({
    * 多人讲述的价值在来源，缺来源的转述无法核验，因此不允许留空。
    */
   sourceNote: textSchema(1, 200),
-  /** 作者本人对自己这份内容是否同意公开。逐份控制，可单独改为 false。 */
+  /** 作者本人对自己这份内容是否同意公开。逐份控制；提交后可撤回整份讲述。 */
   publishConsent: z.boolean(),
-  /** 撤回时间。非空即视为该作者撤回这份内容，新公开版本必须移除。 */
+  /** 撤回时间。非空即视为该作者撤回这份内容，后续公开请求不再返回。 */
   withdrawnAt: timestampSchema.nullable(),
   createdAt: timestampSchema,
   isDemo: z.boolean(),

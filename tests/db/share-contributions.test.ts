@@ -4,7 +4,6 @@ import { after, before, test } from 'node:test';
 import { Pool, type PoolClient } from 'pg';
 import type { CreateExhibitInput } from '../../src/contracts';
 import {
-  cancelInvitation,
   confirmExhibit,
   contribute,
   createExhibit,
@@ -14,6 +13,7 @@ import {
   publishMuseum,
   readContributionState,
   readShareContributions,
+  readSharedVisit,
   respondInvitation,
   stopSharing,
   withdrawContribution,
@@ -211,5 +211,35 @@ test('馆主读参观页也没有特权：别人未同意公开的讲述一样�
     // 与此同时，馆主在自己的工作台里看得到这段草稿——两个接口的可见性不同，且这是对的。
     const state = await readContributionState(owner.id, museumId, exhibitId, db);
     assert.deepEqual(state.contributions.map((item) => item.story), ['客人私下写的一段。']);
+  });
+});
+
+
+test('完整参观读取同时返回快照展品与对应实时讲述，撤回不改变快照', async () => {
+  await inRollback(async (db) => {
+    const owner = await account(db, 'owner');
+    const reader = await account(db, 'reader');
+    const { museumId, exhibitId, token } = await publishedMuseum(db, owner.id, '统一参观读取馆');
+    const visible = await contribute(owner.id, museumId, exhibitId, { ...stories, publishConsent: true }, db);
+    const version = (await getMuseum(owner.id, museumId, db)).version;
+    const later = await createExhibit(owner.id, museumId, exhibitInput('尚未发布的钟', 1, version), db);
+    await contribute(owner.id, museumId, later.id, { ...stories, publishConsent: true }, db);
+    await contribute(owner.id, museumId, exhibitId, { ...stories, publishConsent: false }, db);
+
+    const visit = await readSharedVisit(reader.id, token, db);
+    assert.deepEqual(visit.museum.exhibits.map((item) => item.id), [exhibitId]);
+    assert.deepEqual(visit.contributions.map((item) => item.id), [visible.id]);
+    assert.equal(JSON.stringify(visit).includes('内部原文不可公开'), false);
+    await withdrawContribution(owner.id, visible.id, db);
+    const afterWithdrawal = await readSharedVisit(reader.id, token, db);
+    assert.deepEqual(afterWithdrawal.museum, visit.museum);
+    assert.deepEqual(afterWithdrawal.contributions, []);
+
+    await stopSharing(owner.id, museumId, (await getMuseum(owner.id, museumId, db)).version, db);
+    await assert.rejects(readSharedVisit(reader.id, token, db), (error: unknown) => {
+      assert.ok(error instanceof HttpError);
+      assert.equal(error.failure.code, 'SHARE_NOT_FOUND');
+      return true;
+    });
   });
 });

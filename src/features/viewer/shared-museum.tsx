@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { z } from 'zod';
-import { publicMuseumSchema, type PublicExhibit, type PublicMuseum } from '../../contracts/museum';
-import { sharedContributionsSchema, type SharedContribution } from '../../contracts/contributors';
+import { type PublicExhibit, type PublicMuseum } from '../../contracts/museum';
+import { type SharedContribution } from '../../contracts/contributors';
+import { sharedVisitSchema } from '../../contracts/shared-visit';
 import { shareNotFoundMessage } from '../../contracts/errors';
 import type { AssetStatus, SurfaceStatus, mountCabinetStage } from '../cabinet/cabinet-stage';
 import { ApiFailure, apiRequest, jsonRequest } from '../studio/api';
@@ -33,18 +34,10 @@ export function SharedMuseum({ token, initialMuseum, initialContributions }: {
     setChecking(true);
     const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(15_000)]);
     try {
-      // 讲述与展馆并行拉，但失败互不牵连：读不到讲述只该少一段内容，不该让整页变成错误页。
-      const [museumSettled, sharedSettled] = await Promise.allSettled([
-        apiRequest(`/api/share/${encodeURIComponent(token)}`, publicMuseumSchema, { signal }),
-        apiRequest(`/api/share/${encodeURIComponent(token)}/contributions`, sharedContributionsSchema, { signal }),
-      ]);
+      const { museum, contributions: currentContributions } = await apiRequest(
+        `/api/share/${encodeURIComponent(token)}/visit`, sharedVisitSchema, { signal });
       if (controller.signal.aborted) return;
-      if (museumSettled.status === 'rejected') throw museumSettled.reason;
-      // 拉取失败时清空而不是保留旧值：作者撤回后访问页会重拉，如果这一次失败还留着旧数据，
-      // 读者就会继续看到已经撤回的内容。宁可这一段暂时不显示，也不能显示一个作者已经收回的讲述。
-      setContributions(sharedSettled.status === 'fulfilled'
-        ? groupContributions(sharedSettled.value.contributions) : new Map());
-      const museum = museumSettled.value;
+      setContributions(groupContributions(currentContributions));
       setShare((current) => current.status === 'ready'
         && current.museum.version === museum.version && current.museum.publishedAt === museum.publishedAt
         ? current : { status: 'ready', museum });
