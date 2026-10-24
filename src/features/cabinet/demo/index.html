@@ -50,29 +50,19 @@
       </nav>
       <div class="stage-wrap">
         <canvas tabindex="0" aria-label="三维展柜；检视时方向键旋转，加减键缩放，Esc 放回"></canvas>
-        <button type="button" id="back" class="back" hidden>← &nbsp; 放回展柜 <span>Esc</span></button>
+        <button type="button" id="back" class="back" hidden>← 放回展柜 (Esc)</button>
         <div id="surface-error" class="surface-error" hidden>
           <h2>三维展示暂不可用</h2>
           <p id="surface-message"></p>
           <button type="button" id="retry">重试三维展示</button>
           <p>仍可通过下方的展品按钮查看样例说明。</p>
         </div>
-        <div id="interaction-hint" class="interaction-hint" hidden>拖动旋转 · 双指、按钮或滚轮缩放 · 方向键也可操作</div>
+        <div id="interaction-hint" class="interaction-hint" hidden></div>
       </div>
-      <aside id="story" class="story" hidden aria-label="当前展品样例">
-        <div class="eyebrow">拾物档案 <span aria-hidden="true">/</span> OBJECT ARCHIVE</div>
-        <h2 id="item-title"></h2>
-        <span id="state-label" class="state-label"></span>
-        <div class="divider" aria-hidden="true"></div>
-        <p id="item-description"></p>
-        <p class="disclosure">当前为交互样例。实拍、物主故事与录音尚未接入，模型来源与状态以此处说明为准。</p>
+      <aside id="story" class="story inspection-card" hidden aria-label="当前展品样例">
+        <div id="story-content"></div>
+        <p id="state-label" class="inspection-status" role="status"></p>
         <button type="button" id="retry-model" class="retry-model" hidden>重新载入模型</button>
-        <button type="button" id="reset" class="reset">↺ &nbsp; 重置观察角度</button>
-        <div class="inspection-zoom"><button type="button" id="zoom-out" class="reset" aria-label="缩小模型">− 缩小</button><button type="button" id="zoom-in" class="reset" aria-label="放大模型">＋ 放大</button></div>
-        <div class="panel-bottom">
-          <span>收藏柜中的第 <b id="slot-label"></b> 格</span>
-          <span id="model-note">示意资产</span>
-        </div>
       </aside>
       <aside id="arrangement-panel" class="arrangement-panel" aria-labelledby="arrangement-title" hidden>
         <div class="arrangement-heading">

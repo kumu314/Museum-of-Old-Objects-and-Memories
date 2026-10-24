@@ -1,6 +1,6 @@
 import {
   ACESFilmicToneMapping, AmbientLight, BufferGeometry, DirectionalLight,
-  BoxGeometry, Group, Line, LineBasicMaterial, Mesh, MeshBasicMaterial, PerspectiveCamera, Plane, PlaneGeometry,
+  BoxGeometry, CanvasTexture, Group, Line, LineBasicMaterial, Mesh, MeshBasicMaterial, PerspectiveCamera, Plane, PlaneGeometry,
   SpotLight, Quaternion, Raycaster, RepeatWrapping, Scene,
   SRGBColorSpace, Texture, Vector2, Vector3, WebGLRenderer, MeshPhysicalMaterial, MeshStandardMaterial,
   type WebGLRenderTarget,
@@ -32,6 +32,7 @@ export type AssetStatus = 'loading' | 'ready' | 'failed';
 type Controller = ReturnType<typeof createInspectionController>;
 export interface StageRenderStats { readonly cpuMs: number; readonly calls: number; readonly triangles: number; readonly textures: number; readonly geometries: number; readonly timestamp: number; readonly renderer: string }
 interface StageOptions {
+  readonly onInspectionLayout?: (centerX: number, guideTop: number) => void;
   readonly onSlotDrop?: (id: string, targetSlot: number) => void;
   readonly onRenderStats?: (stats: StageRenderStats) => void;
   readonly onSurfaceStatus: (status: SurfaceStatus) => void;
@@ -76,6 +77,17 @@ export function mountCabinetStage(canvas: HTMLCanvasElement, items: readonly Cab
   backdropShade.position.z = 2;
   backdropShade.visible = false;
   scene.add(backdropShade);
+  const shadowCanvas = document.createElement('canvas');
+  shadowCanvas.width = 256; shadowCanvas.height = 64;
+  const shadowContext = shadowCanvas.getContext('2d');
+  if (shadowContext === null) throw new Error('无法创建检视阴影');
+  shadowContext.scale(1, .25);
+  const shadowGradient = shadowContext.createRadialGradient(128, 128, 0, 128, 128, 128);
+  shadowGradient.addColorStop(0, '#050302b3'); shadowGradient.addColorStop(1, '#05030200');
+  shadowContext.fillStyle = shadowGradient; shadowContext.fillRect(0, 0, 256, 256);
+  const inspectionShadow = new Mesh(new PlaneGeometry(1, 1), new MeshBasicMaterial({ map: new CanvasTexture(shadowCanvas), transparent: true, opacity: 0, depthWrite: false }));
+  inspectionShadow.visible = false;
+  scene.add(inspectionShadow);
   scene.add(new AmbientLight('#e5d3b5', 0.045));
   const keyLight = new DirectionalLight('#fff0da', 0.85);
   keyLight.position.set(-4, 7, 9);
@@ -152,19 +164,25 @@ export function mountCabinetStage(canvas: HTMLCanvasElement, items: readonly Cab
     const active = state.phase === 'focusing' || state.phase === 'inspecting';
     const rect = canvas.getBoundingClientRect();
     const inset = options.inspectionInset();
-    const focusGap = Math.max(4.3, CELL_SIZE[0] * 0.55 / Math.tan(camera.fov * Math.PI / 360) / Math.max((rect.width - inset) / rect.height, 0.1));
     const overviewDistance = 0.82 + Math.max(3.05 / 0.99, CABINET_WIDTH / (2 * 0.88 * Math.max(camera.aspect, 0.1))) / Math.tan(camera.fov * Math.PI / 360);
+    const cameraDistance = active ? overviewDistance * .98 : overviewDistance;
+    const focusGap = cameraDistance - 4.3;
     const overviewHeight = 0.50;
     const [offsetX, offsetY] = overviewOffset(pointerOffset.x, pointerOffset.y, state.phase, reducedMotion.matches);
-    cameraTarget.set(offsetX, (active ? 0.25 : overviewHeight) + offsetY, active ? 4.3 + focusGap : overviewDistance);
+    cameraTarget.set(offsetX, overviewHeight + offsetY, cameraDistance);
     camera.position.lerp(cameraTarget, alpha);
-    const lookAtY = active ? -0.02 : -0.32;
+    const lookAtY = -0.32;
     camera.lookAt(0, lookAtY, 0);
     const visibleHalfWidth = Math.tan(camera.fov * Math.PI / 360) * focusGap * camera.aspect;
-    const focusX = -(inset / rect.width) * visibleHalfWidth;
-    backdropShade.material.opacity += ((active ? 0.52 : 0) - backdropShade.material.opacity) * alpha;
+    const focusCenter = inset > 0 ? Math.min(.28, (rect.width - inset) / rect.width / 2) : .5;
+    const focusX = (focusCenter * 2 - 1) * visibleHalfWidth;
+    const visibleHeight = visibleHalfWidth * 2 / camera.aspect;
+    const focusY = overviewHeight + (lookAtY - overviewHeight) * focusGap / cameraDistance - visibleHeight * .015;
+    backdropShade.material.opacity += ((active ? 0.56 : 0) - backdropShade.material.opacity) * alpha;
     backdropShade.visible = backdropShade.material.opacity > 0.001;
-    let moving = camera.position.distanceTo(cameraTarget) > 0.001 || Math.abs(backdropShade.material.opacity - (active ? 0.52 : 0)) > 0.001;
+    inspectionShadow.material.opacity += ((active ? .7 : 0) - inspectionShadow.material.opacity) * alpha;
+    inspectionShadow.visible = inspectionShadow.material.opacity > .001;
+    let moving = camera.position.distanceTo(cameraTarget) > 0.001 || Math.abs(backdropShade.material.opacity - (active ? 0.56 : 0)) > 0.001 || Math.abs(inspectionShadow.material.opacity - (active ? .7 : 0)) > .001;
     for (const surface of hoverSurfaces) {
       const target = state.phase === 'overview' && hoveredSlot === surface.slot ? 1 : 0;
       surface.amount += (target - surface.amount) * alpha;
@@ -183,20 +201,28 @@ export function mountCabinetStage(canvas: HTMLCanvasElement, items: readonly Cab
       const contact = scene.getObjectByName(`cabinet-contact-shadow:${model.slot}`);
       if (contact !== undefined) contact.visible = !focused && !dragged;
       positionTarget.set(...slotRestPosition(model.slot));
-      if (focused) positionTarget.set(focusX, -0.7, 4.3);
+      const [width, height, depth] = model.placed?.getSize() ?? CELL_SIZE;
+      // Inspection fills the available foreground; cabinet placement and its restoration stay unchanged.
+      const inspectionScale = Math.min(visibleHalfWidth * 2 * (rect.width - inset) / rect.width * .72 / Math.max(width, depth), visibleHeight * .62 / height);
+      if (focused) positionTarget.set(focusX, focusY - height * inspectionScale * zoom / 2, 4.3);
       if (dragged && slotDrag !== null) positionTarget.copy(slotDrag.position);
       rotationTarget.copy(identityRotation);
       if (focused) {
         rotationTarget.setFromAxisAngle(new Vector3(0, 1, 0), yaw);
         rotationTarget.multiply(new Quaternion().setFromAxisAngle(new Vector3(1, 0, 0), pitch));
       }
-      scaleTarget.setScalar(focused ? zoom : 1);
+      scaleTarget.setScalar(focused ? inspectionScale * zoom : 1);
       model.group.position.lerp(positionTarget, alpha);
       model.group.quaternion.slerp(rotationTarget, alpha);
       model.group.scale.lerp(scaleTarget, alpha);
       const unsettled = model.group.position.distanceTo(positionTarget) > 0.001 || model.group.quaternion.angleTo(rotationTarget) > 0.001 || model.group.scale.distanceTo(scaleTarget) > 0.001;
       moving = moving || unsettled;
       if (!unsettled) { model.group.position.copy(positionTarget); model.group.quaternion.copy(rotationTarget); model.group.scale.copy(scaleTarget); }
+      if (focused) {
+        inspectionShadow.position.set(model.group.position.x, model.group.position.y - visibleHeight * .035, 4.3);
+        inspectionShadow.scale.set(width * model.group.scale.x * 1.1, visibleHeight * .055, 1);
+        options.onInspectionLayout?.(focusCenter * rect.width, Math.min(rect.height - 72, (.515 + height * inspectionScale / visibleHeight / 2 + .045) * rect.height));
+      }
     }
     if (!moving) { camera.position.copy(cameraTarget); camera.lookAt(0, lookAtY, 0); }
     if (options.onRenderStats !== undefined) {
@@ -482,6 +508,8 @@ export function mountCabinetStage(canvas: HTMLCanvasElement, items: readonly Cab
     zoom = Math.max(0.75, Math.min(1.45, zoom * factor)); invalidate();
   }
   function onWheel(event: WheelEvent) { if (controller.getSnapshot().phase !== 'inspecting') return; event.preventDefault(); zoomBy(Math.exp(Math.max(-1, Math.min(1, -event.deltaY * 0.001)))); }
+  function resetView() { yaw = 0; pitch = 0; zoom = 1; invalidate(); }
+  function onDoubleClick() { if (controller.getSnapshot().phase === 'inspecting') resetView(); }
   function onKeyDown(event: KeyboardEvent) {
     if (event.key === 'Escape') { if (slotDrag !== null) { event.preventDefault(); event.stopPropagation(); cancelDrag(); } else controller.returnToOverview(); return; }
     if (controller.getSnapshot().phase !== 'inspecting') return;
@@ -502,7 +530,7 @@ export function mountCabinetStage(canvas: HTMLCanvasElement, items: readonly Cab
   const events = { pointerdown: onPointerDown, pointermove: onPointerMove, pointerup: onPointerUp, pointercancel: onPointerCancel, keydown: onKeyDown };
   canvas.addEventListener('webglcontextlost', onContextLost); canvas.addEventListener('webglcontextrestored', onContextRestored);
   canvas.addEventListener('pointerdown', events.pointerdown); canvas.addEventListener('pointermove', events.pointermove); canvas.addEventListener('pointerup', events.pointerup); canvas.addEventListener('pointercancel', events.pointercancel); canvas.addEventListener('keydown', events.keydown);
-  canvas.addEventListener('wheel', onWheel, { passive: false }); canvas.addEventListener('pointerleave', onPointerLeave);
+  canvas.addEventListener('wheel', onWheel, { passive: false }); canvas.addEventListener('dblclick', onDoubleClick); canvas.addEventListener('pointerleave', onPointerLeave);
   canvas.addEventListener('lostpointercapture', onPointerCancel);
   window.addEventListener('pointermove', onOverviewPointerMove); window.addEventListener('blur', onViewportLeave); document.addEventListener('mouseleave', onViewportLeave);
   reducedMotion.addEventListener('change', onMotionPreferenceChange);
@@ -561,14 +589,14 @@ export function mountCabinetStage(canvas: HTMLCanvasElement, items: readonly Cab
     },
     retry: initializeRenderer,
     retryModel(id: string) { const model = displayModels.find((entry) => entry.item.id === id); if (model === undefined) throw new RangeError('未知展品'); void loadModel(model); },
-    resetView() { yaw = 0; pitch = 0; zoom = 1; invalidate(); },
+    resetView,
     destroy() {
       destroyed = true; cancelDrag(); resourceAbort.abort(); unsubscribe(); observer.disconnect(); if (frame !== 0) cancelAnimationFrame(frame); frame = 0;
       for (const model of displayModels) model.request?.abort();
       if (restoreTimer !== null) window.clearTimeout(restoreTimer);
       canvas.removeEventListener('webglcontextlost', onContextLost); canvas.removeEventListener('webglcontextrestored', onContextRestored);
       canvas.removeEventListener('pointerdown', events.pointerdown); canvas.removeEventListener('pointermove', events.pointermove); canvas.removeEventListener('pointerup', events.pointerup); canvas.removeEventListener('pointercancel', events.pointercancel); canvas.removeEventListener('keydown', events.keydown);
-      canvas.removeEventListener('wheel', onWheel); canvas.removeEventListener('pointerleave', onPointerLeave);
+      canvas.removeEventListener('wheel', onWheel); canvas.removeEventListener('dblclick', onDoubleClick); canvas.removeEventListener('pointerleave', onPointerLeave);
       canvas.removeEventListener('lostpointercapture', onPointerCancel);
       window.removeEventListener('pointermove', onOverviewPointerMove); window.removeEventListener('blur', onViewportLeave); document.removeEventListener('mouseleave', onViewportLeave);
       reducedMotion.removeEventListener('change', onMotionPreferenceChange); canvas.style.cursor = originalCursor;

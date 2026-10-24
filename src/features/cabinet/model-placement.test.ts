@@ -27,14 +27,17 @@ test('检视中的父节点变换不改变陈列基准；大小调整不重建�
   const placed = createPlacedModel(asset, [3, 3, 3], defaultModelPlacement());
   const initialPosition = placed.object.position.clone();
   const initialScale = placed.object.scale.x;
+  const initialSize = placed.getSize();
   const parent = new Group(); parent.add(placed.object);
   parent.position.set(99, 30, -6); parent.rotation.set(0.4, 0.8, -0.1); parent.scale.setScalar(1.45); parent.updateMatrixWorld(true);
   placed.setPlacement(defaultModelPlacement());
   assert.equal(placed.object.parent, parent);
   assert.deepEqual(placed.object.position, initialPosition);
   assert.equal(placed.object.scale.x, initialScale);
+  assert.deepEqual(placed.getSize(), initialSize, '检视适配尺寸不应受到动画中的父节点影响');
   placed.setPlacement({ rotation: [0, 0, 0], size: 0.5 });
   assert.ok(Math.abs(placed.object.scale.x / initialScale - 2 / 3) < 1e-8);
+  for (const index of [0, 1, 2] as const) assert.ok(Math.abs(placed.getSize()[index] / initialSize[index] - 2 / 3) < 1e-8);
   assert.equal(asset.geometry.getAttribute('position').count, 24);
   disposeResources(placed.object);
 });

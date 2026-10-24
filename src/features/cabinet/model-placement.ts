@@ -14,6 +14,7 @@ export function defaultModelPlacement(): ModelPlacement { return { rotation: [0,
 export function createPlacedModel(asset: Object3D, cell: Vec3, initial: ModelPlacement, maximumScale?: number) {
   const object = new Group();
   const orientation = new Group();
+  let size: Vec3 = cell;
   orientation.add(asset); object.add(orientation);
   function setPlacement(input: ModelPlacement) {
     const placement = modelPlacementSchema.parse(input);
@@ -28,11 +29,13 @@ export function createPlacedModel(asset: Object3D, cell: Vec3, initial: ModelPla
       const bounds = new Box3().setFromObject(orientation, true);
       const fit = fitModelBounds({ min: [bounds.min.x, bounds.min.y, bounds.min.z], max: [bounds.max.x, bounds.max.y, bounds.max.z] }, cell, 0.9, maximumScale);
       object.scale.setScalar(fit.scale * placement.size);
+      const fittedScale = fit.scale * placement.size;
+      size = [(bounds.max.x - bounds.min.x) * fittedScale, (bounds.max.y - bounds.min.y) * fittedScale, (bounds.max.z - bounds.min.z) * fittedScale];
       const [offsetX, offsetY, offsetZ] = fit.offset;
       object.position.set(offsetX * placement.size, offsetY * placement.size, offsetZ * placement.size);
       object.updateMatrixWorld(true);
     } finally { parent?.add(object); }
   }
   setPlacement(initial);
-  return { object, setPlacement };
+  return { object, setPlacement, getSize: () => size };
 }

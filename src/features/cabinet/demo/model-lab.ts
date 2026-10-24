@@ -174,6 +174,16 @@ async function touch() {
     assert(after.zoom > before.zoom && after.yaw === before.yaw && after.pitch === before.pitch, '双指缩放没有正确隔离旋转');
     assert(controller.getSnapshot().phase === 'inspecting' && captures.size === 0, '多指结束误选或没有释放指针');
     record('合成双指缩放', { passed: true, before, after, note: '合成 PointerEvent，不代替手机实机验收' });
+    canvas.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }));
+    canvas.dispatchEvent(new WheelEvent('wheel', { deltaY: 180, bubbles: true, cancelable: true }));
+    const adjusted = current.getDiagnostics();
+    assert(adjusted.yaw > after.yaw && adjusted.zoom < after.zoom, '方向键或滚轮缩放失效');
+    canvas.dispatchEvent(new KeyboardEvent('keydown', { key: '+', bubbles: true, cancelable: true }));
+    assert(current.getDiagnostics().zoom > adjusted.zoom, '加号键没有放大');
+    canvas.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    const reset = current.getDiagnostics();
+    assert(reset.zoom === 1 && reset.yaw === 0 && reset.pitch === 0, '双击没有恢复初始检视角度与缩放');
+    record('方向键、滚轮、键盘缩放与双击复位', { passed: true, adjusted, reset });
     send('pointerdown', 3, x); destroy();
     assert(captures.size === 0 && !current.getDiagnostics().pendingFrame, '拖动中卸载没有释放指针或动画');
     record('拖动中卸载', { passed: true, diagnostics: current.getDiagnostics() });

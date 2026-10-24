@@ -1,13 +1,13 @@
 'use client';
 
-import Image from 'next/image';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { publicMuseumSchema, type PublicExhibit, type PublicMuseum } from '../../contracts/museum';
+import { publicMuseumSchema, type PublicMuseum } from '../../contracts/museum';
 import { shareNotFoundMessage } from '../../contracts/errors';
 import type { AssetStatus, SurfaceStatus, mountCabinetStage } from '../cabinet/cabinet-stage';
 import { ApiFailure, apiRequest } from '../studio/api';
 import { createInspectionController } from './inspection-controller';
 import { publicStageItems, shareAssetUrl } from './public-stage-items';
+import { ExhibitStory, InspectionGuide } from './inspection-ui';
 import styles from './shared-museum.module.css';
 import '../cabinet/gallery-backdrop.css';
 
@@ -59,6 +59,7 @@ function MuseumViewer({ museum, token, checking, onRefresh }: { museum: PublicMu
   const items = useMemo(() => publicStageItems(museum.exhibits, token), [museum.exhibits, token]);
   const canvas = useRef<HTMLCanvasElement>(null);
   const story = useRef<HTMLElement>(null);
+  const inspectionGuide = useRef<HTMLDivElement>(null);
   const stage = useRef<ReturnType<typeof mountCabinetStage> | null>(null);
   const [surface, setSurface] = useState<SurfaceStatus | 'loading'>('loading');
   const [assets, setAssets] = useState<ReadonlyMap<string, AssetStatus>>(() => new Map());
@@ -72,7 +73,9 @@ function MuseumViewer({ museum, token, checking, onRefresh }: { museum: PublicMu
     void import('../cabinet/cabinet-stage').then(({ mountCabinetStage: mount }) => {
       if (disposed || element === null) return;
       stage.current = mount(element, items, controller, {
-        inspectionInset: () => story.current !== null && getComputedStyle(story.current).position === 'absolute' ? story.current.getBoundingClientRect().width : 0,
+        onInspectionLayout(centerX, guideTop) { if (inspectionGuide.current) { inspectionGuide.current.style.left = `${centerX}px`; inspectionGuide.current.style.top = `${guideTop}px`; } },
+        inspectionInset: () => story.current !== null && getComputedStyle(story.current).position === 'absolute' && canvas.current !== null
+          ? canvas.current.getBoundingClientRect().right - story.current.getBoundingClientRect().left : 0,
         onSurfaceStatus: setSurface,
         onAssetStatus: (id, status) => setAssets((current) => new Map(current).set(id, status)),
       });
@@ -86,39 +89,23 @@ function MuseumViewer({ museum, token, checking, onRefresh }: { museum: PublicMu
     return () => document.removeEventListener('keydown', escape);
   }, [controller]);
 
-  const phaseText = { overview: '展柜总览', focusing: '正在取出', inspecting: '拖动旋转 · 双指或按钮缩放', returning: '正在放回' };
+  useEffect(() => { story.current?.scrollTo({ top: 0 }); }, [state.selectedId]);
+
+  const phaseText = { overview: '展柜总览', focusing: '正在取出', inspecting: '', returning: '正在放回' };
   return <main className={styles.museum}>
     <div className="gallery-backdrop" aria-hidden="true"><div className="gallery-backdrop__vignette" /></div>
     <header className={styles.header}><div><div className={styles.brand}><p className={styles.brandTitle}>拾物馆</p><span aria-hidden="true">·</span><h1>{museum.title}</h1></div>{museum.description && <p className={styles.description}>{museum.description}</p>}</div><button className={styles.refresh} disabled={checking} onClick={onRefresh}>{checking ? '正在核对…' : '重新读取展馆'}</button></header>
     <section className={styles.exhibition} aria-label="旧物展柜" data-phase={state.phase}>
       <div className={styles.stage}>
         <canvas ref={canvas} className={styles.canvas} style={{ visibility: surface === 'ready' ? 'visible' : 'hidden' }} tabIndex={0} aria-label="三维展柜；选择旧物取出，方向键旋转，加减键缩放，Esc 放回" />
-        <div className={styles.stageToolbar}>{hasSelection && <button onClick={() => controller.returnToOverview()}>← 放回展柜</button>}<span role="status">{surface !== 'ready' ? '可从下方目录查看实拍与故事' : selectedStatus === 'failed' ? '模型载入失败，实拍与故事仍可查看' : selectedStatus === 'loading' ? '模型载入中…' : phaseText[state.phase]}</span>{state.phase === 'inspecting' && surface === 'ready' && selectedStatus === 'ready' && <div className={styles.zoomControls}><button aria-label="缩小模型" onClick={() => stage.current?.zoomBy(1 / 1.12)}>− 缩小</button><button aria-label="放大模型" onClick={() => stage.current?.zoomBy(1.12)}>＋ 放大</button></div>}</div>
+        <div className={styles.stageToolbar}>{hasSelection && <button className={styles.back} onClick={() => controller.returnToOverview()}>← 放回展柜 (Esc)</button>}<span role="status">{surface !== 'ready' ? '可从下方目录查看实拍与故事' : selectedStatus === 'failed' ? '模型载入失败，实拍与故事仍可查看' : selectedStatus === 'loading' ? '模型载入中…' : phaseText[state.phase]}</span></div>
         {surface !== 'ready' && <div className={styles.surfaceNotice}><h2>{surface === 'loading' ? '正在准备展柜…' : surface === 'context-lost' ? '三维展示已中断' : '三维展示暂不可用'}</h2><p>实拍、展签与原声仍可通过下方展品目录查看。</p>{surface !== 'loading' && <button onClick={() => stage.current ? stage.current.retry() : window.location.reload()}>重试三维展示</button>}</div>}
-        {state.phase === 'inspecting' && surface === 'ready' && <button className={styles.reset} onClick={() => { stage.current?.resetView(); canvas.current?.focus(); }}>重置角度</button>}
+        <div ref={inspectionGuide} className={styles.inspectionGuide} hidden={state.phase !== 'inspecting' || surface !== 'ready' || selectedStatus !== 'ready'}><InspectionGuide /></div>
       </div>
-      {selected && <aside ref={story} className={styles.story} aria-label="展品故事"><StoryPanel key={selected.id} exhibit={selected} token={token} active={state.phase !== 'returning'} />{selectedStatus === 'failed' && <button onClick={() => stage.current?.retryModel(selected.id)}>重新加载模型</button>}</aside>}
+      {selected && <aside ref={story} className={`${styles.story} inspection-card`} aria-label="展品故事"><ExhibitStory key={selected.id} exhibit={selected} photoUrl={selected.photoAssetId === null ? null : shareAssetUrl(token, selected.photoAssetId)} audioUrl={selected.audioAssetId === null ? null : shareAssetUrl(token, selected.audioAssetId)} active={state.phase !== 'returning'} />{selectedStatus === 'failed' && <button onClick={() => stage.current?.retryModel(selected.id)}>重新加载模型</button>}</aside>}
     </section>
     <p className={styles.guide} data-inspecting={state.phase === 'inspecting'}>点击展柜中的旧物，取出查看立体细节并倾听物主讲述</p>
     <nav className={styles.catalog} data-fallback={surface !== 'ready'} aria-label="选择展品">{[...museum.exhibits].sort((a, b) => a.slotIndex - b.slotIndex).map((exhibit) => <button key={exhibit.id} aria-pressed={exhibit.id === state.selectedId} onClick={() => controller.select(exhibit.id)}><span className={styles.slot}>{String(exhibit.slotIndex + 1).padStart(2, '0')}</span><span><strong>{exhibit.name}</strong><small>{exhibit.era}</small></span><span aria-hidden="true">↗</span></button>)}</nav>
     <footer className={styles.footer}>请按物主允许的范围分享与使用</footer>
   </main>;
-}
-
-function StoryPanel({ exhibit, token, active }: { exhibit: PublicExhibit; token: string; active: boolean }) {
-  const audio = useRef<HTMLAudioElement>(null);
-  const [photoFailed, setPhotoFailed] = useState(false);
-  const [audioFailed, setAudioFailed] = useState(false);
-  useEffect(() => {
-    const element = audio.current;
-    return () => element?.pause();
-  }, []);
-  useEffect(() => { if (!active && audio.current) { audio.current.pause(); audio.current.currentTime = 0; } }, [active]);
-  return <>
-    <p className={styles.eyebrow}>第 {exhibit.slotIndex + 1} 格 · {exhibit.era}</p><h2>{exhibit.name}</h2>
-    <p className={styles.caption}>{exhibit.caption}</p>
-    {exhibit.photoAssetId !== null ? <figure className={styles.photo}>{!photoFailed && <Image src={shareAssetUrl(token, exhibit.photoAssetId)} alt={`${exhibit.name}的实拍`} width={960} height={640} unoptimized onError={() => setPhotoFailed(true)} />}{photoFailed ? <><p role="alert">实拍暂时无法读取，请检查网络或核对分享状态。</p><button onClick={() => setPhotoFailed(false)}>重试实拍</button></> : <figcaption>实拍图片</figcaption>}</figure> : <p className={styles.mediaNote}>此展品尚未提供实拍。</p>}
-    {exhibit.audioAssetId !== null ? <div className={styles.audio}><label htmlFor={`audio-${exhibit.id}`}>听听物主讲述</label><audio id={`audio-${exhibit.id}`} ref={audio} src={shareAssetUrl(token, exhibit.audioAssetId)} controls preload="none" onError={() => setAudioFailed(true)} aria-label={`${exhibit.name}的原声`} />{audioFailed && <><p role="alert">原声暂时无法播放，请检查网络、核对分享状态或更换浏览器。</p><button onClick={() => { setAudioFailed(false); audio.current?.load(); }}>重新加载原声</button></>}</div> : <p className={styles.mediaNote}>此展品尚未提供原声。</p>}
-    <details className={styles.sources}><summary>模型说明与素材来源</summary><p>{exhibit.approximation}</p><p>{exhibit.sourceNotice}</p>{exhibit.modelKey === 'photo-plane' && <p>三维展示为实拍照片薄片，背面为示意。</p>}</details>
-  </>;
 }
