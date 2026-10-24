@@ -128,10 +128,12 @@ async function fakeProxy(context: TestContext, state: ProxyState) {
         response.end(JSON.stringify({ ok: true, data: { loggedIn: true } })); return;
       }
       if (url === '/api/3d/resource/genUploadInfo') {
+        // 旧形状（无 bucket/region/location）：PUT 目标退回 resourceUrl，
+        // 上传落在本地假服务；真实形状的解析有专门单测覆盖。
         response.end(JSON.stringify({
           ok: true,
           data: { encryptTmpSecretId: 'id', encryptTmpSecretKey: 'key', sessionToken: 'tok',
-            bucketName: 'b', region: 'ap-guangzhou', location: 'cos/up.png', resourceUrl: `http://127.0.0.1:${(server.address() as { port: number }).port}/cos/up.png` },
+            resourceUrl: `http://127.0.0.1:${(server.address() as { port: number }).port}/cos/up.png` },
         }));
         return;
       }

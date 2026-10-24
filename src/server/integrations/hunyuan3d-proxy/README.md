@@ -36,7 +36,7 @@ const client = createHunyuanWebProxyClient({
 
 ## 未验证项（真实试跑后核对）
 
-1. `genUploadInfo` 返回的 COS 临时凭证字段名（`encryptTmpSecretId/Key/Token` 等）来自网页 SPA 逆向记录，没有真实样本；`parseCosUploadInfo` 按别名容错，字段缺失时受控失败。
+1. ~~`genUploadInfo` 返回的 COS 临时凭证字段名~~ **已按 2026-10-24 真实响应核对**：`encryptTmpSecretId` / `encryptTmpSecretKey` / `encryptToken`（临时凭证），`bucketName` / `region` / `location`（PUT 目标），`resourceUrl` 为混元站内下载代理地址（`3d.hunyuan.tencent.com/api/3d/resource/download?resourceId=...`，作为生成任务的图片引用，不是 COS 直链）。上传 = 用临时凭证按 COS XML 签名 PUT 到 `https://{bucket}.cos.{region}.myqcloud.com/{location}`（`x-cos-security-token` 参与签名计算）。
 2. 结果 GLB 的实际下载域名：默认沿用 [共享腾讯 COS 来源策略](../hunyuan3d/README.md#结果下载来源策略)，包含受约束的 `myqcloud.com` 与 `tencentcos.cn` 地域/存储桶端点。真实响应出现其他域名时，须先核实来源并复核共享允许策略；`resultUrlPolicy` 覆盖仅供测试注入本地假服务，不用于绕过真实结果的来源校验。
 3. 真实输出的坐标、正面、原点与尺度仍无保证；入库前按 §9.6 由 D 规范化。
 4. 上传与生成均会消耗网页端积分（concept 与主站积分池独立）。

@@ -4,6 +4,7 @@ import { test, type TestContext } from 'node:test';
 import {
   createHunyuanWebProxyClient,
   buildCosAuthorization,
+  cosUploadHeaders,
   parseCosUploadInfo,
   Hunyuan3DError,
   type HunyuanProxyConfig,
@@ -153,13 +154,12 @@ test('完整链路：登录预检、COS 上传、几何提交、自动接续纹�
       return;
     }
     if (url === '/api/3d/resource/genUploadInfo') {
+      // 旧形状（无 bucket/region/location）：PUT 目标退回 resourceUrl，
+      // 上传落在本地假服务；真实形状的解析有专门单测。
       response.end(JSON.stringify(state.uploadInfo ?? {
         encryptTmpSecretId: 'tmp-id',
         encryptTmpSecretKey: 'tmp-key',
         sessionToken: 'tmp-token',
-        bucketName: 'bucket-1',
-        region: 'ap-guangzhou',
-        location: 'upload/abc.png',
         resourceUrl: `${cos.origin}/upload/abc.png`,
       }));
       return;
@@ -315,7 +315,7 @@ test('上游 errNo 拒绝映射为 UPSTREAM_ERROR 并保留错误码', async (co
         ok: true,
         data: {
           encryptTmpSecretId: 'id', encryptTmpSecretKey: 'key', sessionToken: 'tok',
-          bucketName: 'b', region: 'ap-guangzhou', location: 'u/x.png', resourceUrl: `${cos.origin}/u/x.png`,
+          resourceUrl: `${cos.origin}/u/x.png`,
         },
       }));
       return;
@@ -532,4 +532,30 @@ test('默认上传策略在发送照片前拒绝 HTTP 回环地址', async (cont
     bytes: new Uint8Array([1]), mime: 'image/png', width: 256, height: 256,
   } }), 'UPSTREAM_ERROR');
   assert.equal(uploadCalls, 0);
+});
+
+test('真实 genUploadInfo 形状：PUT 目标由 bucket/region/location 推导，引用走站内下载地址', () => {
+  // 2026-10-24 真实响应样本（凭据值为合成占位，结构与字段名一致）。
+  const info = parseCosUploadInfo({
+    error: { code: '0', message: '' },
+    bucketName: 'hunyuan-base-prod-1258344703',
+    region: 'ap-guangzhou',
+    location: 'hunyuan3d/default/36cc2492/2026102420464223_sample.png',
+    encryptTmpSecretId: 'synthetic-id',
+    encryptTmpSecretKey: 'synthetic-key',
+    encryptToken: 'synthetic-token',
+    resourceUrl: 'https://3d.hunyuan.tencent.com/api/3d/resource/download?resourceId=sample',
+  }, 'image/webp', (url) => {
+    assert.equal(url.hostname, 'hunyuan-base-prod-1258344703.cos.ap-guangzhou.myqcloud.com');
+  });
+  assert.equal(info.uploadUrl.hostname, 'hunyuan-base-prod-1258344703.cos.ap-guangzhou.myqcloud.com');
+  assert.equal(info.uploadUrl.pathname, '/hunyuan3d/default/36cc2492/2026102420464223_sample.png');
+  assert.equal(info.resourceUrl, 'https://3d.hunyuan.tencent.com/api/3d/resource/download?resourceId=sample');
+  assert.equal(info.sessionToken, 'synthetic-token');
+  const authorization = buildCosAuthorization(info, 1_700_000_000_000);
+  assert.match(authorization, /q-header-list=content-type;host;x-cos-security-token&/);
+  // 临时凭证 token 作为独立请求头发送，其头部名参与签名计算。
+  const headers = cosUploadHeaders(info, 1_700_000_000_000);
+  assert.equal(headers['x-cos-security-token'], 'synthetic-token');
+  assert.equal(headers['Content-Type'], 'image/webp');
 });
