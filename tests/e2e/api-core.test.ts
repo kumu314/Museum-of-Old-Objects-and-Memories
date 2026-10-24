@@ -18,13 +18,18 @@ test('HTTP制作发布与分享撤销：会话、CAS、确认、快照和统一�
   let cookie = '';
   let museumId: string | undefined;
   async function request(path: string, method = 'GET', body?: unknown, authenticated = true, includeOrigin = true) {
-    return fetch(new URL(path, origin), {
-      method,
-      headers: { ...(authenticated && cookie ? { Cookie: cookie } : {}), ...(includeOrigin ? { Origin: origin } : {}),
-        ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-      signal: AbortSignal.timeout(15000),
-    });
+    try {
+      return await fetch(new URL(path, origin), {
+        method,
+        headers: { ...(authenticated && cookie ? { Cookie: cookie } : {}), ...(includeOrigin ? { Origin: origin } : {}),
+          ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        signal: AbortSignal.timeout(15000),
+      });
+    } catch (error: unknown) {
+      const route = path.replace(/(\/(?:api\/)?share\/)[^/]+/, '$1[token]');
+      throw new Error(`HTTP regression request failed: ${method} ${route}`, { cause: error });
+    }
   }
   async function expectError(response: Response, status: number, code: string) {
     assert.equal(response.status, status);
