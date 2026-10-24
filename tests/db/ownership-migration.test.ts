@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { Pool } from 'pg';
-import { migrate } from '../../src/server/db/migrate';
+import { loadMigrations, migrate } from '../../src/server/db/migrate';
 import { getIsolatedTestDatabaseUrl } from '../../src/server/db/test-database';
 
 test('归属迁移保留历史账号、展馆及登录节流记录，并且可重复执行', async () => {
@@ -25,7 +25,10 @@ test('归属迁移保留历史账号、展馆及登录节流记录，并且可�
     await pool.query("INSERT INTO team_members(id,username,password_hash) VALUES($1,'legacy-owner','test-only')", [owner]);
     await pool.query("INSERT INTO museums(id,title,created_by) VALUES($1,'历史展馆',$2)", [museum, owner]);
     await pool.query("INSERT INTO login_attempts(username,attempts,window_started_at) VALUES('register:legacy-owner',7,now())");
-    assert.deepEqual(await migrate(pool), [3, 4, 5, 6, 7, 8]);
+    // 升级目标不写死版本号：每加一个迁移都要回来改字面量，迟早有人为了让用例变绿
+    // 而漏掉真实的新迁移。这里直接取当前仓库里 0002 之后的全部迁移。
+    const pending = (await loadMigrations('migrations')).map((migration) => migration.version).filter((version) => version > 2);
+    assert.deepEqual(await migrate(pool), pending);
     assert.deepEqual(await migrate(pool), []);
     const saved = await pool.query('SELECT m.id,m.title,m.created_by,u.role FROM museums m JOIN team_members u ON u.id=m.created_by');
     assert.deepEqual(saved.rows, [{ id: museum, title: '历史展馆', created_by: owner, role: 'member' }]);

@@ -42,7 +42,8 @@ export async function requireActor(client: PoolClient, actorId: string): Promise
  */
 export async function museumRecord(client: PoolClient, actorId: string, id: string, lock = false) {
   const result = await client.query<Record<string, unknown>>(`SELECT m.id,m.title,m.description,m.version,
-    p.museum_version AS "publishedVersion", m.share_enabled AS "shareEnabled",m.created_at AS "createdAt",m.updated_at AS "updatedAt"
+    p.museum_version AS "publishedVersion", m.share_enabled AS "shareEnabled",m.region_city AS "regionCity",
+    m.created_at AS "createdAt",m.updated_at AS "updatedAt"
     FROM museums m LEFT JOIN published_snapshots p ON p.id=m.current_snapshot_id
     WHERE m.id=$1 AND m.created_by=$2 AND m.deleted_at IS NULL ${lock ? 'FOR UPDATE OF m' : ''}`, [id, actorId]);
   const row = result.rows[0];

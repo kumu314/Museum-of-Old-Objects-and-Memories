@@ -1,10 +1,11 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { z } from 'zod';
 import { publicMuseumSchema, type PublicExhibit, type PublicMuseum } from '../../contracts/museum';
 import { shareNotFoundMessage } from '../../contracts/errors';
 import type { AssetStatus, SurfaceStatus, mountCabinetStage } from '../cabinet/cabinet-stage';
-import { ApiFailure, apiRequest } from '../studio/api';
+import { ApiFailure, apiRequest, jsonRequest } from '../studio/api';
 import { cabinetPageCount, exhibitsOnPage } from '../studio/cabinet-pages';
 import { loginDestination } from '../studio/login-destination';
 import { createInspectionController } from './inspection-controller';
@@ -53,6 +54,17 @@ export function SharedMuseum({ token, initialMuseum }: { token: string; initialM
       window.removeEventListener('pageshow', restored);
     };
   }, [refresh]);
+
+  const reported = useRef(false);
+  useEffect(() => {
+    // 一次挂载只上报一次。这个 ref 挡的是 React StrictMode 在开发期把 effect 跑两遍，
+    // 不是为了统计去重：真实的刷新与新标签页仍然各自计一次（口径见 discover 页脚）。
+    if (reported.current) return;
+    reported.current = true;
+    // 计数失败绝不能影响参观：不设错误 UI、不重试、不提示，最多少记一次。
+    void apiRequest(`/api/share/${encodeURIComponent(token)}/views`, z.strictObject({ ok: z.literal(true) }),
+      jsonRequest('POST', {})).catch(() => undefined);
+  }, [token]);
 
   if (share.status === 'unauthorized') return <main className={styles.unavailable}><p>拾物馆</p><h1>登录已失效</h1><p>请重新登录后继续参观。</p><a href={`/login?next=${encodeURIComponent(loginDestination(`/share/${token}`))}`}>重新登录并返回参观</a></main>;
   if (share.status === 'failed') return <main className={styles.unavailable}><p>拾物馆</p><h1>{share.message}</h1><p>请向制作人员核对当前链接，或重新读取。</p><button disabled={checking} onClick={() => void refresh()}>{checking ? '正在读取…' : '重新读取展馆'}</button></main>;

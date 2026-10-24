@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { sourceSegmentsSchema } from './ai';
+import { regionCitySchema } from './discovery';
 import { modelInputSchema } from './model-generation';
 import { successResponseSchema } from './errors';
 import { captionSchema, eraSchema, exhibitNameSchema, idSchema, modelKeySchema,
@@ -31,8 +32,14 @@ const draftFields = {
 };
 
 export const createMuseumInputSchema = z.strictObject(museumFields);
+/**
+ * `regionCity` 是新增的可选属性，因此是 `optional` 而不是必填：
+ * 老客户端整份保存时不会带它，语义是"不改动已选城市"；
+ * 要清空必须显式传 `null`。这样不会因为加了一个展示属性就让所有旧保存失败。
+ */
 export const updateMuseumInputSchema = z.strictObject({
   ...museumFields,
+  regionCity: regionCitySchema.nullable().optional(),
   expectedVersion: versionSchema,
 });
 export const versionInputSchema = z.strictObject({ expectedVersion: versionSchema });
@@ -81,6 +88,12 @@ export const museumSummarySchema = z.strictObject({
   version: versionSchema,
   publishedVersion: versionSchema.nullable(),
   shareEnabled: z.boolean(),
+  /**
+   * 地区只到城市一级，`null` 表示馆主未标注：不参与地图聚合，但仍可出现在榜单里。
+   * 这里**不进** `publicMuseumSchema`（发布快照）：位置是馆的属性，不是某一版内容的属性，
+   * 改城市不该要求重新发布，也不该让旧快照带着过期城市。
+   */
+  regionCity: regionCitySchema.nullable(),
   createdAt: timestampSchema,
   updatedAt: timestampSchema,
 });

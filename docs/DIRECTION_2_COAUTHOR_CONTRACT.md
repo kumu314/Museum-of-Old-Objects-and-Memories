@@ -1,7 +1,7 @@
-# 方向二 · 共同作者与多人记忆契约（v0.1 · 待评审）
+# 方向二 · 共同作者与多人记忆契约（v1.0 · 已落库）
 
-状态：**提案**。本文件只定字段与规则，不含 DDL。实现已落在 `src/contracts/contributors.ts`
-与 `src/features/contributors/`（纯函数 + DEMO 界面），**没有任何表**。
+状态：**已实现**。迁移 `migrations/0009_contributions.sql`、服务端 `src/server/core/contributions.ts`、
+五条接口，`/coauthor` 已接真实数据（规则演示保留在 `/coauthor/demo`）。与 v0.1 草案的偏差见 §10。
 
 唯一 owner：**C**（契约 / 迁移 / 权限 / 发布事务）。其他方向如需改动本契约，先提请求，不自行扩展枚举。
 
@@ -148,3 +148,35 @@
 验证：17 个规则用例、TypeScript 检查与本模块 ESLint 均通过；浏览器直接挂载原 DEMO 组件，验证初始 2 条、接受邀请后 3 条、本人撤回后 2 条、另一作者整体撤回后 1 条、刷新恢复 2 条，390px 视口无横向溢出、无浏览器异常。
 
 本轮未验证真实登录页面、数据库或发布事务；组件检查不代表这些尚未接入的协作能力已完成。生产构建及全仓门禁由 PR CI 记录核对。
+
+## 10. 实现状态与偏差（v1.0）
+
+迁移 `0009_contributions.sql` 已落地，服务端在 `src/server/core/contributions.ts`，接口五条：
+`GET|POST /api/museums/[museumId]/exhibits/[exhibitId]/contributions`、
+`POST .../invitations`、`PATCH|DELETE /api/invitations/[invitationId]`、
+`GET /api/contributions/mine`、`POST /api/contributions/[contributionId]/withdraw`。
+`/coauthor` 已换成真实数据，规则演示保留在 `/coauthor/demo`（`demo-fixtures.ts` 未删，仍显式标注 DEMO）。
+
+与草案的四处偏差，都是实现时发现草案不可行或有更好做法：
+
+| 草案 | 实现 | 原因 |
+| --- | --- | --- |
+| `contributions` 无署名快照 | 增加 `author_name` | 契约 `contributionSchema` 要求 `authorName`；改名不该改写历史署名，与 `invitee_name` 同理 |
+| 重复撤回返回 409 | 幂等 200，返回当前内容 | 撤回者恒为作者本人，409 不带来新信息，还会让重试变成需要处理的失败 |
+| 接受已收回邀请 → 409 `VERSION_CONFLICT` | 400 `VALIDATION_ERROR` | `VERSION_CONFLICT` 的文案绑定"版本冲突"，复用会把用户引向错误解释；新增错误码要动当时正被 #15 修改的共享文件 |
+| 撤回触发 `version+1` 并停掉分享 | 只置 `withdrawn_at` | 公开快照目前**不含**讲述，把整馆下架与"这份内容是否公开"无关；等快照格式支持讲述后，撤回必须触发重新发布，否则撤回不生效 |
+
+**对外口径（不得含糊）**：多人讲述已经能记录、能授权、能撤回，但**公开参观页还没有显示它们**。
+`/coauthor` 上的「同意公开」目前只是把授权记录下来，任何界面与文档都不得声称讲述已经出现在公开页。
+
+### 已知的探测面
+
+邀请按用户名发出，接口对"用户名是否存在"必然给出可区分的回答（不存在 → `NOT_FOUND`）。
+这是邀请功能无法回避的代价，缓解措施是：需要登录、只对馆主开放、每次邀请一条记录。
+**不得**在此基础上加"该用户是否存在"这类更明确的查询接口。
+
+### PR #20 合并前复查
+
+邀请创建、回应、收回及投稿与展馆/展品删除共用馆级事务锁；等待锁后重新检查资源仍然有效，删除后旧邀请不再授予写入资格。署名快照接受完整的 80 字符用户名，通过新增 `0010_contribution_name_length.sql` 扩大约束，保留 `0009` 原文及校验和。
+
+本轮验证：18 项真实 PostgreSQL 贡献测试通过，其中覆盖删除后拒绝写入、四种删除与回应/投稿并发次序、完整长用户名邀请与署名。真实界面暂不支持修改既有讲述的授权值，只能撤回该份讲述；界面文案已与此一致。

@@ -87,6 +87,24 @@ export function readShare(actorId: string, token: string, client?: PoolClient) {
     return (await shareRecord(db, token)).data;
   }, client);
 }
+/**
+ * 记一次浏览。
+ *
+ * - 只有真能读到内容（token 有效、分享仍开着、快照已封存）才记；读不到就按 404 处理，不记。
+ * - 馆主自己的访问**照实记下**，排除发生在聚合侧（见 `readLeaderboard`）。事件表记的是
+ *   "发生过什么"的事实，聚合算的是"对外怎么算"的口径；把两者混在一处，将来改口径
+ *   就得回头改历史数据。
+ * - 不做去重：刷新、预加载与自动化流量的处理方式仍属未决，未决前如实记录每一次成功读取，
+ *   也不在任何地方声称已经防刷或统计独立访客。
+ */
+export function recordMuseumView(actorId: string, token: string, client?: PoolClient) {
+  return inTransaction(async (db) => {
+    await requireActor(db, actorId);
+    const share = await shareRecord(db, token);
+    await db.query('INSERT INTO museum_view_events(museum_id,viewer_id) VALUES($1,$2)', [share.id, actorId]);
+    return { ok: true as const };
+  }, client);
+}
 export function getShareAsset(actorId: string, token: string, assetId: string, client?: PoolClient) {
   return inTransaction(async (db) => {
     await requireActor(db, actorId);
