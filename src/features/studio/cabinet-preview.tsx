@@ -21,18 +21,28 @@ export function CabinetPreview({ exhibits, selectedSlot, disabled, onSelectSlot,
   const pageCount = Math.max(cabinetPageCount(exhibits), page + 1);
   const pageExhibits = useMemo(() => exhibitsOnPage(exhibits, page), [exhibits, page]);
   const modelAssetBase = assetBase.replace(/\/assets$/, '/model-assets');
-  const items = useMemo(() => cabinetItems(pageExhibits, assetBase, modelAssetBase), [pageExhibits, assetBase, modelAssetBase]);
+  // 按模型素材记录失败；替换模型后自动尝试加载新模型。
+  const [modelFallback, setModelFallback] = useState<ReadonlySet<string>>(new Set());
+  const items = useMemo(
+    () => cabinetItems(pageExhibits, assetBase, modelAssetBase, modelFallback),
+    [pageExhibits, assetBase, modelAssetBase, modelFallback]);
   const controller = useMemo(() => createInspectionController(items.map((item) => item.id)), [items]);
   const inspection = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
   const [surfaceState, setSurface] = useState<{ controller: typeof controller; value: SurfaceStatus | 'loading' }>({ controller, value: 'loading' });
   const [assetState, setAssetStates] = useState<{ controller: typeof controller; values: Readonly<Record<string, AssetStatus>> }>({ controller, values: {} });
   const surface = surfaceState.controller === controller ? surfaceState.value : 'loading';
-  const assetStates = assetState.controller === controller ? assetState.values : {};
+  const assetStates = useMemo(
+    () => (assetState.controller === controller ? assetState.values : {}),
+    [assetState, controller]);
   const [expanded, setExpanded] = useState(false);
   const [sceneRetry, setSceneRetry] = useState(0);
   const selected = exhibits.find((exhibit) => exhibit.slotIndex === selectedSlot);
   const selectedItem = items.find((item) => item.id === selected?.id);
-  const generatedSelected = Boolean((selected as { generatedModelAssetId?: string | null } | undefined)?.generatedModelAssetId);
+  const adoptedId = selected?.generatedModelAssetId ?? null;
+  const generatedSelected = adoptedId !== null;
+  const modelLoadFailed = adoptedId !== null && modelFallback.has(adoptedId);
+  const modelLoading = generatedSelected && !modelLoadFailed && selected !== undefined && assetStates[selected.id] === 'loading';
+
   const selectSlot = useEffectEvent((slot: number) => { if (!disabled) onSelectSlot(slot); });
 
   useEffect(() => {
@@ -47,6 +57,11 @@ export function CabinetPreview({ exhibits, selectedSlot, disabled, onSelectSlot,
         onAssetStatus: (id, status) => {
           if (cancelled) return;
           setAssetStates((current) => ({ controller, values: { ...(current.controller === controller ? current.values : {}), [id]: status } }));
+          const item = items.find((candidate) => candidate.id === id);
+          if (status === 'failed' && item?.modelKey === 'glb') {
+            const assetId = item.source.assetId;
+            setModelFallback((current) => current.has(assetId) ? current : new Set([...current, assetId]));
+          }
         },
       });
       instance.setArrangement(pageExhibits.filter((exhibit) => items.some((item) => item.id === exhibit.id))
@@ -141,8 +156,14 @@ export function CabinetPreview({ exhibits, selectedSlot, disabled, onSelectSlot,
     <nav className="workbench-pagination" aria-label="展柜翻页"><button type="button" className="wb-text-link" disabled={disabled || expanded || page === 0} onClick={() => onSelectSlot(exhibits.find((item) => cabinetPage(item.slotIndex) === page - 1)?.slotIndex ?? (page - 1) * slotsPerPage)}>← 上一页</button>
       <span aria-live="polite">第 {page + 1} 页 / {pageCount} 页</span><button type="button" className="wb-text-link" disabled={disabled || expanded || (page === pageCount - 1 && (mode === 'visit' || pageExhibits.length === 0))} onClick={() => onSelectSlot(exhibits.find((item) => cabinetPage(item.slotIndex) === page + 1)?.slotIndex ?? (page + 1) * slotsPerPage)}>{page === pageCount - 1 && mode === 'edit' ? '＋ 新一页' : '下一页 →'}</button></nav>
     <div className="wb-row"><p className="wb-hint">当前选中 · {cabinetPosition(selectedSlot)}</p>{mode === 'visit' && <button ref={inspectButton} type="button" className="wb-text-link" disabled={disabled || !selected || !selectedItem || surface !== 'ready' || assetStates[selected.id] !== 'ready'} onClick={() => inspect()}>检视模型</button>}</div>
-    {selected && <p className="wb-hint">{generatedSelected ? '已采纳本次照片生成的模型 · 近似复原' : selected.modelKey === 'photo-plane' ? '实拍照片平面展示 · 非三维复原' : '内置演示模型 · 非本次照片生成'}</p>}
-    {selected && assetStates[selected.id] === 'failed' && <p className="wb-hint" role="alert">展示素材读取失败，照片与故事仍可使用。<button type="button" className="wb-text-link" onClick={() => stage.current?.retryModel(selected.id)}>重试素材</button></p>}
+    {selected && generatedSelected && modelLoading && <p className="wb-hint" role="status">正在加载生成的三维模型，文件较大，首次可能需要数十秒…</p>}
+    {selected && <p className="wb-hint">{generatedSelected && !modelLoadFailed ? '已采纳本次照片生成的模型 · 近似复原' : selectedItem?.modelKey === 'photo-plane' ? '实拍照片平面展示 · 非三维复原' : '内置演示模型 · 非本次照片生成'}</p>}
+    {selected && assetStates[selected.id] === 'failed' && selectedItem?.modelKey !== 'glb' && <p className="wb-hint" role="alert">展示素材读取失败，照片与故事仍可使用。<button type="button" className="wb-text-link" onClick={() => stage.current?.retryModel(selected.id)}>重试素材</button></p>}
+    {selected && modelLoadFailed && adoptedId && <p className="wb-hint" role="alert">生成模型加载失败，{selectedItem?.modelKey === 'photo-plane' ? '已回退为照片展示。' : '暂时使用原有展示。'}<button type="button" className="wb-text-link" onClick={() => {
+      setModelFallback((current) => { const next = new Set(current); next.delete(adoptedId); return next; });
+      setAssetStates((current) => ({ controller, values: { ...current.values, [selected.id]: 'loading' } }));
+    }}>重试模型</button></p>}
+
     {assetStates['cabinet-material'] === 'failed' && <p className="wb-hint">木纹材质读取失败。展品和文字仍可操作，重新读取页面后可重试。</p>}
     {inspection.phase === 'returning' && <p className="wb-hint" role="status">正在放回展柜…</p>}
   </div>;
