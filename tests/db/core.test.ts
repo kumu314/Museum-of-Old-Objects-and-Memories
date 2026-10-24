@@ -60,6 +60,44 @@ async function rejected(action: Promise<unknown>, code: string) {
 }
 async function currentVersion(db: PoolClient, actor: string, museum: string) { return (await getMuseum(actor, museum, db)).version; }
 
+test('缺图照片平面可保存草稿，确认和发布明确拒绝；补图后仍须重新确认', async () => {
+  await fixture(async (db, actor) => {
+    const museum = await createMuseum(actor, { title: '缺图回归馆', description: '' }, db);
+    const exhibit = await createExhibit(actor, museum.id, { ...exhibitInput(museum.version), modelKey: 'photo-plane' }, db);
+    const version = await currentVersion(db, actor, museum.id);
+    const missingPhoto = (error: unknown) => error instanceof HttpError
+      && error.failure.code === 'VALIDATION_ERROR' && /上传.*保存.*实拍照片/.test(error.message);
+    await assert.rejects(confirmExhibit(actor, museum.id, exhibit.id, {
+      expectedVersion: exhibit.version, confirmationNote: '不能确认没有展示图片的照片平面。',
+    }, db), missingPhoto);
+    assert.equal((await getMuseum(actor, museum.id, db)).exhibits[0]?.confirmedVersion, null);
+    assert.equal(await currentVersion(db, actor, museum.id), version);
+
+    // A record confirmed before this fix must also produce a useful publication error.
+    await db.query('UPDATE exhibits SET confirmed_version=version,confirmed_by=$1,confirmed_at=now(),confirmation_note=$2 WHERE id=$3',
+      [actor, '旧版本遗留确认记录，仅用于回归测试。', exhibit.id]);
+    await assert.rejects(confirmExhibit(actor, museum.id, exhibit.id, {
+      expectedVersion: exhibit.version, confirmationNote: '重复确认仍不能绕过补图。',
+    }, db), missingPhoto);
+    await assert.rejects(publishMuseum(actor, museum.id, version, db), (error: unknown) => {
+      assert.ok(missingPhoto(error));
+      assert.ok(error instanceof Error);
+      assert.match(error.message, /第 1 格「复古相机」/);
+      return true;
+    });
+    assert.equal((await getMuseum(actor, museum.id, db)).publishedVersion, null);
+
+    const image = await asset(db, actor, museum.id);
+    const updated = await updateExhibit(actor, museum.id, exhibit.id, { ...editInput(exhibit), photoAssetId: image }, db);
+    assert.equal(updated.confirmedVersion, null);
+    await rejected(publishMuseum(actor, museum.id, await currentVersion(db, actor, museum.id), db), 'NOT_CONFIRMED');
+    await confirmExhibit(actor, museum.id, updated.id, { expectedVersion: updated.version, confirmationNote: '补图并核对当前版本。' }, db);
+    const published = await publishMuseum(actor, museum.id, await currentVersion(db, actor, museum.id), db);
+    assert.ok(published.token);
+    assert.equal((await readShare(published.token, db)).exhibits[0]?.photoAssetId, image);
+  });
+});
+
 test('制作确认发布：完整未确认清单、旧快照隔离、替换素材和重新发布', async () => {
   await fixture(async (db, actor) => {
     const museum = await createMuseum(actor, { title: '家庭演示馆', description: '仅测试' }, db);

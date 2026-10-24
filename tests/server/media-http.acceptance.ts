@@ -165,11 +165,13 @@ test('六格式HTTP验收：真实编码文件上传、私有读取、快照读�
     assert.ok(token);
     for (const photo of images) {
       const path: string = `/api/share/${token}/assets/${photo.asset.id}`;
-      assert.deepEqual(await imageBytes(await request(path, 'GET', undefined, false), photo.width, photo.height), photo.displayed);
-      await imageBytes(await request(`${path}?variant=thumbnail`, 'GET', undefined, false), photo.width, photo.height);
+      await expectError(await request(path, 'GET', undefined, false), 401, 'UNAUTHORIZED');
+      assert.deepEqual(await imageBytes(await request(path), photo.width, photo.height), photo.displayed);
+      await imageBytes(await request(`${path}?variant=thumbnail`), photo.width, photo.height);
     }
     for (const voice of audio) {
-      const response = await request(`/api/share/${token}/assets/${voice.asset.id}`, 'GET', undefined, false);
+      await expectError(await request(`/api/share/${token}/assets/${voice.asset.id}`, 'GET', undefined, false), 401, 'UNAUTHORIZED');
+      const response = await request(`/api/share/${token}/assets/${voice.asset.id}`);
       assert.equal(response.status, 200);
       assertPrivateHeaders(response, voice.asset.contentType);
       assert.deepEqual(Buffer.from(await response.arrayBuffer()), voice.input);
@@ -177,7 +179,7 @@ test('六格式HTTP验收：真实编码文件上传、私有读取、快照读�
     const stopped = await request(`/api/museums/${museumId}/share`, 'DELETE', { expectedVersion: (await museum()).version });
     assert.equal(stopped.status, 200);
     for (const { asset } of [...images, ...audio]) {
-      await expectError(await request(`/api/share/${token}/assets/${asset.id}`, 'GET', undefined, false), 404, 'SHARE_NOT_FOUND');
+      await expectError(await request(`/api/share/${token}/assets/${asset.id}`), 404, 'SHARE_NOT_FOUND');
     }
   } finally {
     try {

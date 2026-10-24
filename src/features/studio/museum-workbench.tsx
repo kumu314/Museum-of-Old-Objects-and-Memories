@@ -4,7 +4,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { z } from 'zod';
-import { museumDraftSchema, updateMuseumInputSchema, type ExhibitDraft, type MuseumDraft } from '../../contracts/museum';
+import { missingDisplayPhoto, museumDraftSchema, updateMuseumInputSchema, type ExhibitDraft, type MuseumDraft } from '../../contracts/museum';
 import { publishResultSchema, shareTokenSchema } from '../../contracts/session';
 import { ApiFailure, apiRequest, describeFailure, jsonRequest } from './api';
 import { CabinetPreview } from './cabinet-preview';
@@ -156,11 +156,13 @@ function MuseumEditor({ initial }: { initial: MuseumDraft }) {
     catch { setError('暂时无法自动复制，请从参观链接输入框中选中并复制。'); }
   }
   const pendingExhibits = museum.exhibits.filter((item) => item.confirmedVersion !== item.version);
-  const publishDisabled = busy || anyDirty || refreshRequired || museum.exhibits.length === 0 || pendingExhibits.length > 0;
+  const missingPhotos = museum.exhibits.filter(missingDisplayPhoto);
+  const publishDisabled = busy || anyDirty || refreshRequired || museum.exhibits.length === 0 || pendingExhibits.length > 0 || missingPhotos.length > 0;
   const publishing = <section className="workbench-publishing" aria-label="展馆发布与分享"><h3>把这份回忆分享出去</h3>
     <p className="wb-hint">{museum.exhibits.length === 0 ? '从一件旧物开始。收录、核对并确认后，再发布给想念的人。' : `${museum.exhibits.length - pendingExhibits.length} / ${museum.exhibits.length} 件旧物已确认。`}</p>
     {pendingExhibits.length > 0 && <ul className="workbench-pending-list">{pendingExhibits.map((item) => <li key={item.id}><button type="button" className="wb-text-link" disabled={busy || refreshRequired} onClick={() => chooseSlot(item.slotIndex)}>待确认 · 第 {item.slotIndex + 1} 格 {item.name}</button></li>)}</ul>}
-    <p className="wb-hint">发布后，持有链接即可访问已确认的展品、照片与原声。原始讲述和 AI 草稿不公开。</p>
+    {missingPhotos.length > 0 && <div role="status"><p className="wb-hint">以下旧物需要先补充并保存实拍照片，才能确认和发布：</p><ul className="workbench-pending-list">{missingPhotos.map((item) => <li key={item.id}><button type="button" className="wb-text-link" disabled={busy || refreshRequired} onClick={() => chooseSlot(item.slotIndex)}>待补图片 · 第 {item.slotIndex + 1} 格 {item.name}</button></li>)}</ul></div>}
+    <p className="wb-hint">发布后，持有链接并登录有效账号的人可参观已确认的展品、照片与原声。原始讲述和 AI 草稿不公开。</p>
     {anyDirty && <p className="wb-hint">请先处理本页尚未保存的输入或确认记录。</p>}
     <button type="button" className="wb-primary wb-full" disabled={publishDisabled} onClick={publish}>{action === '发布' ? '正在发布…' : '生成快照并发布分享'}</button>
     {shareUrl && museum.shareEnabled && <div className="workbench-share-link"><Field label="当前参观链接"><input readOnly value={shareUrl} onFocus={(event) => event.target.select()} /></Field><div className="wb-actions"><button type="button" className="wb-secondary" onClick={copyShare}>复制链接</button><a className="wb-text-link" href={shareUrl} target="_blank" rel="noreferrer">打开参观页 ↗</a></div></div>}

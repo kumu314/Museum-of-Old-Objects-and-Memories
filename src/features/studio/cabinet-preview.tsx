@@ -66,6 +66,8 @@ export function CabinetPreview({ exhibits, selectedSlot, disabled, onSelectSlot,
   }
   function close() {
     controller.returnToOverview();
+    const current = controller.getSnapshot();
+    if (surface !== 'ready' && current.phase === 'returning') controller.finishTransition(current.transitionId);
     if (controller.getSnapshot().phase === 'overview') { setExpanded(false); inspectButton.current?.focus(); }
   }
 
@@ -92,7 +94,7 @@ export function CabinetPreview({ exhibits, selectedSlot, disabled, onSelectSlot,
         event.preventDefault(); list[next]?.focus();
       }}>
       <canvas ref={canvas} tabIndex={expanded ? 0 : -1} aria-label="旧物三维展柜，使用下方格位按钮选择旧物；检视时方向键旋转，加减键缩放" />
-      {expanded && <><div className="workbench-inspection-controls"><button type="button" className="wb-secondary" onClick={close}>← 返回展柜</button><span>{selected?.name}</span><button type="button" className="wb-secondary" onClick={() => stage.current?.resetView()}>重置角度</button></div><p className="workbench-inspection-help">拖动旋转 · 滚轮缩放 · 方向键与加减键也可操作 · Esc 返回</p></>}
+      {expanded && <><div className="workbench-inspection-controls"><button type="button" className="wb-secondary" onClick={close}>← 返回展柜</button><span>{selected?.name}</span><button type="button" className="wb-secondary" disabled={surface !== 'ready'} onClick={() => stage.current?.resetView()}>重置角度</button></div><p className="workbench-inspection-help">拖动旋转 · 滚轮缩放 · 方向键与加减键也可操作 · Esc 返回</p></>}
       {surface !== 'ready' && <div className="workbench-cabinet-status" role="status"><p>{surfaceMessage}</p>
         {surface !== 'loading' && <button type="button" className="wb-secondary" onClick={retrySurface}>重试三维展示</button>}</div>}
     </div>

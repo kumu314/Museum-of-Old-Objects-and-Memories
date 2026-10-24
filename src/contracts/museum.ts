@@ -46,6 +46,11 @@ export const updateExhibitInputSchema = z.strictObject({
   expectedVersion: versionSchema,
 });
 
+export function missingDisplayPhoto(exhibit: Pick<CreateExhibitInput, 'modelKey' | 'photoAssetId'>): boolean {
+  return exhibit.modelKey === 'photo-plane' && exhibit.photoAssetId === null;
+}
+export const displayPhotoRequiredMessage = '实拍照片平面展示需要图片，请先上传并保存实拍照片，再确认和发布。';
+
 export const confirmExhibitInputSchema = z.strictObject({
   expectedVersion: versionSchema,
   confirmationNote: textSchema(1, 2_000),
@@ -86,8 +91,7 @@ export const publicExhibitSchema = z.strictObject({
   ...exhibitFields,
   id: idSchema,
   caption: textSchema(1, 120),
-}).refine((exhibit) => exhibit.modelKey !== 'photo-plane' || exhibit.photoAssetId !== null,
-  '实拍薄片展品必须关联展示图片。');
+}).refine((exhibit) => !missingDisplayPhoto(exhibit), { message: displayPhotoRequiredMessage, path: ['photoAssetId'] });
 
 export const publicMuseumSchema = z.strictObject({
   ...museumFields,

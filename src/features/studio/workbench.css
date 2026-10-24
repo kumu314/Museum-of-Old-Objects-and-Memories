@@ -95,14 +95,14 @@
 .workbench-cabinet { margin-bottom: 20px; }
 .workbench-cabinet-viewport { position: relative; height: clamp(220px,19vw,330px); min-width: 0; background: #14100c; border: 1px solid var(--wb-line); }
 .workbench-cabinet canvas { display: block; width: 100%; height: 100%; touch-action: pan-y; }
-.workbench-cabinet-status { position: absolute; inset: 0; display: grid; place-content: center; gap: 12px; padding: 24px; text-align: center; background: #14100cf2; font-size: 13px; }
+.workbench-cabinet-status { position: absolute; inset: 0; z-index: 1; display: grid; place-content: center; gap: 12px; padding: 24px; text-align: center; background: #14100cf2; font-size: 13px; }
 .workbench-slot-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 6px; margin: 10px 0; }
 .workbench-slot-grid button { min-width: 0; padding: 7px 5px; border: 1px solid var(--wb-line); color: var(--wb-muted); border-radius: 3px; background: transparent; font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
 .workbench-slot-grid button[aria-pressed=true] { border-color: var(--wb-brass); color: #ead3a6; background: #cfb4770c; }
 .workbench-slot-grid span { display: block; }
 .workbench-inspection { position: fixed; z-index: 100; inset: 0; height: 100dvh; border: 0; background: #17130f; padding: 70px 16px 65px; }
 .workbench-inspection canvas { touch-action: none; }
-.workbench-inspection-controls { position: absolute; top: 18px; left: 20px; right: 20px; display: flex; gap: 12px; align-items: center; justify-content: space-between; }
+.workbench-inspection-controls { position: absolute; top: 18px; left: 20px; right: 20px; z-index: 2; display: flex; gap: 12px; align-items: center; justify-content: space-between; }
 .workbench-inspection-help { position: absolute; bottom: 20px; left: 20px; right: 20px; color: var(--wb-muted); font-size: 12px; text-align: center; }
 @media (min-width:1750px) { .workbench-grid { max-width: 1900px; margin: 0 auto; } }
 @media (max-width:1050px) {

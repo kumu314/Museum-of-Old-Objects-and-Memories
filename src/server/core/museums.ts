@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { PoolClient } from 'pg';
-import { museumDraftSchema, museumSummarySchema, type CreateMuseumInput, type UpdateMuseumInput,
+import { displayPhotoRequiredMessage, missingDisplayPhoto, museumDraftSchema, museumSummarySchema, type CreateMuseumInput, type UpdateMuseumInput,
   type CreateExhibitInput, type UpdateExhibitInput, type ConfirmExhibitInput } from '../../contracts';
 import { withTransaction } from '../db/pool';
 import { assertVersion, dates, exhibitRecord, exhibitRecords, museumRecord, requireActor, validateAssets,
@@ -103,6 +103,7 @@ export function confirmExhibit(actorId: string, museumId: string, id: string, in
     await museumRecord(db, museumId, actorId, true);
     const exhibit = await exhibitRecord(db, museumId, id);
     assertVersion(exhibit.version, input.expectedVersion);
+    if (missingDisplayPhoto(exhibit)) invalid(displayPhotoRequiredMessage);
     if (exhibit.confirmedVersion === exhibit.version) return exhibit;
     if (!exhibit.caption.trim()) invalid('请先填写展签，再确认当前内容。');
     await db.query('UPDATE exhibits SET confirmed_version=version,confirmed_by=$1,confirmed_at=now(),confirmation_note=$2,updated_at=now() WHERE id=$3 AND museum_id=$4', [actorId, input.confirmationNote, id, museumId]);
