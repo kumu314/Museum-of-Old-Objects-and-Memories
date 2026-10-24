@@ -23,7 +23,9 @@ export function listMuseums(actorId: string, client?: PoolClient) {
     await requireActor(db, actorId);
     // 只看自己创建的展馆：工作台列表不能泄露他人展馆的存在、标题与更新时间。
     const result = await db.query<Record<string, unknown>>(`SELECT m.id,m.title,m.description,m.version,p.museum_version AS "publishedVersion",
-      m.share_enabled AS "shareEnabled",m.region_city AS "regionCity",m.discovery_listed AS "discoveryListed",m.created_at AS "createdAt",m.updated_at AS "updatedAt"
+      m.share_enabled AS "shareEnabled",m.access_mode AS "accessMode",m.access_epoch AS "accessEpoch",
+      m.region_city AS "regionCity",m.discovery_listed AS "discoveryListed",
+      m.created_at AS "createdAt",m.updated_at AS "updatedAt"
       FROM museums m LEFT JOIN published_snapshots p ON p.id=m.current_snapshot_id
       WHERE m.deleted_at IS NULL AND m.created_by=$1 ORDER BY m.updated_at DESC`, [actorId]);
     return result.rows.map((row) => museumSummarySchema.parse(dates(row)));
@@ -83,6 +85,9 @@ export function updateMuseum(actorId: string, id: string, input: UpdateMuseumInp
     // 一次保存就会把馆主选好的城市悄悄抹掉。
     const regionCity = input.regionCity === undefined ? current.regionCity : input.regionCity;
     const discoveryListed = input.discoveryListed ?? current.discoveryListed;
+    if (discoveryListed && !current.discoveryListed && current.accessMode !== 'discoverable') {
+      invalid('请先开启公开发现，再同意收录到地图和榜单。公开发现目前仅向登记的演示账号开放。');
+    }
     await db.query('UPDATE museums SET title=$1,description=$2,region_city=$3,discovery_listed=$4,version=version+1,updated_at=now() WHERE id=$5',
       [input.title, input.description, regionCity, discoveryListed, id]);
     return museumDraft(db, actorId, id);
@@ -92,7 +97,7 @@ export function removeMuseum(actorId: string, id: string, expectedVersion: numbe
   return inTransaction(async (db) => {
     await requireActor(db, actorId);
     assertVersion((await museumRecord(db, actorId, id, true)).version, expectedVersion);
-    await db.query('UPDATE museums SET deleted_at=now(),share_enabled=false,share_token_hash=NULL,version=version+1,updated_at=now() WHERE id=$1', [id]);
+    await db.query("UPDATE museums SET deleted_at=now(),access_mode='private',access_epoch=NULL,share_token_hash=NULL,version=version+1,updated_at=now() WHERE id=$1", [id]);
     return { id };
   }, client);
 }

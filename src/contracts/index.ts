@@ -5,3 +5,7 @@ export * from './museum';
 export * from './assets';
 export * from './session';
 export * from './model-generation';
+export * from './memoir';
+export * from './discovery';
+export * from './social';
+export * from './direction1-demo';

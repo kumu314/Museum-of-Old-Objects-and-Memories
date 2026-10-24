@@ -74,8 +74,12 @@ test('HTTP制作发布与分享撤销：会话、CAS、确认、快照和统一�
     const publication = await request(`${base}/publish`, 'POST', { expectedVersion: (await museum()).version });
     assert.equal(publication.status, 200);
     const published = publishResponseSchema.parse(await publication.json()).data;
-    assert.ok(published.token);
-    const token = published.token;
+    assert.equal(published.token, null);
+    assert.equal((await museum()).accessMode, 'private');
+    const opening = await request(`${base}/share`, 'POST', { expectedVersion: (await museum()).version });
+    assert.equal(opening.status, 200);
+    const { token } = shareLinkResponseSchema.parse(await opening.json()).data;
+    assert.equal((await museum()).accessMode, 'link_only');
     await expectError(await request(`/api/share/${token}`, 'GET', undefined, false), 401, 'UNAUTHORIZED');
     await expectError(await request('/api/share/invalid', 'GET', undefined, false), 401, 'UNAUTHORIZED');
     const share = await request(`/api/share/${token}`);

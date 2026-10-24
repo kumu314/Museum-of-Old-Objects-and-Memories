@@ -47,21 +47,31 @@ export function readProviderSettings(
   try {
     mtimeMs = statSync(path).mtimeMs;
   } catch (error) {
-    const isMissing = error instanceof Error && 'code' in error && (error.code === 'ENOENT' || error.code === 'ENOTDIR');
-    // Windows 把“父路径是文件”也报成 ENOENT：此时父路径存在但不是目录，
-    // 属于坏路径必须抛错；只有整条链都不存在才算未配置。
-    if (isMissing) {
-      const parent = resolve(path, '..');
-      let parentIsFile = false;
-      try { parentIsFile = statSync(parent).isFile(); } catch { parentIsFile = false; }
-      if (parentIsFile) {
-        throw new HttpError({ code: 'GENERATION_UNAVAILABLE', message: '通道配置路径无效：父路径是文件而不是目录。' });
-      }
-      settingsCache = { path, mtimeMs: 0, loadedAt: Date.now(), value: null };
-      return null;
+    if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) {
+      throw new HttpError({ code: 'GENERATION_UNAVAILABLE', message: '无法读取通道配置文件，请检查文件路径与权限。' });
     }
-    throw new HttpError({ code: 'GENERATION_UNAVAILABLE', message: '无法读取通道配置文件，请检查文件路径与权限。' });
+    // Windows 对非目录祖先也可能报 ENOENT；逐级找到首个存在的祖先，
+    // 只有它确为目录时才将缺失配置视为未配置。
+    let parent = resolve(path, '..');
+    for (;;) {
+      let info;
+      try { info = statSync(parent); }
+      catch (parentError) {
+        if (!(parentError instanceof Error && 'code' in parentError && parentError.code === 'ENOENT')) {
+          throw new HttpError({ code: 'GENERATION_UNAVAILABLE', message: '无法读取通道配置父路径，请检查路径与权限。' });
+        }
+        const ancestor = resolve(parent, '..');
+        if (ancestor === parent) throw new HttpError({ code: 'GENERATION_UNAVAILABLE', message: '通道配置根路径不存在。' });
+        parent = ancestor;
+        continue;
+      }
+      if (!info.isDirectory()) throw new HttpError({ code: 'GENERATION_UNAVAILABLE', message: '通道配置路径无效：祖先路径不是目录。' });
+      break;
+    }
+    settingsCache = { path, mtimeMs: 0, loadedAt: Date.now(), value: null };
+    return null;
   }
+
   const now = Date.now();
   if (settingsCache?.path === path && settingsCache.mtimeMs === mtimeMs && now - settingsCache.loadedAt < cacheTtlMs) {
     return settingsCache.value;

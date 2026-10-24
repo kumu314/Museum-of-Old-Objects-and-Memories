@@ -30,7 +30,8 @@ export const publishResultSchema = z.strictObject({
   museumId: idSchema,
   snapshotId: idSchema,
   version: versionSchema,
-  token: shareTokenSchema.nullable(),
+  // Publishing never opens access or issues a bearer token.
+  token: z.null(),
 });
 export const publishResponseSchema = successResponseSchema(publishResultSchema);
 export const shareLinkResponseSchema = successResponseSchema(z.strictObject({ token: shareTokenSchema }));

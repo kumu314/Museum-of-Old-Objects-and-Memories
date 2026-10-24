@@ -149,19 +149,18 @@ function MuseumEditor({ initial }: { initial: MuseumDraft }) {
     setAction('发布'); setError(null); setMessage(null);
     try {
       const result = await apiRequest(`${path}/publish`, publishResultSchema, jsonRequest('POST', { expectedVersion: museum.version }));
-      if (result.token) setShareUrl(`${window.location.origin}/share/${result.token}`);
-      setMessage(`已发布版本 v${result.version}。草稿后续修改不会直接改变本次发布内容。`);
+      setMessage(`已生成发布快照 v${result.version}。${museum.shareEnabled ? '已有参观入口现在展示此快照。' : '展馆仍为私密，可另行开启持链接访问。'}`);
       await refreshState();
     } catch (failure) { fail(failure); }
     finally { setAction(null); }
   }
   async function rotateShare() {
     if (busy || anyDirty || refreshRequired) return;
-    if (!window.confirm('更换链接后，旧链接的新请求将无法访问。确定更换吗？')) return;
+    if (!window.confirm(museum.shareEnabled ? '更换链接后，旧链接的新请求将无法访问。确定更换吗？' : '开启后，持有链接并登录有效账号的人可参观已发布快照中的展品、照片与原声。确定开启持链接访问吗？')) return;
     setAction('更换链接'); setError(null); setMessage(null);
     try {
       const result = await apiRequest(`${path}/share`, z.strictObject({ token: shareTokenSchema }), jsonRequest('POST', { expectedVersion: museum.version }));
-      setShareUrl(`${window.location.origin}/share/${result.token}`); setMessage('新链接已生成，旧链接已失效。');
+      setShareUrl(`${window.location.origin}/share/${result.token}`); setMessage(museum.shareEnabled ? '新链接已生成，旧链接已失效。' : '已开启持链接访问，请妥善选择分享对象。');
       await refreshState();
     } catch (failure) { fail(failure); }
     finally { setAction(null); }
@@ -196,7 +195,7 @@ function MuseumEditor({ initial }: { initial: MuseumDraft }) {
     <p className="wb-hint">发布整个展馆的已确认版本；原始讲述、AI 草稿及确认备注不公开。后续编辑不会改变本次快照。</p>
     {shareUrl && museum.shareEnabled && <div className="workbench-share-link"><Field label="当前参观链接"><input readOnly value={shareUrl} onFocus={(event) => event.target.select()} /></Field><div className="wb-actions"><button type="button" className="wb-secondary" onClick={copyShare}>复制链接</button><a className="wb-text-link" href={shareUrl} target="_blank" rel="noreferrer">打开参观页 ↗</a></div></div>}
     {museum.shareEnabled && !shareUrl && <p className="wb-hint">分享已启用。已有链接可继续使用；如未保留，可更换链接取得新的参观地址。</p>}
-    {museum.publishedVersion !== null && <div className="wb-actions"><button type="button" className="wb-text-link" disabled={busy || anyDirty || refreshRequired} onClick={rotateShare}>更换参观链接</button>{museum.shareEnabled && <button type="button" className="wb-text-link" disabled={busy || anyDirty || refreshRequired} onClick={stopSharing}>停止分享</button>}</div>}
+    {museum.publishedVersion !== null && <div className="wb-actions"><button type="button" className="wb-text-link" disabled={busy || anyDirty || refreshRequired} onClick={rotateShare}>{museum.shareEnabled ? '更换参观链接' : '开启持链接访问'}</button>{museum.shareEnabled && <button type="button" className="wb-text-link" disabled={busy || anyDirty || refreshRequired} onClick={stopSharing}>停止分享并设为私密</button>}</div>}
   </section>;
 
   function toolbar(controls: ReactNode) {
@@ -223,8 +222,10 @@ function MuseumEditor({ initial }: { initial: MuseumDraft }) {
             {henanCities.map((city) => <option key={city} value={city}>{city}</option>)}
           </select>
         </Field>
-        <label className="workbench-discovery-consent"><input type="checkbox" checked={discoveryListed} onChange={(event) => setDiscoveryListed(event.target.checked)} disabled={busy || refreshRequired} />我同意将已发布展馆的名称、所选城市与累计浏览次数收录到记忆地图和榜单，供所有登录用户查看。</label>
-        <p className="wb-hint">默认不收录。取消勾选并保存后退出地图和榜单，不会关闭现有参观链接。</p>
+        <label className="workbench-discovery-consent"><input type="checkbox" checked={discoveryListed} onChange={(event) => setDiscoveryListed(event.target.checked)} disabled={busy || refreshRequired || (museum.accessMode !== 'discoverable' && !museum.discoveryListed)} />我同意将已发布展馆的名称、所选城市与累计浏览次数收录到记忆地图和榜单，供所有登录用户查看。</label>
+        <p className="wb-hint">{museum.accessMode === 'discoverable'
+          ? '默认不收录。取消勾选并保存后退出地图和榜单，不会关闭现有参观链接。'
+          : '本馆未开启公开发现，不会进入地图和榜单。公开发现目前仅向登记的演示账号开放；已有收录标记可取消并保存，参观链接不受影响。'}</p>
         <Notice error={error} message={message} />
         <div className="wb-row"><span className="wb-hint" role="status">{action === '保存展馆' ? '正在保存…' : metadataDirty ? '有未保存修改' : '已保存'} · 再次发布后更新分享页</span><button className="wb-primary" disabled={busy || !metadataDirty || refreshRequired}>保存展馆资料</button></div>
       </form>

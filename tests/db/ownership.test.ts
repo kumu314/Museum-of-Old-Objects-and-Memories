@@ -99,8 +99,8 @@ test('归属隔离：发布、分享换链与停止分享只能由归属账号�
 
     await hidden(publishMuseum(stranger.id, mine.id, version, db));
     const published = await publishMuseum(owner.id, mine.id, version, db);
-    const token = published.token;
-    assert.ok(token);
+    assert.equal(published.token, null);
+    const { token } = await rotateShareToken(owner.id, mine.id, version, db);
 
     await hidden(rotateShareToken(stranger.id, mine.id, (await getMuseum(owner.id, mine.id, db)).version, db));
     await hidden(stopSharing(stranger.id, mine.id, (await getMuseum(owner.id, mine.id, db)).version, db));
