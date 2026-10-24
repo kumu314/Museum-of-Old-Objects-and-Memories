@@ -3,7 +3,12 @@ import { z } from 'zod';
 export const idSchema = z.uuid();
 export const versionSchema = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 export const timestampSchema = z.iso.datetime({ offset: true });
-export const slotIndexSchema = z.number().int().min(0).max(5);
+export const slotIndexSchema = z.number().int().min(0).max(2_147_483_647);
+export const slotsPerPage = 6;
+export function cabinetPage(slotIndex: number): number { return Math.floor(slotIndex / slotsPerPage); }
+export function cabinetPosition(slotIndex: number): string {
+  return `第 ${cabinetPage(slotIndex) + 1} 页 · 第 ${slotIndex % slotsPerPage + 1} 格`;
+}
 export const modelKeySchema = z.enum(['camera-01', 'cassette', 'ticket', 'photo-plane']);
 
 /** Count Unicode code points, so a supplementary character is not two words. */

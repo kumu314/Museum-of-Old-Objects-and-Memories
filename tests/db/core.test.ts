@@ -6,7 +6,7 @@ import type { CreateExhibitInput, ExhibitDraft, UpdateExhibitInput } from '../..
 import { migrate } from '../../src/server/db/migrate';
 import { getIsolatedTestDatabaseUrl } from '../../src/server/db/test-database';
 import { HttpError } from '../../src/server/http';
-import { createMuseum, getMuseum, listMuseums, updateMuseum, createExhibit, updateExhibit, removeExhibit, confirmExhibit,
+import { createMuseum, getMuseum, getOwnMuseum, listMuseums, removeMuseum, updateMuseum, createExhibit, updateExhibit, removeExhibit, confirmExhibit,
   publishMuseum, readShare, getShareAsset, stopSharing, rotateShareToken, getPrivateAsset } from '../../src/server/core';
 
 const pool = new Pool({ connectionString: getIsolatedTestDatabaseUrl(), max: 2 });
@@ -39,14 +39,14 @@ test('用户间隔离：非创建者读取、修改和列举他人展馆均不�
 });
 function exhibitInput(expectedMuseumVersion: number, slotIndex = 0): CreateExhibitInput {
   return { name: '复古相机', era: '年代待考', slotIndex, modelKey: 'camera-01', caption: '演示展品，不代表真实物主记录。',
-    photoAssetId: null, audioAssetId: null, approximation: '候选演示模型', sourceNotice: '仅作流程测试',
+    photoAssetId: null, audioAssetId: null, modelInput: { mode: 'single', imageAssetId: null }, approximation: '候选演示模型', sourceNotice: '仅作流程测试',
     rawStory: '内部原文不可公开', transcript: null, sourceSegments: [{ id: 'raw-1', text: '内部原文不可公开', source: 'rawStory' }], expectedMuseumVersion };
 }
 function editInput(exhibit: ExhibitDraft): UpdateExhibitInput {
   return { name: exhibit.name, era: exhibit.era, slotIndex: exhibit.slotIndex, modelKey: exhibit.modelKey,
     caption: exhibit.caption, photoAssetId: exhibit.photoAssetId, audioAssetId: exhibit.audioAssetId,
     approximation: exhibit.approximation, sourceNotice: exhibit.sourceNotice, rawStory: exhibit.rawStory,
-    transcript: exhibit.transcript, sourceSegments: exhibit.sourceSegments, expectedVersion: exhibit.version };
+    transcript: exhibit.transcript, sourceSegments: exhibit.sourceSegments, modelInput: exhibit.modelInput, expectedVersion: exhibit.version };
 }
 async function asset(db: PoolClient, actorId: string, museumId: string, kind: 'image' | 'audio' = 'image') {
   const id = randomUUID();
@@ -59,6 +59,66 @@ async function rejected(action: Promise<unknown>, code: string) {
   await assert.rejects(action, (error: unknown) => error instanceof HttpError && error.failure.code === code);
 }
 async function currentVersion(db: PoolClient, actor: string, museum: string) { return (await getMuseum(actor, museum, db)).version; }
+
+test('每个账号只保留一座有效展馆；重复创建不覆盖资料，删除后可重新开始', async () => {
+  await fixture(async (db, actor) => {
+    assert.equal(await getOwnMuseum(actor, db), null);
+    const museum = await createMuseum(actor, { title: '唯一展馆', description: '整座展馆的概括' }, db);
+    assert.equal((await getOwnMuseum(actor, db))?.exhibits.length, 0);
+    await rejected(createMuseum(actor, { title: '重复创建', description: '' }, db), 'MUSEUM_EXISTS');
+    assert.equal((await getOwnMuseum(actor, db))?.title, museum.title);
+    await removeMuseum(actor, museum.id, museum.version, db);
+    assert.equal(await getOwnMuseum(actor, db), null);
+    assert.notEqual((await createMuseum(actor, { title: '重新开始', description: '' }, db)).id, museum.id);
+  });
+});
+
+test('跨页收录与发布包含全部展品，未确认清单超过六项，简介更新不改变旧快照', async () => {
+  await fixture(async (db, actor) => {
+    const museum = await createMuseum(actor, { title: '多页展馆', description: '旧的全馆简介' }, db);
+    for (let slot = 0; slot < 8; slot++) await createExhibit(actor, museum.id, { ...exhibitInput(await currentVersion(db, actor, museum.id), slot), name: `旧物 ${slot + 1}`, rawStory: `这只属于旧物 ${slot + 1}` }, db);
+    const draft = await getOwnMuseum(actor, db);
+    assert.equal(draft?.exhibits.length, 8);
+    assert.equal(draft?.exhibits[6]?.rawStory, '这只属于旧物 7');
+    assert.ok(draft);
+    await assert.rejects(publishMuseum(actor, museum.id, draft.version, db), (error: unknown) => {
+      assert.ok(error instanceof HttpError && error.failure.code === 'NOT_CONFIRMED');
+      assert.equal(error.failure.details.unconfirmedExhibitIds.length, 8);
+      return true;
+    });
+    for (const exhibit of draft.exhibits) await confirmExhibit(actor, museum.id, exhibit.id, { expectedVersion: exhibit.version, confirmationNote: '核对本件展品。' }, db);
+    const published = await publishMuseum(actor, museum.id, await currentVersion(db, actor, museum.id), db);
+    assert.ok(published.token);
+    const before = await readShare(actor, published.token, db);
+    assert.equal(before.exhibits.length, 8);
+    assert.equal(before.exhibits[7]?.slotIndex, 7);
+    const updated = await updateMuseum(actor, museum.id, { title: museum.title, description: '新的全馆简介', expectedVersion: await currentVersion(db, actor, museum.id) }, db);
+    assert.equal(updated.description, '新的全馆简介');
+    assert.deepEqual(await readShare(actor, published.token, db), before);
+    await publishMuseum(actor, museum.id, updated.version, db);
+    assert.equal((await readShare(actor, published.token, db)).description, '新的全馆简介');
+    assert.equal((await readShare(actor, published.token, db)).exhibits[0]?.caption, exhibitInput(1).caption);
+  });
+});
+
+test('建模照片准备持久保存并校验归属和类型，分享不泄露未选为展示图的建模输入', async () => {
+  await fixture(async (db, actor) => {
+    const museum = await createMuseum(actor, { title: '建模准备', description: '' }, db);
+    const views = { front: await asset(db, actor, museum.id), back: await asset(db, actor, museum.id), left: await asset(db, actor, museum.id), right: await asset(db, actor, museum.id) };
+    const input = { ...exhibitInput(museum.version), modelInput: { mode: 'multiview' as const, views } };
+    const exhibit = await createExhibit(actor, museum.id, input, db);
+    assert.deepEqual((await getMuseum(actor, museum.id, db)).exhibits[0]?.modelInput, input.modelInput);
+    const wrongKind = await asset(db, actor, museum.id, 'audio');
+    await rejected(updateExhibit(actor, museum.id, exhibit.id, { ...editInput(exhibit), modelInput: { mode: 'single', imageAssetId: wrongKind } }, db), 'NOT_FOUND');
+    await rejected(updateExhibit(actor, museum.id, exhibit.id, { ...editInput(exhibit), modelInput: { mode: 'single', imageAssetId: randomUUID() } }, db), 'NOT_FOUND');
+    await confirmExhibit(actor, museum.id, exhibit.id, { expectedVersion: exhibit.version, confirmationNote: '确认演示展示。' }, db);
+    const published = await publishMuseum(actor, museum.id, await currentVersion(db, actor, museum.id), db);
+    assert.ok(published.token);
+    assert.equal('modelInput' in ((await readShare(actor, published.token, db)).exhibits[0] ?? {}), false);
+    for (const id of Object.values(views)) await rejected(getShareAsset(actor, published.token, id, db), 'SHARE_NOT_FOUND');
+    assert.equal((await getPrivateAsset(actor, museum.id, views.front, db)).asset.id, views.front);
+  });
+});
 
 test('缺图照片平面可保存草稿，确认和发布明确拒绝；补图后仍须重新确认', async () => {
   await fixture(async (db, actor) => {
@@ -95,6 +155,18 @@ test('缺图照片平面可保存草稿，确认和发布明确拒绝；补图�
     const published = await publishMuseum(actor, museum.id, await currentVersion(db, actor, museum.id), db);
     assert.ok(published.token);
     assert.equal((await readShare(actor, published.token, db)).exhibits[0]?.photoAssetId, image);
+  });
+});
+
+test('第二页缺图时明确指出页号和格位，不提示不存在的第七格', async () => {
+  await fixture(async (db, actor) => {
+    const museum = await createMuseum(actor, { title: '第二页缺图', description: '' }, db);
+    await createExhibit(actor, museum.id, { ...exhibitInput(museum.version, 6), modelKey: 'photo-plane' }, db);
+    await assert.rejects(publishMuseum(actor, museum.id, await currentVersion(db, actor, museum.id), db), (error: unknown) => {
+      assert.ok(error instanceof HttpError && error.failure.code === 'VALIDATION_ERROR');
+      assert.match(error.message, /第 2 页 · 第 1 格「复古相机」.*上传.*保存.*实拍照片/);
+      return true;
+    });
   });
 });
 
@@ -154,8 +226,10 @@ test('旧版本写入不覆盖；跨馆或错误类型素材被拒绝且不改�
     assert.equal((await getMuseum(actor, museum.id, db)).exhibits[0]?.name, updated.name);
     await rejected(updateMuseum(actor, museum.id, { title: '过期馆名', description: '', expectedVersion: museum.version }, db), 'VERSION_CONFLICT');
     await rejected(publishMuseum(actor, museum.id, museum.version, db), 'VERSION_CONFLICT');
-    const another = await createMuseum(actor, { title: '另一馆', description: '' }, db);
-    const foreignImage = await asset(db, actor, another.id);
+    const outsider = randomUUID();
+    await db.query('INSERT INTO team_members(id,username,password_hash) VALUES($1,$2,$3)', [outsider, `asset-owner-${outsider}`, 'test-only']);
+    const another = await createMuseum(outsider, { title: '另一馆', description: '' }, db);
+    const foreignImage = await asset(db, outsider, another.id);
     const wrongKind = await asset(db, actor, museum.id, 'audio');
     const version = await currentVersion(db, actor, museum.id);
     await rejected(updateExhibit(actor, museum.id, updated.id, { ...editInput(updated), photoAssetId: foreignImage }, db), 'NOT_FOUND');

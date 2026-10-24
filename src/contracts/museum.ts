@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { sourceSegmentsSchema } from './ai';
+import { modelInputSchema } from './model-generation';
 import { successResponseSchema } from './errors';
 import { captionSchema, eraSchema, exhibitNameSchema, idSchema, modelKeySchema,
   slotIndexSchema, textSchema, timestampSchema, versionSchema } from './primitives';
@@ -23,6 +24,7 @@ const exhibitFields = {
 
 const draftFields = {
   ...exhibitFields,
+  modelInput: modelInputSchema,
   rawStory: z.string().refine((value) => Array.from(value).length <= 12_000, '原始讲述不能超过 12000 字。'),
   transcript: z.string().refine((value) => Array.from(value).length <= 12_000, '录音整理文本不能超过 12000 字。').nullable(),
   sourceSegments: sourceSegmentsSchema,
@@ -82,7 +84,7 @@ export const museumSummarySchema = z.strictObject({
 });
 
 export const museumDraftSchema = museumSummarySchema.extend({
-  exhibits: z.array(exhibitDraftSchema).max(6)
+  exhibits: z.array(exhibitDraftSchema)
     .refine((exhibits) => new Set(exhibits.map(({ slotIndex }) => slotIndex)).size === exhibits.length,
       '同一柜格不能放置多件展品。'),
 });
@@ -98,7 +100,7 @@ export const publicMuseumSchema = z.strictObject({
   id: idSchema,
   version: versionSchema,
   publishedAt: timestampSchema,
-  exhibits: z.array(publicExhibitSchema).min(1).max(6)
+  exhibits: z.array(publicExhibitSchema).min(1)
     .refine((exhibits) => new Set(exhibits.map(({ slotIndex }) => slotIndex)).size === exhibits.length,
       '同一柜格不能放置多件展品。')
     .refine((exhibits) => new Set(exhibits.map(({ id }) => id)).size === exhibits.length,
@@ -106,8 +108,8 @@ export const publicMuseumSchema = z.strictObject({
 });
 
 /** Explicit projection prevents internal text or future draft fields leaking. */
-export function toPublicExhibit(exhibit: ExhibitDraft): PublicExhibit {
-  return publicExhibitSchema.parse({
+function displayExhibit(exhibit: ExhibitDraft): PublicExhibit {
+  return {
     id: exhibit.id,
     name: exhibit.name,
     era: exhibit.era,
@@ -118,7 +120,17 @@ export function toPublicExhibit(exhibit: ExhibitDraft): PublicExhibit {
     audioAssetId: exhibit.audioAssetId,
     approximation: exhibit.approximation,
     sourceNotice: exhibit.sourceNotice,
-  });
+  };
+}
+export function toPublicExhibit(exhibit: ExhibitDraft): PublicExhibit {
+  return publicExhibitSchema.parse(displayExhibit(exhibit));
+}
+
+// Owner previews allow incomplete captions/photos but serialize the same narrow
+// set of presentation fields, never stories, confirmation notes or model inputs.
+export type MuseumDisplayData = Pick<PublicMuseum, 'id' | 'title' | 'description' | 'version' | 'exhibits'>;
+export function toMuseumDisplay(museum: MuseumDraft): MuseumDisplayData {
+  return { id: museum.id, title: museum.title, description: museum.description, version: museum.version, exhibits: museum.exhibits.map(displayExhibit) };
 }
 
 export const museumListResponseSchema = successResponseSchema(z.array(museumSummarySchema));

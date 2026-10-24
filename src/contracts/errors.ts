@@ -3,7 +3,7 @@ import { idSchema, textSchema } from './primitives';
 
 export const errorCodeSchema = z.enum([
   'VALIDATION_ERROR', 'UNAUTHORIZED', 'FORBIDDEN', 'NOT_FOUND', 'SHARE_NOT_FOUND',
-  'VERSION_CONFLICT', 'NOT_CONFIRMED', 'PAYLOAD_TOO_LARGE', 'UNSUPPORTED_MEDIA_TYPE',
+  'VERSION_CONFLICT', 'MUSEUM_EXISTS', 'NOT_CONFIRMED', 'PAYLOAD_TOO_LARGE', 'UNSUPPORTED_MEDIA_TYPE',
   'AI_UNAVAILABLE', 'AI_TIMEOUT', 'INTERNAL_ERROR',
 ]);
 export type ErrorCode = z.infer<typeof errorCodeSchema>;
@@ -15,6 +15,7 @@ export const errorHttpStatus = {
   NOT_FOUND: 404,
   SHARE_NOT_FOUND: 404,
   VERSION_CONFLICT: 409,
+  MUSEUM_EXISTS: 409,
   NOT_CONFIRMED: 409,
   PAYLOAD_TOO_LARGE: 413,
   UNSUPPORTED_MEDIA_TYPE: 415,
@@ -30,7 +31,7 @@ const commonFields = {
   requestId: textSchema(1, 128),
 };
 
-export const unconfirmedExhibitIdsSchema = z.array(idSchema).min(1).max(6)
+export const unconfirmedExhibitIdsSchema = z.array(idSchema).min(1)
   .refine((ids) => new Set(ids).size === ids.length, '未确认展品 ID 不得重复。');
 
 export const apiErrorSchema = z.discriminatedUnion('code', [

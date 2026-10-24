@@ -33,6 +33,9 @@
 .catalog strong, .catalog small { display: block; overflow-wrap: anywhere; }
 .catalog strong { font-size: 14px; font-weight: 400; }
 .catalog small { margin-top: 5px; color: #a99a82; font-size: 11px; }
+.pagination { flex: 0 0 auto; display: flex; align-items: center; justify-content: center; gap: 16px; margin-top: 8px; color: #c8b69e; font-size: 13px; }
+.pagination button { min-height: 44px; }
+.pagination button:disabled { cursor: default; }
 .footer { flex: 0 0 auto; text-align: center; padding-top: 25px; color: #97856c; font-size: 11px; }
 .unavailable { max-width: 640px; margin: 0 auto; padding: 90px 24px; text-align: center; line-height: 2; }
 .unavailable h1 { font-size: 26px; font-weight: 400; }

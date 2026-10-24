@@ -48,7 +48,7 @@ async function fixture(t: TestContext) {
     assert.equal((await request('/api/auth/logout', cookie, 'POST')).status, 200);
   });
   const fields: CreateExhibitInput = { name: '回归测试旧物', era: '年代待考', slotIndex: 0, modelKey: 'photo-plane',
-    caption: '这是供登录与缺图流程验收的展签。', photoAssetId: null, audioAssetId: null, approximation: '合成验收素材。',
+    caption: '这是供登录与缺图流程验收的展签。', photoAssetId: null, audioAssetId: null, modelInput: { mode: 'single', imageAssetId: null }, approximation: '合成验收素材。',
     sourceNotice: '非真实用户素材。', rawStory: '不向参观者展示的原始讲述。', transcript: null, sourceSegments: [], expectedMuseumVersion: museum.version };
   return { cookie, path, current, fields };
 }
