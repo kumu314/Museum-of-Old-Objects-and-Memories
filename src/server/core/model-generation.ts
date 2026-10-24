@@ -301,3 +301,21 @@ async function advanceJob(actorId: string, museumId: string, exhibitId: string, 
     return rowToJob(snapshot.row, snapshot.stats);
   }
 }
+
+/** 刷新/重新进入页面时恢复该展品的最新任务（无任务返回 null），并推进一次轮询。 */
+export async function getLatestModelGenerationJob(
+  actorId: string, museumId: string, exhibitId: string,
+  pool: Pool = getPool(),
+): Promise<ModelGenerationJob | null> {
+  const latest = await withTransaction(async (db) => {
+    await requireActor(db, actorId);
+    await museumRecord(db, actorId, museumId);
+    await exhibitRecord(db, museumId, exhibitId);
+    const result = await db.query<{ id: string }>(
+      `SELECT id FROM model_generation_jobs WHERE exhibit_id=$1 AND museum_id=$2 ORDER BY created_at DESC LIMIT 1`,
+      [exhibitId, museumId]);
+    return result.rows[0]?.id ?? null;
+  }, pool);
+  if (latest === null) return null;
+  return getModelGenerationJob(actorId, museumId, exhibitId, latest, pool);
+}

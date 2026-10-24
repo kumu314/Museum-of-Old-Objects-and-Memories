@@ -30,7 +30,7 @@ export function modelInputAssetIds(input: ModelInput): string[] {
 // Reserved paths. single/job/model-assets 已接入；multiview 仍保留待实现。
 export function modelGenerationPaths(museumId: string, exhibitId: string) {
   const base = `/api/museums/${encodeURIComponent(museumId)}/exhibits/${encodeURIComponent(exhibitId)}/model`;
-  return { single: `${base}/single`, multiview: `${base}/multiview`, job: (jobId: string) => `${base}/jobs/${encodeURIComponent(jobId)}` };
+  return { single: `${base}/single`, multiview: `${base}/multiview`, job: (jobId: string) => `${base}/jobs/${encodeURIComponent(jobId)}`, latest: `${base}/latest` };
 }
 
 export function modelAssetPath(museumId: string, assetId: string) {

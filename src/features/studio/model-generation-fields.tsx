@@ -18,12 +18,32 @@ export function ModelGenerationFields({ museumId, exhibitId, exhibitVersion, dir
 }) {
   const assetPath = `/api/museums/${encodeURIComponent(museumId)}/assets`;
   const [job, setJob] = useState<ModelGenerationJob | null>(null);
+  const [pollError, setPollError] = useState<string | null>(null);
   const jobRef = useRef<ModelGenerationJob | null>(null);
-  jobRef.current = job;
+  // ref 在 effect 内同步，避免渲染期间写 ref（React 并发渲染下不安全）。
+  useEffect(() => { jobRef.current = job; }, [job]);
   const active = job !== null && (job.status === 'SUBMITTING' || job.status === 'WAIT' || job.status === 'RUN');
   const terminal = job?.status === 'FAIL' || job?.status === 'DONE';
 
-  // 轮询任务状态；终态（FAIL/DONE）后停止。切换展品时由 resetKey 重建组件。
+  // 进入或刷新页面时恢复该展品的最新任务，避免“任务在跑但界面不知道”。
+  useEffect(() => {
+    if (exhibitId === null) return;
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        const latest = await apiRequest(modelGenerationPaths(museumId, exhibitId).latest,
+          modelGenerationJobSchema.nullable(), { signal: controller.signal });
+        if (latest !== null && !controller.signal.aborted) setJob(latest);
+      } catch (error) {
+        if (!controller.signal.aborted) onError(describeFailure(error));
+      }
+    })();
+    return () => controller.abort();
+    // 只在展品变化时恢复；轮询结果不回写触发重复请求。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [museumId, exhibitId]);
+
+  // 轮询任务状态；终态（FAIL/DONE）后停止。瞬时错误只提示，不把任务判死。
   useEffect(() => {
     const current = jobRef.current;
     if (!current || terminal) return;
@@ -34,10 +54,10 @@ export function ModelGenerationFields({ museumId, exhibitId, exhibitVersion, dir
           const next = await apiRequest(modelGenerationPaths(museumId, current.exhibitId).job(current.id),
             modelGenerationJobSchema, { signal: controller.signal });
           setJob(next);
+          setPollError(null);
         } catch (error) {
           if (controller.signal.aborted) return;
-          setJob((previous) => previous === null ? previous
-            : { ...previous, status: 'FAIL', errorMessage: describeFailure(error) });
+          setPollError(`状态刷新失败，正在重试：${describeFailure(error)}`);
         }
       })();
     }, 3_000);
@@ -102,6 +122,7 @@ export function ModelGenerationFields({ museumId, exhibitId, exhibitVersion, dir
       ? <button type="button" className="wb-secondary" disabled>四视图生成 · 暂未支持</button>
       : <button type="button" className="wb-secondary" disabled={!canGenerate} onClick={() => { void generate(); }}>{active && job ? STATUS_LABELS[job.status] : job?.status === 'FAIL' ? '重新生成 3D 模型' : '生成 3D 模型'}</button>}
     {!active && generateBlockReason && <p className="wb-hint">{generateBlockReason}</p>}
+    {pollError && <p role="status" className="wb-hint">{pollError}</p>}
     {statusText && <p role="status">{statusText}{job?.status === 'DONE' && job.modelAssetId && <> · <a href={modelAssetPath(museumId, job.modelAssetId)} download={`model-${job.id}.glb`}>下载 GLB</a></>}</p>}
     {job?.status === 'DONE' && job.stats && <p>结果规模：{job.stats.meshCount} 网格 / {job.stats.materialCount} 材质 / {Math.round(job.stats.byteLength / 1024)} KB。入柜采纳与发布接入将在后续版本开放。</p>}
   </section>;
