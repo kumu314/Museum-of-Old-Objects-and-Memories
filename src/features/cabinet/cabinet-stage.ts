@@ -1,6 +1,6 @@
 import {
-  ACESFilmicToneMapping, AmbientLight, BufferGeometry, DirectionalLight,
-  BoxGeometry, CanvasTexture, Group, Line, LineBasicMaterial, Mesh, MeshBasicMaterial, PerspectiveCamera, Plane, PlaneGeometry,
+  ACESFilmicToneMapping, AmbientLight, BufferGeometry, Color, DirectionalLight,
+  BoxGeometry, CanvasTexture, Group, Line, LineSegments, LineBasicMaterial, Mesh, MeshBasicMaterial, PerspectiveCamera, Plane, PlaneGeometry,
   SpotLight, Quaternion, Raycaster, RepeatWrapping, Scene,
   SRGBColorSpace, Texture, Vector2, Vector3, WebGLRenderer, MeshPhysicalMaterial, MeshStandardMaterial,
   type WebGLRenderTarget,
@@ -38,6 +38,7 @@ interface StageOptions {
   readonly onInspectionLayout?: (centerX: number, guideTop: number) => void;
   readonly onSlotDrop?: (id: string, targetSlot: number) => void;
   readonly onRenderStats?: (stats: StageRenderStats) => void;
+  readonly homePresentation?: boolean;
   readonly onSurfaceStatus: (status: SurfaceStatus) => void;
   readonly inspectionInset: () => number;
   readonly onAssetStatus: (id: string, status: AssetStatus) => void;
@@ -97,7 +98,7 @@ export function mountCabinetStage(canvas: HTMLCanvasElement, items: readonly Cab
   scene.add(buildCabinetBody({ wood: woodMaterial, interior: innerMaterial }, new Map(items.map((item) => {
     const text = item.plaqueText ?? (item.modelKey === 'glb' ? '旧物模型' : item.modelKey === 'photo-plane' ? '实拍展品' : `${modelManifest[item.modelKey].displayName} · ${modelManifest[item.modelKey].eraLabel}`);
     return [item.slot, text];
-  }))));
+  })), options.homePresentation));
   scene.add(createGallerySurroundings());
   const backdropShade = new Mesh(new PlaneGeometry(40, 24), new MeshBasicMaterial({ color: '#080604', transparent: true, opacity: 0, depthWrite: false }));
   backdropShade.position.z = 2;
@@ -173,13 +174,16 @@ export function mountCabinetStage(canvas: HTMLCanvasElement, items: readonly Cab
   const slotIntersection = new Vector3();
   const originalCursor = canvas.style.cursor;
   let hoveredSlot: number | null = null;
+  let selectedSlot: number | null = null;
   function namedMaterial(name: string) {
     const node = scene.getObjectByName(name);
     return node instanceof Mesh && node.material instanceof MeshStandardMaterial ? node.material : null;
   }
+  const emptySlotHoverColor = new Color('#F3ECE1');
   const hoverSurfaces = Array.from({ length: 6 }, (_, slot) => ({
     slot, amount: 0, light: slotLights.get(slot),
     plaque: namedMaterial(`cabinet-plaque:${slot}`),
+    plus: scene.getObjectByName(`home-empty-plus:${slot}`),
   }));
 
   function notifySurface(status: SurfaceStatus) { surfaceStatus = status; options.onSurfaceStatus(status); }
@@ -202,7 +206,7 @@ export function mountCabinetStage(canvas: HTMLCanvasElement, items: readonly Cab
     const active = state.phase === 'focusing' || state.phase === 'inspecting';
     const rect = canvas.getBoundingClientRect();
     const inset = options.inspectionInset();
-    const overviewDistance = 0.82 + Math.max(3.05 / 0.99, CABINET_WIDTH / (2 * 0.88 * Math.max(camera.aspect, 0.1))) / Math.tan(camera.fov * Math.PI / 360);
+    const overviewDistance = 0.82 + Math.max(3.05 / 0.99, CABINET_WIDTH / (2 * (options.homePresentation ? 0.98 : 0.88) * Math.max(camera.aspect, 0.1))) / Math.tan(camera.fov * Math.PI / 360);
     const cameraDistance = active ? overviewDistance * .98 : overviewDistance;
     const focusGap = cameraDistance - 4.3;
     const overviewHeight = 0.50;
@@ -222,10 +226,14 @@ export function mountCabinetStage(canvas: HTMLCanvasElement, items: readonly Cab
     inspectionShadow.visible = inspectionShadow.material.opacity > .001;
     let moving = camera.position.distanceTo(cameraTarget) > 0.001 || Math.abs(backdropShade.material.opacity - (active ? 0.56 : 0)) > 0.001 || Math.abs(inspectionShadow.material.opacity - (active ? .7 : 0)) > .001;
     for (const surface of hoverSurfaces) {
-      const target = state.phase === 'overview' && hoveredSlot === surface.slot ? 1 : 0;
+      const target = state.phase === 'overview' && (hoveredSlot === surface.slot || selectedSlot === surface.slot) ? 1 : 0;
       surface.amount += (target - surface.amount) * alpha;
       if (Math.abs(surface.amount - target) < 0.001) surface.amount = target;
       else moving = true;
+      if (surface.plus instanceof LineSegments && surface.plus.material instanceof LineBasicMaterial) {
+        surface.plus.material.color.set('#C8A870').lerp(emptySlotHoverColor, surface.amount);
+        surface.plus.material.opacity = 0.6 + surface.amount * 0.4;
+      }
       const highlight = 1 + surface.amount * 0.15;
       if (surface.light !== undefined) surface.light.intensity = 17 * highlight;
       if (surface.plaque !== null) {
@@ -606,6 +614,11 @@ export function mountCabinetStage(canvas: HTMLCanvasElement, items: readonly Cab
     zoom = Math.max(0.75, Math.min(1.45, zoom * factor)); invalidate();
   }
   function onWheel(event: WheelEvent) { if (controller.getSnapshot().phase !== 'inspecting') return; event.preventDefault(); zoomBy(Math.exp(Math.max(-1, Math.min(1, -event.deltaY * 0.001)))); }
+  function rotateBy(radians: number) {
+    if (!Number.isFinite(radians)) throw new RangeError('旋转角度必须为有限数');
+    if (controller.getSnapshot().phase !== 'inspecting') return;
+    yaw += radians; invalidate();
+  }
   function resetView() { yaw = 0; pitch = 0; zoom = 1; invalidate(); }
   function onDoubleClick() { if (controller.getSnapshot().phase === 'inspecting') resetView(); }
   function onKeyDown(event: KeyboardEvent) {
@@ -652,11 +665,18 @@ export function mountCabinetStage(canvas: HTMLCanvasElement, items: readonly Cab
   window.addEventListener('pointermove', onOverviewPointerMove); window.addEventListener('blur', onViewportLeave); document.addEventListener('mouseleave', onViewportLeave);
   window.addEventListener('keydown', onWindowKeyDown); document.addEventListener('pointerdown', onDocumentPointerDown);
   reducedMotion.addEventListener('change', onMotionPreferenceChange);
-  camera.position.set(0, 0.4, 16); initializeRenderer();
+  camera.position.set(0, 0.4, 16);
+  // 先发出资源请求，让网络下载与同步的 WebGL / 环境贴图初始化重叠。
   for (const display of displayModels) void loadModel(display);
   void loadWoodMaterial();
+  initializeRenderer();
   return {
     zoomBy,
+    rotateBy,
+    setSelectedSlot(slot: number | null) {
+      if (slot !== null) slotRestPosition(slot);
+      selectedSlot = slot; invalidate();
+    },
     getDiagnostics() {
       return { destroyed, surface: surfaceStatus, zoom, yaw, pitch, pendingFrame: frame !== 0,
         capability: renderer === null ? failureReason : 'supported',

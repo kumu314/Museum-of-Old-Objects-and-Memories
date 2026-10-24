@@ -1,9 +1,10 @@
 'use client';
 
+import { Brand } from '../navigation/brand';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
-import Link from 'next/link';
+import Link from '../navigation/navigation-link';
 import { z } from 'zod';
 import type { MuseumDisplayData } from '../../contracts/museum';
 import { apiRequest, describeFailure } from '../studio/api';
@@ -31,7 +32,7 @@ export function MuseumDisplay(props: DisplayProps) {
     finally { setBusy(false); }
   }
   return <main className="memory-workbench museum-visit">
-    <header className="workbench-brandbar"><Link href="/" className="workbench-brand"><span className="workbench-seal" aria-hidden="true">拾</span><strong>拾物馆</strong></Link>
+    <header className="workbench-brandbar"><Link href="/" className="workbench-brand"><Brand /></Link>
       {owner ? <div className="workbench-brand-actions"><span className="wb-badge">仅本人预览 · 当前草稿</span><Link className="wb-primary" href={`/studio/${museum.id}`}>进入工作台</Link><button type="button" className="wb-text-link" disabled={busy} onClick={() => router.refresh()}>重新读取</button><button type="button" className="wb-text-link" disabled={busy} onClick={logout}>退出登录</button></div>
         : <Link className="wb-text-link" href="/studio">我的展馆</Link>}</header>
     <Notice error={error} />

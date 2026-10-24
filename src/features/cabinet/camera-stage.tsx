@@ -1,5 +1,7 @@
 'use client';
 
+import { OrnateFrame } from '../ornaments/ornate-frame';
+import { AstrolabeRing } from '../ornaments/astrolabe-ring';
 import { useEffect, useRef, useState } from 'react';
 import {
   ACESFilmicToneMapping, AmbientLight, Box3, DirectionalLight, Group, PerspectiveCamera,
@@ -203,28 +205,31 @@ export function CameraStage() {
     </div>;
   }
 
-  return <div className="grid grid-cols-[1fr_auto] items-stretch gap-4">
-    <div className="relative grid place-items-center aspect-[1.06/1]"
+  return <OrnateFrame className="home-inspection-frame grid min-w-0 grid-cols-[minmax(0,1fr)_48px] sm:grid-cols-[minmax(0,1fr)_64px] items-center gap-2 pr-4 sm:gap-4">
+    <div className="relative isolate grid min-w-0 place-items-center aspect-[1.06/1]"
       style={{
-        background: 'radial-gradient(85% 62% at 50% 16%, rgba(225,197,142,.18), transparent 60%), radial-gradient(120% 60% at 50% 112%, rgba(58,45,26,.45), transparent 60%), linear-gradient(180deg, #1D160F 0%, #140F0A 100%)',
-        maskImage: 'radial-gradient(120% 118% at 50% 46%, black 58%, transparent 98%)',
-        WebkitMaskImage: 'radial-gradient(120% 118% at 50% 46%, black 58%, transparent 98%)',
+        background: 'radial-gradient(circle at 50% 55%, rgba(180,135,80,0.16) 0%, transparent 70%)',
       }}>
-      <canvas ref={canvasRef} className="block h-full w-full cursor-grab active:cursor-grabbing" aria-label="复古相机三维检视：拖拽旋转，滚轮缩放，点击空白处或按 Esc 返回初始视角" />
-      <span className="pointer-events-none absolute left-[7%] top-[9%] -rotate-[4deg] font-serif text-[15px] tracking-[.16em]" aria-hidden="true">360° 检视</span>
-      <span className="pointer-events-none absolute bottom-[13%] right-[9%] font-serif text-[17px] tracking-[.1em] text-[#C8A56B]" aria-hidden="true">360°</span>
-      <p className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 whitespace-nowrap text-xs text-[#7A6C5B]">拖拽旋转 · 滚轮缩放 · 点击空白处返回初始视角</p>
+      <div aria-hidden="true" className="pointer-events-none absolute left-[16%] top-[65%] h-[12%] w-[68%] rounded-[50%] border-t border-[#806044]/60 shadow-[0_18px_22px_-8px_rgba(0,0,0,.9),inset_0_-10px_10px_rgba(0,0,0,.65)]"
+        style={{ backgroundImage: `linear-gradient(rgba(32,18,10,.35), rgba(23,13,8,.7)), url(${new URL('./assets/walnut-color.jpg', import.meta.url).href})`, backgroundSize: 'cover' }} />
+      <div aria-hidden="true" className="pointer-events-none absolute left-[28%] top-[64%] h-[6%] w-[44%] rounded-[50%] bg-black/70 blur-sm" />
+      <AstrolabeRing />
+      <canvas ref={canvasRef} className="relative block min-w-0 h-full w-full cursor-grab active:cursor-grabbing" aria-label="复古相机三维检视：拖拽旋转，滚轮缩放，点击空白处或按 Esc 返回初始视角" />
+
     </div>
-    <div className="grid justify-items-center gap-3" role="group" aria-label="相机预设角度">
-      <span className="mb-1 text-[10.5px] tracking-[.26em] text-[#7A6C5B] [writing-mode:vertical-rl]">A CLOSER LOOK AT MEMORIES</span>
+    <div className="grid w-full min-w-0 grid-cols-1 justify-items-center gap-3" role="group" aria-label="相机预设角度">
+      <span className="mb-1 justify-self-end whitespace-nowrap text-right text-[10px] tracking-widest text-[#7A6C5B]">A CLOSER LOOK<br />AT MEMORIES<i className="ml-auto mt-2 block h-px w-6 bg-[#C8A870]/70" aria-hidden="true" /></span>
       {PRESETS.map((preset, index) => (
         <button key={preset.label} type="button" aria-pressed={index === active} aria-label={preset.label}
           onClick={() => callPreset(index)}
-          className={`h-16 w-16 overflow-hidden rounded-lg border transition ${index === active ? 'border-[#C8A56B] opacity-100 shadow-[0_0_0_1px_#C8A56B,0_10px_22px_-12px_rgba(200,165,107,.75)]' : 'border-[#3A2D20] opacity-55 hover:opacity-90'}`}>
-          <img src={`https://images.unsplash.com/photo-1510127034890-ba27508e9f1c?auto=format&fit=crop&w=160&h=160&q=70`} alt="" className="h-full w-full object-cover" style={{ filter: 'sepia(.45) contrast(1.15) brightness(.6) saturate(.85)' }} />
+          className={`museum-camera-preset h-12 w-12 sm:h-16 sm:w-16 overflow-hidden rounded-lg border transition ${index === active ? 'border-[#C8A870] opacity-100 shadow-[0_0_0_1px_#C8A870,0_10px_22px_-12px_rgba(200,165,107,.75)]' : 'border-[#C8A56B]/45 opacity-55 hover:opacity-90'}`}>
+          <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" aria-hidden="true"><g transform={`translate(24 23) rotate(${[0, -12, 12, 0][index]}) scale(${index === 3 ? .85 : 1} 1) translate(-24 -23)`}><rect x="6" y="13" width="36" height="25" rx="3" /><path d="M7 20h9m16 0h10M10 10h9v3m13-3h7v3" /><circle cx="24" cy="26" r="9" /><circle cx="24" cy="26" r="6" /><path d="M35 16h4" /></g><text x="24" y="46" textAnchor="middle" fill="currentColor" stroke="none" fontSize="6">0{index + 1}</text></svg>
         </button>
       ))}
-      <button type="button" onClick={callReset} className="mt-1 rounded-full border border-[#C8A56B]/50 px-3 py-1.5 text-xs text-[#B7A994] hover:border-[#C8A56B] hover:text-[#F0E8DA]">返回初始视角</button>
     </div>
-  </div>;
+    <div className="col-span-2 flex flex-wrap items-center justify-center gap-x-3 gap-y-2">
+      <p className="text-center text-[10px] sm:text-xs text-[#7A6C5B]">拖拽旋转 · 滚轮缩放 · 点击空白处返回初始视角</p>
+      <button type="button" onClick={callReset} className="whitespace-nowrap px-3.5 py-1.5 rounded-full text-xs border border-[#C8A870]/50 text-[#B7A994] hover:border-[#C8A870] hover:text-[#F0E8DA]" style={{ fontSize: '12px' }}>返回初始视角</button>
+    </div>
+  </OrnateFrame>;
 }

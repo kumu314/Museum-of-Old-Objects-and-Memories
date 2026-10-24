@@ -1,8 +1,9 @@
 'use client';
 
+import { Brand } from '../navigation/brand';
 import { useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
+import Link from '../navigation/navigation-link';
 import { z } from 'zod';
 import { createMuseumInputSchema, museumDraftSchema } from '../../contracts/museum';
 import { ApiFailure, apiRequest, describeFailure, jsonRequest } from './api';
@@ -33,7 +34,7 @@ export function StudioHome({ username }: { username: string }) {
     finally { setPending(false); }
   }
   return <main className="memory-workbench">
-    <header className="workbench-brandbar"><Link href="/" className="workbench-brand"><strong>拾物馆</strong></Link><div className="wb-actions"><span>{username}</span><button className="wb-text-link" disabled={pending} onClick={logout}>退出登录</button></div></header>
+    <header className="workbench-brandbar"><Link href="/" className="workbench-brand"><Brand /></Link><div className="wb-actions"><span>{username}</span><button className="wb-text-link" disabled={pending} onClick={logout}>退出登录</button></div></header>
     <section className="workbench-onboarding"><p><Link className="wb-text-link" href="/demo">体验方向一 DEMO：世界与自传 →</Link></p><p className="workbench-eyebrow">我的展馆 · 开始收录</p><h1>给你们的回忆，取一个名字</h1><p className="wb-hint">每个账号拥有一座展馆，里面可以慢慢收录更多旧物。先填写馆名，再留下第一件旧物和它的故事。</p>
       <Notice error={error} /><form className="workbench-fields" onSubmit={create}>
         <Field label="展馆名称"><input required maxLength={120} value={title} onChange={(event) => setTitle(event.target.value)} disabled={pending} placeholder="例如：我们家的旧时光" /></Field>

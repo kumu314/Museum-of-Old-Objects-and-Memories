@@ -1,4 +1,6 @@
+@import url('https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@600&display=swap');
 @import 'tailwindcss';
+@import '../features/ornaments/ornaments.css';
 
 @theme {
   --font-serif: 'Noto Serif SC', 'Source Han Serif SC', 'Songti SC', 'STZhongsong', 'SimSun', serif;
@@ -21,3 +23,8 @@ button, input, textarea { font: inherit; }
 .mm-auth-input:focus { border-color: #C8A56B; box-shadow: 0 0 0 3px rgba(200,165,107,.14); }
 .mm-auth-input:disabled { opacity: .55; }
 .mm-auth-hint { display: block; margin-top: 7px; font-size: 12px; color: #7A6C5B; }
+
+/* 已确认的朱砂方印与中英文字标，保持原始比例。 */
+.museum-brand { display: block; width: 132px; height: auto; flex-shrink: 0; }
+@media (min-width: 640px) { .museum-brand { width: 150px; } }
+.curator-workbench .museum-brand { width: 155px; }

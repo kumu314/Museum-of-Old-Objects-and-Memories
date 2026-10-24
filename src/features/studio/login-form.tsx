@@ -2,7 +2,8 @@
 
 import { useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
+import Link from '../navigation/navigation-link';
+import { Brand } from '../navigation/brand';
 import { loginInputSchema, registerInputSchema, teamMemberSchema } from '../../contracts/session';
 import { apiRequest, describeFailure, jsonRequest } from './api';
 
@@ -41,14 +42,7 @@ export function LoginForm({ returnTo = '/studio' }: { returnTo?: string }) {
         <div className="absolute inset-0" style={{ background: 'linear-gradient(75deg, rgba(16,13,10,.92) 22%, rgba(16,13,10,.42) 70%, rgba(16,13,10,.3) 100%)' }} />
         <div className="absolute inset-0" style={{ boxShadow: 'inset 0 0 140px 30px rgba(8,6,4,.72)' }} aria-hidden="true" />
         <div className="relative z-10 flex items-center gap-3">
-          <span className="grid h-11 w-11 flex-none rotate-[-2deg] grid-cols-2 grid-rows-2 gap-0.5 rounded-md bg-[#A62B2B] p-[5px] shadow-[inset_0_0_0_1.5px_rgba(243,236,225,.4),0_6px_14px_-6px_rgba(166,43,43,.7)]" aria-hidden="true">
-            <i className="rounded-[2px] border border-[#F3ECE1]/55" /><i className="rounded-[2px] border border-[#F3ECE1]/55" />
-            <i className="rounded-[2px] border border-[#F3ECE1]/55" /><i className="rounded-[2px] border border-[#F3ECE1]/55" />
-          </span>
-          <span className="flex flex-col leading-tight">
-            <b className="font-serif text-xl font-semibold tracking-[.14em]">拾物馆</b>
-            <span className="text-[10px] tracking-[.3em] text-[#B7A994]">MEMORIES MUSEUM</span>
-          </span>
+          <Link href="/" aria-label="拾物馆首页"><Brand /></Link>
         </div>
         <p className="relative z-10 font-serif text-[26px] font-medium leading-[2] tracking-[.12em] lg:text-[30px]" style={{ textShadow: '0 2px 4px rgba(0,0,0,.6)' }}>
           旧物不语，<br />讲述让它被记住。
@@ -66,11 +60,7 @@ export function LoginForm({ returnTo = '/studio' }: { returnTo?: string }) {
       <div className="mm-auth-form flex flex-col justify-center px-6 py-14 sm:px-12" style={{ background: 'radial-gradient(70% 50% at 85% 0%, rgba(200,165,107,.06), transparent 60%), #100D0A' }}>
         <div className="mx-auto w-full max-w-[420px] lg:mb-16">
           <div className="mb-6 flex items-center gap-3 lg:hidden">
-            <span className="grid h-9 w-9 flex-none rotate-[-2deg] grid-cols-2 grid-rows-2 gap-0.5 rounded bg-[#A62B2B] p-1 shadow-[inset_0_0_0_1.5px_rgba(243,236,225,.4)]" aria-hidden="true">
-              <i className="rounded-[2px] border border-[#F3ECE1]/55" /><i className="rounded-[2px] border border-[#F3ECE1]/55" />
-              <i className="rounded-[2px] border border-[#F3ECE1]/55" /><i className="rounded-[2px] border border-[#F3ECE1]/55" />
-            </span>
-            <b className="font-serif text-lg tracking-[.14em]">拾物馆</b>
+            <Link href="/" aria-label="拾物馆首页"><Brand /></Link>
           </div>
 
           <div className="flex gap-7 border-b border-[#3A2D20]" role="tablist" aria-label="登录或注册">
