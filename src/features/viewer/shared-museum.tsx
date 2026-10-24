@@ -9,6 +9,7 @@ import { ApiFailure, apiRequest } from '../studio/api';
 import { createInspectionController } from './inspection-controller';
 import { publicStageItems, shareAssetUrl } from './public-stage-items';
 import styles from './shared-museum.module.css';
+import '../cabinet/gallery-backdrop.css';
 
 type ShareState = { status: 'ready'; museum: PublicMuseum } | { status: 'failed'; message: string };
 
@@ -87,7 +88,8 @@ function MuseumViewer({ museum, token, checking, onRefresh }: { museum: PublicMu
 
   const phaseText = { overview: '展柜总览', focusing: '正在取出', inspecting: '拖动旋转 · 双指或按钮缩放', returning: '正在放回' };
   return <main className={styles.museum}>
-    <header className={styles.header}><div><p className={styles.eyebrow}>拾物馆 · 旧物纪念展</p><h1>{museum.title}</h1>{museum.description && <p className={styles.description}>{museum.description}</p>}</div><button className={styles.refresh} disabled={checking} onClick={onRefresh}>{checking ? '正在核对…' : '重新读取展馆'}</button></header>
+    <div className="gallery-backdrop" aria-hidden="true"><div className="gallery-backdrop__vignette" /></div>
+    <header className={styles.header}><div><div className={styles.brand}><p className={styles.brandTitle}>拾物馆</p><span aria-hidden="true">·</span><h1>{museum.title}</h1></div>{museum.description && <p className={styles.description}>{museum.description}</p>}</div><button className={styles.refresh} disabled={checking} onClick={onRefresh}>{checking ? '正在核对…' : '重新读取展馆'}</button></header>
     <section className={styles.exhibition} aria-label="旧物展柜" data-phase={state.phase}>
       <div className={styles.stage}>
         <canvas ref={canvas} className={styles.canvas} style={{ visibility: surface === 'ready' ? 'visible' : 'hidden' }} tabIndex={0} aria-label="三维展柜；选择旧物取出，方向键旋转，加减键缩放，Esc 放回" />
@@ -97,9 +99,9 @@ function MuseumViewer({ museum, token, checking, onRefresh }: { museum: PublicMu
       </div>
       {selected && <aside ref={story} className={styles.story} aria-label="展品故事"><StoryPanel key={selected.id} exhibit={selected} token={token} active={state.phase !== 'returning'} />{selectedStatus === 'failed' && <button onClick={() => stage.current?.retryModel(selected.id)}>重新加载模型</button>}</aside>}
     </section>
-    <p className={styles.guide}>{hasSelection ? '拖动旋转 · 双指、按钮或滚轮缩放 · 按 Esc 或“放回展柜”返回' : '点击展柜中的旧物，取出查看立体细节并倾听物主讲述'}</p>
-    <nav className={styles.catalog} aria-label="展品目录">{[...museum.exhibits].sort((a, b) => a.slotIndex - b.slotIndex).map((exhibit) => <button key={exhibit.id} aria-pressed={exhibit.id === state.selectedId} onClick={() => controller.select(exhibit.id)}><span className={styles.slot}>{String(exhibit.slotIndex + 1).padStart(2, '0')}</span><span><strong>{exhibit.name}</strong><small>{exhibit.era}</small></span><span aria-hidden="true">↗</span></button>)}</nav>
-    <footer className={styles.footer}>持有链接即可访问 · 请按物主允许的范围分享</footer>
+    <p className={styles.guide} data-inspecting={state.phase === 'inspecting'}>点击展柜中的旧物，取出查看立体细节并倾听物主讲述</p>
+    <nav className={styles.catalog} data-fallback={surface !== 'ready'} aria-label="选择展品">{[...museum.exhibits].sort((a, b) => a.slotIndex - b.slotIndex).map((exhibit) => <button key={exhibit.id} aria-pressed={exhibit.id === state.selectedId} onClick={() => controller.select(exhibit.id)}><span className={styles.slot}>{String(exhibit.slotIndex + 1).padStart(2, '0')}</span><span><strong>{exhibit.name}</strong><small>{exhibit.era}</small></span><span aria-hidden="true">↗</span></button>)}</nav>
+    <footer className={styles.footer}>请按物主允许的范围分享与使用</footer>
   </main>;
 }
 

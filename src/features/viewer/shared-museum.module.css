@@ -1,10 +1,12 @@
-.museum { max-width: 1600px; margin: 0 auto; padding: 32px 42px 20px; min-height: 100svh; background: radial-gradient(ellipse at 50% 35%, #31251a66, transparent 65%); }
+.museum { position: relative; isolation: isolate; max-width: 1600px; margin: 0 auto; padding: 24px 38px 20px; min-height: 100svh; background: #211d17; }
 .museum button, .unavailable button { border: 1px solid #ac90624d; border-radius: 8px; background: #211a14e6; color: #eadfc8; padding: 10px 15px; cursor: pointer; font: inherit; transition: border-color 150ms; }
 .museum button:hover, .unavailable button:hover { border-color: #d7ba80; }
 .museum button:disabled, .unavailable button:disabled { cursor: wait; opacity: .55; }
 .header { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; padding: 0 12px; }
 .eyebrow { margin: 0 0 9px; color: #bfa77e; font-size: 12px; letter-spacing: .13em; }
-.header h1 { margin: 0; font: 400 clamp(24px, 2.6vw, 36px)/1.45 'Noto Serif CJK SC', 'Songti SC', serif; overflow-wrap: anywhere; }
+.brand { display: flex; flex-wrap: wrap; align-items: baseline; gap: 14px; color: #a58d6e; }
+.brandTitle { margin: 0; color: #f3e5ce; font: 600 32px/1.45 'Noto Serif CJK SC', 'Songti SC', serif; letter-spacing: .08em; }
+.header h1 { margin: 0; color: #c6b398; font: 400 14px/1.7 'Noto Serif CJK SC', 'Songti SC', serif; letter-spacing: .1em; overflow-wrap: anywhere; }
 .description { max-width: 780px; white-space: pre-wrap; overflow-wrap: anywhere; color: #b1a48f; font-size: 14px; line-height: 1.8; margin: 12px 0 0; }
 .museum .refresh { flex: 0 0 auto; font-size: 12px; background: transparent; }
 .exhibition { position: relative; margin-top: 12px; }
@@ -32,8 +34,10 @@
 .sources { margin: 22px 0 16px; border-top: 1px solid #ac90622b; padding-top: 16px; color: #ad9d86; font-size: 12px; line-height: 1.9; overflow-wrap: anywhere; }
 .sources summary { cursor: pointer; color: #cdb997; }
 .sources p { white-space: pre-wrap; }
-.guide { text-align: center; color: #c4b18d; font-size: 13px; line-height: 1.9; margin: 10px 0 24px; }
-.catalog { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; max-width: 1080px; margin: 0 auto; }
+.guide { text-align: center; color: rgba(235, 220, 200, 0.7); font-size: 13px; line-height: 1.9; margin: 10px 0 24px; transition: opacity 320ms ease; }
+.guide[data-inspecting='true'] { opacity: 0; }
+.catalog { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; max-width: 1080px; margin: 0 auto; }
+.catalog:focus-within, .catalog[data-fallback='true'] { position: relative; width: 100%; height: auto; overflow: visible; clip-path: none; }
 .catalog button { display: flex; gap: 14px; align-items: center; text-align: left; min-width: 0; background: #211a1466; }
 .catalog button[aria-pressed='true'] { border-color: #c7a66e; background: #4b382655; }
 .slot { font-family: Georgia, serif; font-size: 23px; color: #a98c5c; }
@@ -48,13 +52,15 @@
 @media (max-width: 760px) {
   .museum { padding: 23px 16px 20px; }
   .header { padding: 0; gap: 12px; flex-wrap: wrap; }
-  .header h1 { font-size: 25px; }
+  .brand { gap: 8px; }
+  .brandTitle { font-size: 28px; }
+  .header h1 { font-size: 12px; }
   .description { font-size: 13px; }
   .stage { height: 55svh; min-height: 370px; }
   .stageToolbar { left: 0; top: 12px; }
   .story { position: static; width: 100%; max-height: none; margin-top: 12px; padding: 22px; }
   .catalog { grid-template-columns: 1fr; gap: 9px; }
   .catalog button { padding: 13px 16px; }
-  .guide { margin: 20px 0; font-size: 12px; }
+  .guide { margin: 20px 0; font-size: 13px; }
 }
-@media (prefers-reduced-motion: reduce) { .museum button { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .museum button, .guide { transition: none; } }

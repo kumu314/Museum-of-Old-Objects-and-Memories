@@ -1,17 +1,19 @@
 import { mountCabinetStage, type CabinetStageItem, type AssetStatus, type SurfaceStatus, type StageRenderStats } from '../cabinet-stage.ts';
 import { createInspectionController } from '../../viewer/inspection-controller.ts';
-import { modelManifest } from '../model-manifest.ts';
 import { MAX_PLAQUE_LENGTH, moveExhibitToSlot, setPlaqueText, validateArrangement, type CabinetArrangement } from '../cabinet-arrangement.ts';
+import { sessionResponseSchema } from '../../../contracts/session';
+import '../gallery-backdrop.css';
 function element(id: string) { const value = document.getElementById(id); if (value === null) throw new Error(`Missing ${id}`); return value; }
 const canvas = document.querySelector('canvas');
 if (!(canvas instanceof HTMLCanvasElement)) throw new Error('Missing canvas');
 const canvasElement = canvas;
 const items = [{ id: 'camera', slot: 0, modelKey: 'camera-01' }, { id: 'cassette', slot: 1, modelKey: 'cassette' }, { id: 'ticket', slot: 4, modelKey: 'ticket' }] satisfies CabinetStageItem[];
 const storageKey = 'shiwuguan.demo.arrangement.v1';
-const defaultArrangement: CabinetArrangement = items.map((item) => {
-  const model = modelManifest[item.modelKey];
-  return { id: item.id, slot: item.slot, plaqueText: `${model.displayName} · ${model.eraLabel}` };
-});
+const defaultArrangement: CabinetArrangement = [
+  { id: 'camera', slot: 0, plaqueText: '海鸥双反相机 · 约 1980 年代' },
+  { id: 'cassette', slot: 1, plaqueText: '手录磁带 · 1996 年夏' },
+  { id: 'ticket', slot: 4, plaqueText: '旧车票 · 2003 年冬' },
+];
 const exhibitSelectElement = element('arrangement-item');
 const slotSelectElement = element('arrangement-slot');
 const plaqueInputElement = element('arrangement-plaque');
@@ -22,7 +24,9 @@ const plaqueInput = plaqueInputElement;
 // HTML maxlength counts UTF-16 units; the shared validator counts visible Unicode code points.
 plaqueInput.removeAttribute('maxlength');
 element('plaque-help').textContent = `最多 ${MAX_PLAQUE_LENGTH} 个字符`;
-let arrangement: CabinetArrangement = readArrangement();
+// The public sample never reads or overwrites the maker's saved local arrangement.
+let arrangement: CabinetArrangement = defaultArrangement;
+let makerAuthorized = false;
 let editingRequested = false;
 let editingActive = false;
 
@@ -122,10 +126,13 @@ function update() {
     if (editingActive) canvasElement.focus();
   }
   element('exhibition').dataset.phase = state.phase;
+  document.body.dataset.phase = state.phase;
   element('exhibition').dataset.editing = String(editingActive);
   element('edit-arrangement').textContent = editingRequested ? '完成编辑' : '编辑陈列';
   element('edit-arrangement').setAttribute('aria-pressed', String(editingRequested));
-  element('catalog').hidden = editingRequested;
+  element('edit-arrangement').hidden = !makerAuthorized;
+  element('catalog').hidden = !makerAuthorized || editingRequested;
+  element('exhibit-access').dataset.fallback = String(surface !== 'ready');
   element('open-arrangement-panel').hidden = !editingActive;
   if (!editingActive) setArrangementPanel(false);
   canvasElement.setAttribute('aria-label', editingActive ? '三维展柜编辑；拖动展品在六个格位之间换位，Esc 取消拖动；也可使用陈列工具选择格位' : '三维展柜；检视时方向键旋转，加减键缩放，Esc 放回');
@@ -140,7 +147,7 @@ function update() {
   const retry = document.getElementById('retry-model');
   if (retry !== null) retry.hidden = status !== 'failed';
   element('state-label').textContent = surface !== 'ready' ? '三维暂不可用 · 可查看样例说明' : status === 'failed' ? '模型载入失败 · 可重试' : status === 'loading' ? '模型载入中' : phaseLabels[state.phase];
-  element('guide').textContent = state.phase === 'overview' ? '点击展柜中的旧物，取出查看立体细节并倾听物主讲述' : '拖动旋转 · 双指、按钮或滚轮缩放 · 按 Esc 放回展柜';
+  element('guide').textContent = '点击展柜中的旧物，取出查看立体细节并倾听物主讲述';
   if (editingRequested) element('guide').textContent = editingActive ? '拖动展品换格 · 已有展品时交换 · Esc 取消拖动 · 更改仅保存在此浏览器' : '正在放回展品，完成后可拖动换位';
   if (assets.get('cabinet-material') === 'failed') element('guide').textContent = '木纹材质未能载入，可刷新重试。展品目录仍可操作。';
   for (const button of document.querySelectorAll<HTMLButtonElement>('button[data-item]')) button.setAttribute('aria-pressed', String(button.dataset.item === state.selectedId));
@@ -148,6 +155,7 @@ function update() {
 const unsubscribe = controller.subscribe(update);
 for (const button of document.querySelectorAll<HTMLButtonElement>('button[data-item]')) button.addEventListener('click', () => { if (editingRequested) return; const id = button.dataset.item; if (id !== undefined) { controller.select(id); const details=button.closest('details'); if (details !== null) details.open=false; } });
 element('edit-arrangement').addEventListener('click', () => {
+  if (!makerAuthorized) return;
   editingRequested = !editingRequested;
   if (editingRequested) {
     const catalog = element('catalog');
@@ -202,3 +210,18 @@ document.addEventListener('keydown', (event) => {
 });
 window.addEventListener('pagehide', (event) => { if (!event.persisted) { unsubscribe(); stage.destroy(); } });
 update();
+
+// This is a local-only authoring preview. Real workbench writes retain server authorization.
+if (new URLSearchParams(location.search).has('studio')) {
+  void (async () => {
+    try {
+      const response = await fetch('/api/auth/session', { cache: 'no-store', signal: AbortSignal.timeout(10_000) });
+      if (!response.ok) throw new Error('请先在主应用登录制作账号，再打开制作预览。');
+      sessionResponseSchema.parse(await response.json());
+      makerAuthorized = true;
+      arrangement = readArrangement(); stage.setArrangement(arrangement); refreshArrangementControls(); update();
+    } catch (error: unknown) {
+      showArrangementStatus(`制作预览不可用：${errorMessage(error)}`, true);
+    }
+  })();
+}

@@ -8,6 +8,7 @@
     <link rel="stylesheet" href="/style.css">
   </head>
   <body>
+    <div class="gallery-backdrop" aria-hidden="true"><div class="gallery-backdrop__vignette"></div></div>
     <header class="museum-header">
       <div class="brand">
         <h1>拾物馆</h1>
@@ -28,8 +29,8 @@
             <span>音画设置</span>
           </button>
         </span>
-        <button type="button" id="edit-arrangement" class="edit-arrangement" aria-pressed="false">编辑陈列</button>
-        <details id="catalog" class="catalog">
+        <button type="button" id="edit-arrangement" class="edit-arrangement" aria-pressed="false" hidden>编辑陈列</button>
+        <details id="catalog" class="catalog" hidden>
           <summary>展品目录 <span aria-hidden="true">⌄</span></summary>
           <div class="catalog-menu">
             <p class="catalog-label">展柜中的旧物</p>
@@ -42,6 +43,11 @@
       </nav>
     </header>
     <main id="exhibition" data-phase="overview">
+      <nav id="exhibit-access" class="exhibit-access" aria-label="选择样例展品">
+        <button type="button" data-item="camera">查看相机样例</button>
+        <button type="button" data-item="cassette">查看磁带样例</button>
+        <button type="button" data-item="ticket">查看车票样例</button>
+      </nav>
       <div class="stage-wrap">
         <canvas tabindex="0" aria-label="三维展柜；检视时方向键旋转，加减键缩放，Esc 放回"></canvas>
         <button type="button" id="back" class="back" hidden>← &nbsp; 放回展柜 <span>Esc</span></button>
@@ -49,7 +55,7 @@
           <h2>三维展示暂不可用</h2>
           <p id="surface-message"></p>
           <button type="button" id="retry">重试三维展示</button>
-          <p>仍可通过右上角的展品目录查看样例说明。</p>
+          <p>仍可通过下方的展品按钮查看样例说明。</p>
         </div>
         <div id="interaction-hint" class="interaction-hint" hidden>拖动旋转 · 双指、按钮或滚轮缩放 · 方向键也可操作</div>
       </div>

@@ -14,6 +14,12 @@ export function slotRestPosition(slot: number): readonly [number, number, number
   return [((slot % 3) - 1) * 3.6, slot < 3 ? 0.23 : -2.65, 0.03];
 }
 
+// Both the face rail and its plaque use the same stable slot centre.
+export function slotPlaquePosition(slot: number): readonly [number, number, number] {
+  const [x, floorY] = slotRestPosition(slot);
+  return [x, slot < 3 ? -0.065 : floorY - 0.16, 0.91];
+}
+
 // A shallow rear rise exposes the upper shelf at the near-level overview camera.
 export function slotFloorSlope(slot: number): number { return slot < 3 ? 0.18 : 0; }
 export function slotFloorHeight(slot: number, z: number): number {

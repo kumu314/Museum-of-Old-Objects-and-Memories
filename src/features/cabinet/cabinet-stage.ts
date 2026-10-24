@@ -1,12 +1,11 @@
 import {
-  ACESFilmicToneMapping, AmbientLight, BufferGeometry, Color, DirectionalLight,
-  BoxGeometry, Group, Line, LineBasicMaterial, Matrix4, Mesh, MeshBasicMaterial, PerspectiveCamera, Plane, PlaneGeometry,
+  ACESFilmicToneMapping, AmbientLight, BufferGeometry, DirectionalLight,
+  BoxGeometry, Group, Line, LineBasicMaterial, Mesh, MeshBasicMaterial, PerspectiveCamera, Plane, PlaneGeometry,
   SpotLight, Quaternion, Raycaster, RepeatWrapping, Scene,
   SRGBColorSpace, Texture, Vector2, Vector3, WebGLRenderer, MeshPhysicalMaterial, MeshStandardMaterial,
   type WebGLRenderTarget,
 } from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { Reflector } from 'three/addons/objects/Reflector.js';
 import { createInspectionController } from '../viewer/inspection-controller.ts';
 import { createInspectionGesture } from '../viewer/inspection-gesture';
 import { buildCabinetBody } from './cabinet-body.ts';
@@ -73,43 +72,6 @@ export function mountCabinetStage(canvas: HTMLCanvasElement, items: readonly Cab
     return [item.slot, text];
   }))));
   scene.add(createGallerySurroundings());
-  // Fade a restrained reflection into the transparent canvas, with no floor horizon.
-  const reflection = new Reflector(new PlaneGeometry(18, 12), {
-    color: '#e2cdb5', textureWidth: 512, textureHeight: 512, clipBias: 0.003,
-    shader: {
-      uniforms: { color: { value: new Color() }, tDiffuse: { value: null }, textureMatrix: { value: new Matrix4() } },
-      vertexShader: `uniform mat4 textureMatrix; varying vec4 reflectionUv; varying vec2 groundPosition; varying vec4 reflectionClip;
-        void main() { reflectionUv = textureMatrix * vec4(position, 1.0); groundPosition = position.xy;
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-          reflectionClip = gl_Position; }`,
-      fragmentShader: `uniform vec3 color; uniform sampler2D tDiffuse; varying vec4 reflectionUv; varying vec2 groundPosition; varying vec4 reflectionClip;
-        void main() { vec2 uv = reflectionUv.xy / reflectionUv.w;
-          vec3 reflected = vec3(0.0);
-          for (int x = -2; x <= 2; x++) for (int y = -2; y <= 2; y++) {
-            reflected += texture2D(tDiffuse, uv + vec2(float(x), float(y)) * 0.004).rgb / 25.0;
-          }
-          float fade = (1.0 - smoothstep(4.5, 8.5, abs(groundPosition.x))) * (1.0 - smoothstep(0.6, 6.0, abs(groundPosition.y)));
-          gl_FragColor = vec4(reflected * color, fade * 0.38 * smoothstep(0.0, 0.035, reflectionClip.y / reflectionClip.w * 0.5 + 0.5));
-          #include <tonemapping_fragment>
-          #include <colorspace_fragment>
-        }`,
-    },
-  });
-  for (const material of Array.isArray(reflection.material) ? reflection.material : [reflection.material]) {
-    material.transparent = true;
-    material.depthWrite = false;
-  }
-  reflection.rotation.x = -Math.PI / 2;
-  reflection.position.y = -3.212;
-  // Reflector's nested render must not overwrite the main camera's transmission buffer.
-  const reflectScene = reflection.onBeforeRender;
-  const glazing = Array.from({ length: 6 }, (_, slot) => scene.getObjectByName(`cabinet-front-glass:${slot}`));
-  reflection.onBeforeRender = (...args) => {
-    for (const pane of glazing) if (pane !== undefined) pane.visible = false;
-    try { reflectScene.apply(reflection, args); }
-    finally { for (const pane of glazing) if (pane !== undefined) pane.visible = true; }
-  };
-  scene.add(reflection);
   const backdropShade = new Mesh(new PlaneGeometry(40, 24), new MeshBasicMaterial({ color: '#080604', transparent: true, opacity: 0, depthWrite: false }));
   backdropShade.position.z = 2;
   backdropShade.visible = false;
@@ -611,7 +573,7 @@ export function mountCabinetStage(canvas: HTMLCanvasElement, items: readonly Cab
       window.removeEventListener('pointermove', onOverviewPointerMove); window.removeEventListener('blur', onViewportLeave); document.removeEventListener('mouseleave', onViewportLeave);
       reducedMotion.removeEventListener('change', onMotionPreferenceChange); canvas.style.cursor = originalCursor;
       for (const surface of hoverSurfaces) if (surface.plaque !== null) surface.plaque.envMap = null;
-      disposeResources(scene, ownedTextures); reflection.dispose(); environmentTarget?.dispose(); glassEnvironmentTarget?.dispose(); renderer?.dispose();
+      disposeResources(scene, ownedTextures); environmentTarget?.dispose(); glassEnvironmentTarget?.dispose(); renderer?.dispose();
       // Three owns additional transmission targets; only context loss releases the whole owner.
       renderer?.forceContextLoss();
     },

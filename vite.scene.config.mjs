@@ -11,5 +11,6 @@ export default defineConfig({
     modelLab: `${project}src/features/cabinet/demo/model-lab.html`,
     qa: `${project}src/features/cabinet/demo/qa.html`,
   } } },
-  server: { host: '127.0.0.1', port: 17681, strictPort: true, fs: { allow: [project] } },
+  server: { host: '127.0.0.1', port: 17681, strictPort: true, fs: { allow: [project] },
+    proxy: { '/api/auth/session': 'http://127.0.0.1:17682' } },
 });

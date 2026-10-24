@@ -1,6 +1,8 @@
 * { box-sizing: border-box; }
 html { height: 100%; overflow: hidden; color-scheme: dark; background: #0c0806; }
 body {
+  position: relative;
+  isolation: isolate;
   margin: 0;
   min-width: 320px;
   height: 100vh;
@@ -10,11 +12,7 @@ body {
   grid-template-rows: auto minmax(0, 1fr) auto;
   color: #e8dac5;
   font-family: "Noto Serif CJK SC", "Source Han Serif SC", Georgia, serif;
-  background:
-    radial-gradient(ellipse 6% 24% at 2% 43%, #68513930, transparent 100%),
-    radial-gradient(ellipse 5% 27% at 97% 49%, #7c5b3920, transparent 100%),
-    radial-gradient(ellipse 10% 3% at 3% 66%, #73533522, transparent 100%),
-    radial-gradient(ellipse at 50% 43%, #20160e 0%, #120c08 56%, #0c0806 100%);
+  background: #211d17;
 }
 button, summary { -webkit-tap-highlight-color: transparent; }
 button { color: inherit; font: inherit; cursor: pointer; }
@@ -32,14 +30,14 @@ button:focus-visible, summary:focus-visible, canvas:focus-visible, input:focus-v
   gap: 28px;
   width: 100%;
   max-width: 1920px;
-  height: 76px;
+  height: 68px;
   margin: 0 auto;
-  padding: 0 48px;
+  padding: 0 38px;
 }
 .brand { display: flex; align-items: baseline; gap: 15px; white-space: nowrap; }
-.brand h1 { margin: 0; font-size: 29px; font-weight: 500; letter-spacing: .12em; }
+.brand h1 { margin: 0; color: #f3e5ce; font-size: 32px; font-weight: 600; letter-spacing: .08em; }
 .brand-dot { color: #8e7352; font-size: 20px; }
-.brand p { margin: 0; color: #b6a58d; font-size: 14px; letter-spacing: .13em; }
+.brand p { margin: 0; color: #c6b398; font-size: 14px; letter-spacing: .13em; }
 .visitor-nav {
   display: flex;
   align-items: center;
@@ -264,7 +262,12 @@ canvas:focus-visible { outline-offset: -5px; }
 .surface-error p { color: #a18a6a; font-size: 12px; line-height: 1.9; }
 .surface-error button { margin: 12px 0; padding: 11px 18px; border: 1px solid #725436; border-radius: 2px; background: #352619; font-size: 12px; }
 .museum-footer { position: relative; display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 7px 16px; min-height: 62px; padding: 12px 24px max(18px, env(safe-area-inset-bottom)); text-align: center; }
-.museum-footer p { margin: 0; color: #c9b38f; font-size: 13px; line-height: 1.9; letter-spacing: .1em; }
+.museum-footer p { margin: 0; color: rgba(235, 220, 200, 0.7); font-size: 13px; line-height: 1.9; letter-spacing: .08em; }
+#guide { transition: opacity 320ms ease; }
+body[data-phase="inspecting"] #guide { opacity: 0; }
+.exhibit-access { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.exhibit-access:focus-within, .exhibit-access[data-fallback="true"] { z-index: 8; bottom: 14px; left: 50%; transform: translateX(-50%); display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; width: max-content; max-width: calc(100% - 32px); height: auto; overflow: visible; clip-path: none; white-space: normal; }
+.exhibit-access button { padding: 10px 14px; border: 1px solid #8a7050; border-radius: 3px; background: #201911f2; font-size: 12px; }
 .arrangement-tools-toggle { flex-shrink: 0; padding: 7px 10px; border: 1px solid #80603c; border-radius: 3px; background: #2b2016; color: #e4c69a; font-size: 11px; }
 .museum-footer .arrangement-status { position: absolute; z-index: 7; bottom: calc(100% + 2px); left: 50%; width: min(720px, calc(100% - 32px)); max-height: 100px; overflow: auto; transform: translateX(-50%); padding: 6px 12px; border: 1px solid #5b432c; border-radius: 3px; background: #1c1510f2; color: #ceb38b; font-size: 11px; letter-spacing: .025em; }
 .museum-footer .arrangement-status[data-failed="true"] { color: #f0b68a; }
@@ -304,7 +307,7 @@ canvas:focus-visible { outline-offset: -5px; }
 @media (max-width: 1100px) {
   .museum-header { gap: 18px; padding-right: 30px; padding-left: 30px; }
   .brand { gap: 10px; }
-  .brand h1 { font-size: 25px; }
+  .brand h1 { font-size: 30px; }
   .brand p { font-size: 12px; letter-spacing: .08em; }
   .visitor-nav { gap: 12px; font-size: 11px; }
   .story { right: 26px; padding: 29px 26px 22px; }
@@ -314,7 +317,7 @@ canvas:focus-visible { outline-offset: -5px; }
 @media (max-width: 900px) {
   .museum-header { height: auto; min-height: 76px; flex-wrap: wrap; gap: 6px 16px; padding: 10px 20px; }
   .brand { gap: 8px; }
-  .brand h1 { font-size: 23px; }
+  .brand h1 { font-size: 28px; }
   .brand p { font-size: 11px; letter-spacing: .04em; }
   .visitor-nav { gap: 9px; font-size: 10px; }
   .catalog { margin-left: 0; }
@@ -330,7 +333,7 @@ canvas:focus-visible { outline-offset: -5px; }
   .divider { margin: 23px 0 19px; }
   .reset { margin: 24px 0; }
   .museum-footer { min-height: 66px; padding: 12px 24px max(18px, env(safe-area-inset-bottom)); }
-  .museum-footer p { font-size: 11px; letter-spacing: .06em; }
+  .museum-footer p { font-size: 13px; letter-spacing: .06em; }
   .arrangement-panel { right: 16px; }
 }
 
@@ -339,7 +342,7 @@ canvas:focus-visible { outline-offset: -5px; }
   .nav-icon { width: 16px; height: 16px; }
   .visitor-nav .unavailable-action button { gap: 5px; }
   .brand { gap: 6px; }
-  .brand h1 { font-size: 20px; letter-spacing: .08em; }
+  .brand h1 { font-size: 28px; letter-spacing: .08em; }
   .brand-dot { font-size: 14px; }
   .brand p { font-size: 9.5px; letter-spacing: 0; }
   .visitor-nav { gap: 7px; letter-spacing: .02em; }
@@ -354,18 +357,18 @@ canvas:focus-visible { outline-offset: -5px; }
 @media (max-width: 420px) {
   .museum-header { gap: 8px; padding-right: 12px; padding-left: 12px; }
   .brand { gap: 4px; }
-  .brand h1 { font-size: 18px; }
+  .brand h1 { font-size: 26px; }
   .brand-dot { font-size: 12px; }
   .brand p { font-size: 9px; }
   .visitor-nav { gap: 5px; font-size: 9px; }
   .catalog summary { gap: 4px; padding-left: 8px; }
-  .museum-footer p { font-size: 10px; }
+  .museum-footer p { font-size: 13px; letter-spacing: .025em; }
 }
 
 @media (max-width: 360px) {
   .museum-header { gap: 6px; padding-right: 10px; padding-left: 10px; }
   .brand { gap: 3px; }
-  .brand h1 { font-size: 16px; }
+  .brand h1 { font-size: 26px; }
   .brand-dot { font-size: 10px; }
   .brand p { font-size: 8px; }
   .visitor-nav { gap: 4px; font-size: 8px; }
