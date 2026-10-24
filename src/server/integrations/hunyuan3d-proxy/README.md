@@ -41,6 +41,17 @@ const client = createHunyuanWebProxyClient({
 3. 真实输出的坐标、正面、原点与尺度仍无保证；入库前按 §9.6 由 D 规范化。
 4. 上传与生成均会消耗网页端积分（concept 与主站积分池独立）。
 
+## 当前上游阻塞（2026-10-24 实测）
+
+应用侧链路（提交 → 轮询 → 纹理接续 → 下载）已打通到提交并被上游受理，但**上游首个处理步骤失败**：
+
+- 所有实验输入（WebP/JPEG、合成图/真实照片、512–768px、`image2geometry` / `_singleimage` / `5views2geometry`、带/不带 `worksType`、`apose`）都被受理后进入 `hunyuan-3d-images-subject-segmentation`，随后以 `errorCode 400 / "http client codec StatusCode: Bad Request"` 失败。
+- 传 COS 直链会改为 `errNo 200010 审核失败`（桶非公开，审核服务读不到）。
+- 反代项目文档记录过同类上游步骤 7/7 全失败（`text2texture` 预处理），说明这是供应商侧/账号侧问题，不是参数格式问题。
+- 失败任务按官方说明不扣积分；应用会把上游原因显示给用户，并不会重复提交。
+
+结论：**不能宣称照片生成链路已通过**。需要等上游恢复、更换账号/Region，或改走官方云 API（需 SecretId/SecretKey 与额度）。
+
 ## 真实协议差异（2026-10-24，实测）
 
 - `image2geometry` **必须带 `requestId`**（格式 `go` + 12 位十六进制），缺失时上游返回 `errNo 200002 输入参数错误`。
