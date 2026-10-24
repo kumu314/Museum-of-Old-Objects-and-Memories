@@ -13,7 +13,8 @@ import {
 import { getPool, withTransaction } from '../db/pool';
 import { getServerConfig } from '../config';
 import { prepareGeneratedModel, resolveAssetPath } from '../assets/storage';
-import { Hunyuan3DError } from '../integrations/hunyuan3d';
+import { createHunyuan3DClient, Hunyuan3DError } from '../integrations/hunyuan3d';
+import { readHunyuanCloudConfig } from '../integrations/hunyuan3d/config';
 import { createHunyuanWebProxyClient } from '../integrations/hunyuan3d-proxy';
 import { readHunyuanProxyConfig } from '../integrations/hunyuan3d-proxy/config';
 import type { Hunyuan3DClient } from '../integrations/hunyuan3d/types';
@@ -33,20 +34,49 @@ import { assertVersion, assetRecord, exhibitRecord, invalid, museumRecord, notFo
  * - 进程内对同一任务只跑一个推进循环，避免并发重复下载/入库。
  */
 
-const PROVIDER = 'hunyuan-proxy';
+type ModelProvider = { name: string; client: Hunyuan3DClient };
 
 // 适配器实例按配置缓存：纹理阶段去重等进程内状态必须跨轮询保留，
 // 否则每次轮询都会重复提交纹理任务、重复消耗积分。
 const clients = new Map<string, Hunyuan3DClient>();
-function proxyClient(): Hunyuan3DClient {
-  const config = readHunyuanProxyConfig();
-  const key = `${config.baseUrl}|${process.env.HUNYUAN_PROXY_ALLOW_INSECURE_UPLOAD === '1' ? 'insecure' : 'strict'}`;
+
+function clientFor(key: string, create: () => Hunyuan3DClient): Hunyuan3DClient {
   let client = clients.get(key);
   if (client === undefined) {
-    client = createHunyuanWebProxyClient(config);
+    client = create();
     clients.set(key, client);
   }
   return client;
+}
+
+/**
+ * 通道选择：三项云 API 变量齐全时走官方云 API（生产路径），否则退回本机
+ * 反代演示链路。任务会记录提交时的 provider，轮询按记录选择，避免中途切换
+ * 配置把任务串到另一条通道。
+ */
+function resolveProvider(): ModelProvider {
+  const cloud = readHunyuanCloudConfig();
+  if (cloud !== undefined) {
+    const key = `cloud|${cloud.config.region}|${cloud.config.endpoint ?? ''}|${cloud.config.model ?? ''}`;
+    return { name: cloud.provider, client: clientFor(key, () => createHunyuan3DClient(cloud.config)) };
+  }
+  const proxy = readHunyuanProxyConfig();
+  const key = `proxy|${proxy.baseUrl}|${process.env.HUNYUAN_PROXY_ALLOW_INSECURE_UPLOAD === '1' ? 'insecure' : 'strict'}`;
+  return { name: 'hunyuan-proxy', client: clientFor(key, () => createHunyuanWebProxyClient(proxy)) };
+}
+
+function providerForJob(provider: string): Hunyuan3DClient {
+  if (provider === 'hunyuan-cloud') {
+    const cloud = readHunyuanCloudConfig();
+    if (cloud === undefined) {
+      throw new HttpError({ code: 'GENERATION_UNAVAILABLE', message: '该任务由云 API 提交，但云 API 配置已移除，无法继续查询。' });
+    }
+    const key = `cloud|${cloud.config.region}|${cloud.config.endpoint ?? ''}|${cloud.config.model ?? ''}`;
+    return clientFor(key, () => createHunyuan3DClient(cloud.config));
+  }
+  const proxy = readHunyuanProxyConfig();
+  const key = `proxy|${proxy.baseUrl}|${process.env.HUNYUAN_PROXY_ALLOW_INSECURE_UPLOAD === '1' ? 'insecure' : 'strict'}`;
+  return clientFor(key, () => createHunyuanWebProxyClient(proxy));
 }
 
 const jobRowSchema = z.strictObject({
@@ -59,6 +89,7 @@ const jobRowSchema = z.strictObject({
   modelAssetId: idSchema.nullable(),
   externalJobId: z.string().max(200).nullable(),
   inputAssetId: idSchema,
+  provider: z.string().min(1).max(60),
   createdAt: z.instanceof(Date),
 });
 
@@ -66,7 +97,7 @@ type JobRow = z.infer<typeof jobRowSchema>;
 
 const jobColumns = `id, exhibit_id AS "exhibitId", source_version AS "sourceVersion", status,
   error_code AS "errorCode", error_message AS "errorMessage", model_asset_id AS "modelAssetId",
-  external_job_id AS "externalJobId", input_asset_id AS "inputAssetId", created_at AS "createdAt"`;
+  external_job_id AS "externalJobId", input_asset_id AS "inputAssetId", provider, created_at AS "createdAt"`;
 
 function rowToJob(row: JobRow, stats: Record<string, number> | null): ModelGenerationJob {
   return modelGenerationJobSchema.parse({
@@ -141,7 +172,7 @@ export async function requestSingleModelGeneration(
   pool: Pool = getPool(),
 ): Promise<ModelGenerationJob> {
   // 配置缺失在任务创建前受控失败，避免留下无意义的失败任务。
-  const proxyConfig = readHunyuanProxyConfig();
+  const provider = resolveProvider();
   const uploadDir = getServerConfig().uploadDir;
 
   const claim = await withTransaction(async (db) => {
@@ -175,7 +206,7 @@ export async function requestSingleModelGeneration(
     await db.query(
       `INSERT INTO model_generation_jobs(id,museum_id,exhibit_id,source_version,mode,input_asset_id,provider,status,created_by)
        VALUES($1,$2,$3,$4,'single',$5,$6,'SUBMITTING',$7)`,
-      [id, museumId, exhibitId, exhibit.version, input.imageAssetId, PROVIDER, actorId]);
+      [id, museumId, exhibitId, exhibit.version, input.imageAssetId, provider.name, actorId]);
     return { jobId: id, stored };
   }, pool);
   if ('existing' in claim) return claim.existing;
@@ -185,8 +216,10 @@ export async function requestSingleModelGeneration(
     const stored = claim.stored;
     if (stored.asset.kind !== 'image') invalid('生成需要图片素材。');
     const bytes = new Uint8Array(await readFile(resolveAssetPath(uploadDir, stored.storageKey)));
-    const { jobId } = await proxyClient().submitImage({
+    const { jobId } = await provider.client.submitImage({
       image: { bytes, mime: stored.asset.contentType as 'image/webp', width: stored.asset.width, height: stored.asset.height },
+      // 云 API 需要显式打开 PBR 才能拿到带贴图的成品；反代通道忽略该字段。
+      enablePbr: true,
     });
     await withTransaction(async (db) => {
       await db.query(
@@ -250,7 +283,7 @@ async function advanceJob(actorId: string, museumId: string, exhibitId: string, 
 
   try {
     const uploadDir = getServerConfig().uploadDir;
-    const outcome = await generateModelFile(proxyClient(), snapshot.row.externalJobId, uploadDir);
+    const outcome = await generateModelFile(providerForJob(snapshot.row.provider), snapshot.row.externalJobId, uploadDir);
     if (outcome.kind === 'pending') {
       await withTransaction(async (db) => {
         await db.query(`UPDATE model_generation_jobs SET status=$2, updated_at=now() WHERE id=$1 AND status IN ('SUBMITTING','WAIT','RUN')`,
