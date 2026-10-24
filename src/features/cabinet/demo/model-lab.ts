@@ -1,4 +1,5 @@
 import { mountCabinetStage, type AssetStatus, type StageRenderStats } from '../cabinet-stage';
+import { clearWebglProbe } from '../webgl-capability';
 import { modelManifest } from '../model-manifest';
 import { createInspectionController } from '../../viewer/inspection-controller';
 import type { GlbModelSource } from '../glb-model';
@@ -57,12 +58,23 @@ async function until(check: () => boolean, message: string) {
 }
 const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 function source(key: Key, slow = false): GlbModelSource { const url = new URL(catalog[key], document.baseURI); if (slow) url.searchParams.set('qaSlow', '1'); return { assetId: `qa-${key}`, version: String(++revision), url: url.href }; }
+// 模拟无 GPU 预览机的真实形态：getContext 返回句柄，但 getContextAttributes() 为 null。
+// 直接返回 null 会被预检的 no-context 分支挡下，掩盖 attributes 缺失这条更常见的路径。
+function blockWebglContexts() {
+  clearWebglProbe();
+  const dead = { isContextLost: () => false, getContextAttributes: () => null, getExtension: () => null };
+  const native = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, 'getContext');
+  Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', { configurable: true, writable: true, value: () => dead });
+  return () => {
+    if (native === undefined) delete (HTMLCanvasElement.prototype as { getContext?: unknown }).getContext;
+    else Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', native);
+  };
+}
 function mount(key: Key = 'textured', blockWebgl = false) {
   assert(stage === null, '旧查看器尚未卸载');
   currentStatus = 'loading'; woodStatus = 'loading'; stats = null; lastError = '';
   canvas = document.createElement('canvas'); canvas.tabIndex = 0; canvas.setAttribute('aria-label', '检查台三维画布'); area.replaceChildren(canvas);
-  const currentCanvas = canvas; const nativeContext = canvas.getContext;
-  if (blockWebgl) canvas.getContext = () => null;
+  const restore = blockWebgl ? blockWebglContexts() : null;
   controller = createInspectionController([id]);
   stage = mountCabinetStage(canvas, [{ id, slot: 1, plaqueText: 'QA 测试资产', modelKey: 'glb', source: source(key) }], controller, {
     inspectionInset: () => 0,
@@ -72,10 +84,9 @@ function mount(key: Key = 'textured', blockWebgl = false) {
     onModelStats(_id, value) { currentTriangles = value.triangles; },
     onRenderStats(value) { stats = value; },
   });
-  return () => { currentCanvas.getContext = nativeContext; };
+  return () => { restore?.(); };
 }
-async function settled() { await until(() => currentStatus === 'ready' && woodStatus === 'ready' && stage?.getDiagnostics().pendingFrame === false, '模型与渲染静止'); }
-async function replace(key: Key) { assert(stage, '没有查看器'); stage.setModelSource(id, source(key)); await until(() => currentStatus !== 'loading', `加载 ${key}`); }
+async function settled() { await until(() => currentStatus === 'ready' && woodStatus === 'ready' && stage?.getDiagnostics().pendingFrame === false, '模型与渲染静止'); }async function replace(key: Key) { assert(stage, '没有查看器'); stage.setModelSource(id, source(key)); await until(() => currentStatus !== 'loading', `加载 ${key}`); }
 function sample() { assert(stage && stats, '没有可用渲染记录'); return { ...stage.getDiagnostics(), cpuMs: stats.cpuMs, calls: stats.calls, renderer: stats.renderer }; }
 function record(name: string, result: Record<string, unknown>) { records.push({ name, ...result }); report.textContent = JSON.stringify(records, null, 2); }
 function destroy() { assert(stage, '没有查看器'); const previous = stage; stage.destroy(); stage = null; return previous; }

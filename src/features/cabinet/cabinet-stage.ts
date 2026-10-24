@@ -21,6 +21,7 @@ import { overviewOffset } from './overview-motion.ts';
 import { updateBrassPlaqueText } from './brass-plaque.ts';
 import type { CabinetArrangement } from './cabinet-arrangement.ts';
 import { createFrameClock } from './frame-clock.ts';
+import { probeWebgl2, webglFailure, type WebglCapability } from './webgl-capability.ts';
 
 // Rendering inputs only. The public snapshot remains owned by C's shared schema.
 export type CabinetStageItem = { readonly id: string; readonly slot: number; readonly plaqueText?: string } & (
@@ -121,6 +122,7 @@ export function mountCabinetStage(canvas: HTMLCanvasElement, items: readonly Cab
   dropIndicator.visible = false; dropIndicator.renderOrder = 20; scene.add(dropIndicator);
   let renderer: WebGLRenderer | null = null;
   let contextControl: WEBGL_lose_context | null = null;
+  let capability: WebglCapability | null = null;
   let glassEnvironmentTarget: WebGLRenderTarget | null = null;
   let environmentTarget: WebGLRenderTarget | null = null;
   let surfaceStatus: SurfaceStatus = 'unavailable';
@@ -279,10 +281,20 @@ export function mountCabinetStage(canvas: HTMLCanvasElement, items: readonly Cab
   function initializeRenderer() {
     if (destroyed) return;
     if (renderer !== null) { contextControl?.restoreContext(); return; }
+    // 环境级缺失要在进入 Three 之前拦住：无 GPU 的预览机常返回一个 attributes 为 null
+    // 的上下文句柄，WebGLRenderer 构造器读 attributes.alpha 会抛 TypeError，而不是给出可恢复的失败。
+    capability = probeWebgl2();
+    if (!capability.supported) {
+      console.warn(`三维展柜不可用（${capability.reason}），已降级为静态界面`);
+      notifySurface('unavailable'); return;
+    }
     try {
       // Probe first: Three installs canvas listeners before a failed constructor returns.
       const context = canvas.getContext('webgl2', { antialias: true, alpha: true, powerPreference: 'high-performance' });
       if (context === null) throw new Error('浏览器无法创建 WebGL2 画布');
+      // 预检只证明环境具备能力，不保证这张 canvas 还拿得到配额；同一套判据再用一次。
+      const failure = webglFailure(context);
+      if (failure !== null) throw new Error(`WebGL2 上下文不可用：${failure}`);
       renderer = new WebGLRenderer({ canvas, context, antialias: true, alpha: true, powerPreference: 'high-performance' });
       // A lost context may stop returning extensions; retain the recovery handle now.
       contextControl = renderer.getContext().getExtension('WEBGL_lose_context');
@@ -548,6 +560,7 @@ export function mountCabinetStage(canvas: HTMLCanvasElement, items: readonly Cab
     zoomBy,
     getDiagnostics() {
       return { destroyed, surface: surfaceStatus, zoom, yaw, pitch, pendingFrame: frame !== 0,
+        capability: capability === null ? null : capability.supported ? 'supported' : capability.reason,
         contextLost: renderer?.getContext().isContextLost() ?? true,
         pendingRequests: displayModels.filter((model) => model.request !== null).length,
         geometries: renderer?.info.memory.geometries ?? 0, textures: renderer?.info.memory.textures ?? 0,
