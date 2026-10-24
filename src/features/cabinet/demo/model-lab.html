@@ -8,7 +8,7 @@
     </style>
   </head>
   <body><h1>三维稳定性检查台</h1><p>程序合成边界资产与已有演示模型，仅用于测试；没有调用生成服务或读取用户素材。计时包含本机加载、解析与陈列，资源数量来自实际渲染器。</p>
-    <nav aria-label="检查项目"><button id="fixtures">检查六类边界模型</button><button id="delay">延迟旧响应测试</button><button id="unmount">加载中退出测试</button><button id="switches">连续切换 30 次</button><button id="mounts">挂载卸载 24 次</button><button id="touch">模拟双指缩放</button><button id="remount">卸载后复用画布</button><button id="dismiss">点击空白放回</button><button id="initial">首次 WebGL 与重试</button><button id="all">运行全部检查</button><a href="/qa.html?preview=model&webgl=blocked">首次 WebGL 失败检查</a><a href="/model-preview.html">返回制作预览</a></nav>
+    <nav aria-label="检查项目"><button id="fixtures">检查六类边界模型</button><button id="delay">延迟旧响应测试</button><button id="unmount">加载中退出测试</button><button id="switches">连续切换 30 次</button><button id="mounts">挂载卸载 24 次</button><button id="touch">模拟双指缩放</button><button id="remount">卸载后复用画布</button><button id="initializationFailure">初始化中途失败恢复</button><button id="dismiss">点击空白放回</button><button id="initial">首次 WebGL 与重试</button><button id="all">运行全部检查</button><a href="/qa.html?preview=model&webgl=blocked">首次 WebGL 失败检查</a><a href="/model-preview.html">返回制作预览</a></nav>
     <output id="status" role="status">检查台准备中</output><div id="area"></div><section aria-label="模型资料"><p>测试资料始终保留：这些几何体用于检查尺寸、落点与失败行为，不代表真实旧物，也不是图生 3D 结果。</p></section>
     <pre id="report" aria-label="检查记录">尚未运行检查</pre><script type="module" src="/model-lab.ts"></script>
   </body>

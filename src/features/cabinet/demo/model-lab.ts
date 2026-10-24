@@ -1,3 +1,4 @@
+import { PMREMGenerator } from 'three';
 import { mountCabinetStage, type AssetStatus, type StageRenderStats } from '../cabinet-stage';
 import { clearWebglProbe } from '../webgl-capability';
 import { modelManifest } from '../model-manifest';
@@ -64,7 +65,12 @@ function blockWebglContexts() {
   clearWebglProbe();
   const dead = { isContextLost: () => false, getContextAttributes: () => null, getExtension: () => null };
   const native = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, 'getContext');
-  Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', { configurable: true, writable: true, value: () => dead });
+  const nativeGetContext = HTMLCanvasElement.prototype.getContext;
+  Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', { configurable: true, writable: true,
+    value(this: HTMLCanvasElement, kind: string, options?: unknown) {
+      return kind === 'webgl2' ? dead : nativeGetContext.call(this, kind, options);
+    },
+  });
   return () => {
     if (native === undefined) delete (HTMLCanvasElement.prototype as { getContext?: unknown }).getContext;
     else Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', native);
@@ -176,13 +182,44 @@ async function initialWebgl() {
 async function remount() {
   if (stage) destroy();
   mount(); await settled();
-  destroy();
-  mount('textured', false, true);
-  await until(() => stage?.getDiagnostics().surface === 'ready', '复用画布后没有恢复');
+  for (let cycle = 0; cycle < 3; cycle++) {
+    destroy();
+    mount('textured', false, true);
+    await until(() => stage?.getDiagnostics().surface === 'ready', `第 ${cycle + 1} 次复用画布后没有恢复`);
+  }
   assert(stage !== null, '复用画布后没有查看器');
   const diagnostics = stage.getDiagnostics();
   assert(diagnostics.capability === 'supported', `复用画布后仍是降级态：${diagnostics.capability}`);
   record('卸载后复用同一张画布', { passed: true, diagnostics });
+}
+
+// 在真实 renderer 创建后注入环境贴图故障，验证自动重试与失败后的手动恢复。
+async function initializationFailure() {
+  const nativeFromScene = PMREMGenerator.prototype.fromScene;
+  let failures = 0;
+  try {
+    if (stage) destroy();
+    PMREMGenerator.prototype.fromScene = function (...args) {
+      failures++;
+      if (failures === 1) throw new Error('QA：首次环境贴图初始化失败');
+      return nativeFromScene.apply(this, args);
+    };
+    mount();
+    await until(() => stage?.getDiagnostics().surface === 'ready', '环境贴图暂时失败后没有自动恢复');
+    await settled();
+    record('初始化中途失败后自动恢复', { passed: true, attempts: failures });
+
+    destroy(); failures = 0;
+    PMREMGenerator.prototype.fromScene = function () { failures++; throw new Error('QA：持续环境贴图初始化失败'); };
+    mount();
+    await until(() => stage?.getDiagnostics().capability === 'canvas-context', '环境贴图持续失败后没有降级');
+    assert(stage !== null && stage.getDiagnostics().surface === 'unavailable' && failures === 2, '初始化重试没有在两次后停止');
+    PMREMGenerator.prototype.fromScene = nativeFromScene;
+    stage.retry();
+    await until(() => stage?.getDiagnostics().surface === 'ready', '环境贴图恢复后手动重试失败');
+    await settled();
+    record('初始化持续失败降级与手动恢复', { passed: true, failures });
+  } finally { PMREMGenerator.prototype.fromScene = nativeFromScene; }
 }
 
 async function touch() {
@@ -245,13 +282,13 @@ async function dismiss() {
   } finally { canvas.setPointerCapture = nativeSet; canvas.releasePointerCapture = nativeRelease; canvas.hasPointerCapture = nativeHas; }
 }
 
-const actions = { fixtures, delay: () => delayed(false), unmount: () => delayed(true), switches, mounts, remount, touch, dismiss, initial: initialWebgl,
-  all: async () => { await fixtures(); await delayed(false); await delayed(true); await switches(); await mounts(); await remount(); await touch(); await dismiss(); await initialWebgl(); } };
+const actions = { fixtures, delay: () => delayed(false), unmount: () => delayed(true), switches, mounts, remount, initializationFailure, touch, dismiss, initial: initialWebgl,
+  all: async () => { await fixtures(); await delayed(false); await delayed(true); await switches(); await mounts(); await remount(); await initializationFailure(); await touch(); await dismiss(); await initialWebgl(); } };
 for (const [name, action] of Object.entries(actions)) { const trigger = document.getElementById(name); if (trigger === null) continue; trigger.addEventListener('click', () => {
   const buttons = document.querySelectorAll('button'); buttons.forEach((button) => { button.disabled = true; }); status.textContent = '检查中…';
   void action().then(() => { status.textContent = '检查通过，详细记录见下方'; }).catch((error: unknown) => {
     status.textContent = `检查失败：${error instanceof Error ? error.message : String(error)}`;
-    record(name, { passed: false, error: error instanceof Error ? error.message : String(error) });
+    record(name, { passed: false, error: error instanceof Error ? error.message : String(error), diagnostics: stage?.getDiagnostics() });
   }).finally(() => { buttons.forEach((button) => { button.disabled = false; }); });
 }); }
 window.addEventListener('pagehide', () => { closed.abort(); if (stage) destroy(); EventTarget.prototype.addEventListener = addListener; EventTarget.prototype.removeEventListener = removeListener; window.ResizeObserver = NativeResizeObserver; });

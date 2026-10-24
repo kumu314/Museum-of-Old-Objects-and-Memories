@@ -64,10 +64,12 @@ function markRestorable(event: Event) {
   event.preventDefault();
   const target = event.target;
   if (!(target instanceof HTMLCanvasElement)) return;
+  target.removeEventListener('webglcontextlost', markRestorable);
   restorableCanvases.add(target);
   const resume = pendingReinitialize.get(target);
   pendingReinitialize.delete(target);
-  resume?.();
+  // 浏览器在 lost 事件派发结束后才处理 preventDefault 并允许恢复。
+  if (resume !== undefined) window.setTimeout(resume, 0);
 }
 
 export function mountCabinetStage(canvas: HTMLCanvasElement, items: readonly CabinetStageItem[], controller: Controller, options: StageOptions) {
@@ -351,12 +353,12 @@ export function mountCabinetStage(canvas: HTMLCanvasElement, items: readonly Cab
       failureReason = null;
       retriedInitialize = false;
     } catch {
-      // forceContextLoss 之后 isContextLost() 要等 webglcontextlost 事件派发完才变 true。
-      // 这个窗口里构造必然失败，但上下文其实还救得回来：先等一拍重走一次，否则就会
-      // 变成"首次加载降级、手动点一下重试才恢复"。
+      // 环境贴图初始化也可能在 renderer 已创建后失败；释放部分实例，保证重试能重新构造。
+      renderer?.dispose(); renderer = null;
+      contextControl = null;
+      // 构造或环境初始化暂时失败时只自动重试一次，持续失败则通知降级。
       if (!retriedInitialize) {
         retriedInitialize = true;
-        // 等一拍再重走：此刻 isContextLost() 还没稳定，重试会走错分支。
         window.setTimeout(() => { if (!destroyed && renderer === null) initializeRenderer(); }, 50);
         return;
       }
@@ -383,6 +385,7 @@ export function mountCabinetStage(canvas: HTMLCanvasElement, items: readonly Cab
     notifySurface('context-lost');
   }
   function onContextRestored() {
+    restorableCanvases.delete(canvas);
     // The next task runs after Three's native listener has rebuilt its GL internals.
     if (restoreTimer !== null) window.clearTimeout(restoreTimer);
     restoreTimer = window.setTimeout(() => {
@@ -725,7 +728,9 @@ export function mountCabinetStage(canvas: HTMLCanvasElement, items: readonly Cab
       if (renderer !== null) {
         // lost 事件不是同步派发的，卸载后原有的 onContextLost 已被移除；必须有人
         // preventDefault，否则这张画布被永久弃用，下一次挂载的 restoreContext 会被直接拒绝。
-        canvas.addEventListener('webglcontextlost', markRestorable, { once: true });
+        // 恢复资格只属于本轮 lost 事件，不能复用上一轮已取消事件的标记。
+        restorableCanvases.delete(canvas);
+        canvas.addEventListener('webglcontextlost', markRestorable);
         if (contextControl !== null) lostControls.set(canvas, contextControl);
       }
       renderer?.forceContextLoss();
