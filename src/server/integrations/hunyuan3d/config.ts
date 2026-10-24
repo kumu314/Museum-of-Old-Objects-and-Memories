@@ -47,5 +47,9 @@ export function readHunyuanCloudConfig(
   // 测试用：仅当显式提供 HUNYUAN_3D_ENDPOINT 时才允许覆盖官方域名。
   const endpoint = environment.HUNYUAN_3D_ENDPOINT?.trim();
   if (endpoint !== undefined && endpoint !== '') config.endpoint = endpoint;
+  // 测试用：仅当显式开启时允许本地假上游的 http 结果地址；生产不得设置。
+  if (environment.HUNYUAN_CLOUD_ALLOW_INSECURE_RESULT === '1') {
+    config.resultUrlPolicy = () => {};
+  }
   return { config, provider: 'hunyuan-cloud' };
 }

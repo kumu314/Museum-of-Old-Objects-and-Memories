@@ -266,3 +266,63 @@ test('白模结果被判失败；崩溃遗留的 SUBMITTING 按提交结果未�
     (error: unknown) => error instanceof HttpError && error.failure.code === 'VALIDATION_ERROR',
   );
 });
+
+test('云 API 通道：配置齐全时走官方 Pro 协议，任务记录 provider 并完成落盘', async (context) => {
+  const setup = await fixture(context);
+  const names = ['HUNYUAN_SECRET_ID', 'HUNYUAN_SECRET_KEY', 'HUNYUAN_REGION', 'HUNYUAN_3D_ENDPOINT', 'HUNYUAN_CLOUD_ALLOW_INSECURE_RESULT'] as const;
+  const previous = names.map((name) => [name, process.env[name]] as const);
+  let submitAction: string | undefined;
+  const actions: string[] = [];
+  const server = createServer((request: IncomingMessage, response: ServerResponse) => {
+    request.on('error', () => {}); response.on('error', () => {});
+    const chunks: Buffer[] = [];
+    request.on('data', (chunk: Buffer) => chunks.push(chunk));
+    request.on('end', () => {
+      const url = request.url ?? '';
+      if (url === '/model.glb') { response.end(glbBytes(true)); return; }
+      const action = request.headers['x-tc-action']?.toString();
+      actions.push(action ?? '');
+      if (action === 'SubmitHunyuanTo3DProJob') {
+        submitAction = action;
+        const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown>;
+        response.end(JSON.stringify({ Response: { JobId: 'cloud-job-1', RequestId: 'req-1', Echo: { EnablePBR: body.EnablePBR } } }));
+        return;
+      }
+      if (action === 'QueryHunyuanTo3DProJob') {
+        response.end(JSON.stringify({ Response: {
+          Status: 'DONE', ResultCreditConsumed: 20,
+          ResultFile3Ds: [{ Type: 'GLB', Url: `${(server.address() as { port: number }).port ? `http://127.0.0.1:${(server.address() as { port: number }).port}` : ''}/model.glb` }],
+        } }));
+        return;
+      }
+      response.statusCode = 400;
+      response.end(JSON.stringify({ Response: { Error: { Code: 'InvalidAction', Message: 'unknown' } } }));
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  context.after(async () => {
+    for (const [name, value] of previous) { if (value === undefined) delete process.env[name]; else process.env[name] = value; }
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  });
+  process.env.HUNYUAN_SECRET_ID = 'synthetic-id';
+  process.env.HUNYUAN_SECRET_KEY = 'synthetic-key';
+  process.env.HUNYUAN_REGION = 'ap-guangzhou';
+  process.env.HUNYUAN_3D_ENDPOINT = `${origin}/`;
+  process.env.HUNYUAN_CLOUD_ALLOW_INSECURE_RESULT = '1';
+
+  const submitted = await requestSingleModelGeneration(setup.actor, setup.museum.id, setup.exhibit.id, request(setup), pool);
+  assert.equal(submitted.status, 'WAIT');
+  assert.equal(submitAction, 'SubmitHunyuanTo3DProJob');
+  const stored = await pool.query<{ provider: string; external_job_id: string }>(
+    'SELECT provider, external_job_id FROM model_generation_jobs WHERE id=$1', [submitted.id]);
+  assert.equal(stored.rows[0]?.provider, 'hunyuan-cloud');
+  assert.equal(stored.rows[0]?.external_job_id, 'cloud-job-1');
+
+  const done = await getModelGenerationJob(setup.actor, setup.museum.id, setup.exhibit.id, submitted.id, pool);
+  assert.equal(done.status, 'DONE');
+  assert.equal(done.stats?.materialCount, 1);
+  assert.ok(done.modelAssetId);
+  assert.ok(actions.includes('QueryHunyuanTo3DProJob'));
+});
