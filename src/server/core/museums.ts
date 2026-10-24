@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { z } from 'zod';
 import type { PoolClient } from 'pg';
 import { displayPhotoRequiredMessage, missingDisplayPhoto, modelInputAssetIds, museumDraftSchema, museumSummarySchema, type CreateMuseumInput, type UpdateMuseumInput,
   type CreateExhibitInput, type UpdateExhibitInput, type ConfirmExhibitInput } from '../../contracts';
@@ -45,6 +46,19 @@ export function getOwnMuseum(actorId: string, client?: PoolClient) {
     if (result.rows.length > 1) throw new Error('One active museum per account migration is required.');
     const row = result.rows[0];
     return row ? museumDraft(db, actorId, row.id) : null;
+  }, client);
+}
+const museumEntrySchema = z.strictObject({ id: z.uuid(), hasExhibits: z.boolean() });
+
+// 入口仅决定跳转目的地，不读取目标页稍后才需要的故事、素材和全部展品。
+export function getOwnMuseumEntry(actorId: string, client?: PoolClient) {
+  return inTransaction(async (db) => {
+    await requireActor(db, actorId);
+    const result = await db.query(`SELECT m.id,
+      EXISTS (SELECT 1 FROM exhibits e WHERE e.museum_id=m.id AND e.deleted_at IS NULL) AS "hasExhibits"
+      FROM museums m WHERE m.created_by=$1 AND m.deleted_at IS NULL`, [actorId]);
+    if (result.rows.length > 1) throw new Error('One active museum per account migration is required.');
+    return result.rows.length === 0 ? null : museumEntrySchema.parse(result.rows[0]);
   }, client);
 }
 export function createMuseum(actorId: string, input: CreateMuseumInput, client?: PoolClient) {

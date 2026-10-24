@@ -1,0 +1,40 @@
+.ornate-frame {
+  position: relative;
+  border: 1px solid rgba(200,168,112,.35);
+  border-radius: 3px;
+  box-shadow: inset 0 0 28px #0006, 0 12px 32px #0004;
+}
+.ornate-frame__trim { position: absolute; inset: 4px; z-index: 3; pointer-events: none; border: 1px solid rgba(200,168,112,.12); border-radius: 1px; }
+.ornate-frame__corner { position: absolute; width: 48px; height: 48px; color: #c8a870; filter: drop-shadow(0 1px 1px #000) drop-shadow(0 0 3px #c8a87030); }
+.ornate-frame__corner--nw { top: -5px; left: -5px; }
+.ornate-frame__corner--ne { top: -5px; right: -5px; transform: rotate(90deg); }
+.ornate-frame__corner--se { bottom: -5px; right: -5px; transform: rotate(180deg); }
+.ornate-frame__corner--sw { bottom: -5px; left: -5px; transform: rotate(270deg); }
+.lacquer-home { position: relative; isolation: isolate; }
+.floating-dust { position: fixed; inset: 0; overflow: hidden; pointer-events: none; z-index: 2; }
+.floating-dust i { position: absolute; border-radius: 50%; background: rgba(216,190,139,.35); box-shadow: 0 0 6px rgba(216,190,139,.45); opacity: 0; animation: museum-dust-rise linear infinite; }
+@keyframes museum-dust-rise {
+  0% { transform: translate3d(-10px,80px,0); opacity: 0; }
+  20% { opacity: .85; }
+  48% { opacity: .25; }
+  70% { opacity: 1; }
+  100% { transform: translate3d(28px,-150px,0); opacity: 0; }
+}
+.home-collection-card { transition: border-color .3s, box-shadow .3s; }
+.home-collection-card:hover { border-color: #c8a87099; box-shadow: inset 0 0 28px #0006, 0 12px 36px #0006, 0 0 22px #c8a8700d; }
+.home-inspection-frame { padding: 24px 16px 20px; background: radial-gradient(ellipse at 50% 0,#9c70351a,transparent 70%), linear-gradient(140deg,#22190f80,#0f0d0b); }
+.astrolabe { position: absolute; inset: 0; pointer-events: none; color: #c8a870; opacity: .7; }
+.astrolabe__dial { position: absolute; width: 100%; height: 100%; inset: 0; filter: drop-shadow(0 0 5px #c8a87026); }
+.astrolabe__rotation { transform-origin: 250px 250px; animation: astrolabe-turn 60s linear infinite; }
+.astrolabe__base { position: absolute; left: 8%; top: 32%; width: 84%; height: 84%; transform: scaleY(.22); opacity: .85; }
+@keyframes astrolabe-turn { to { transform: rotate(360deg); } }
+.confirmation-seal { flex: 0 0 62px; width: 62px; height: 62px; transform: rotate(7deg); filter: drop-shadow(1px 3px 2px #0007); }
+@media (max-width:600px) {
+  .ornate-frame__corner { width: 36px; height: 36px; }
+  .home-inspection-frame { padding: 16px 10px; }
+}
+@media (prefers-reduced-motion:reduce) {
+  .floating-dust i { animation: none; opacity: .45; }
+  .astrolabe__rotation { animation: none; }
+  .home-collection-card { transition: none; }
+}

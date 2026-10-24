@@ -6,7 +6,7 @@ import type { CreateExhibitInput, ExhibitDraft, UpdateExhibitInput } from '../..
 import { migrate } from '../../src/server/db/migrate';
 import { getIsolatedTestDatabaseUrl } from '../../src/server/db/test-database';
 import { HttpError } from '../../src/server/http';
-import { createMuseum, getMuseum, getOwnMuseum, listMuseums, removeMuseum, updateMuseum, createExhibit, updateExhibit, removeExhibit, confirmExhibit,
+import { createMuseum, getMuseum, getOwnMuseum, getOwnMuseumEntry, listMuseums, removeMuseum, updateMuseum, createExhibit, updateExhibit, removeExhibit, confirmExhibit,
   publishMuseum, readShare, getShareAsset, stopSharing, rotateShareToken, getPrivateAsset } from '../../src/server/core';
 
 const pool = new Pool({ connectionString: getIsolatedTestDatabaseUrl(), max: 2 });
@@ -261,5 +261,24 @@ test('停止分享和换链立即撤销旧数据与素材入口，所有不可�
     await rejected(getShareAsset(actor, 'invalid', randomUUID(), db), 'SHARE_NOT_FOUND');
     const row = await db.query<{ share_token_hash: string | null }>('SELECT share_token_hash FROM museums WHERE id=$1', [museum.id]);
     assert.equal(row.rows[0]?.share_token_hash, null);
+  });
+});
+
+test('入口分流仅读取本人有效展馆与展品存在性，删除及停用后不再可用', async () => {
+  await fixture(async (db, actor) => {
+    assert.equal(await getOwnMuseumEntry(actor, db), null);
+    const museum = await createMuseum(actor, { title: '跳转测试', description: '' }, db);
+    assert.deepEqual(await getOwnMuseumEntry(actor, db), { id: museum.id, hasExhibits: false });
+    const exhibit = await createExhibit(actor, museum.id, exhibitInput(museum.version), db);
+    assert.deepEqual(await getOwnMuseumEntry(actor, db), { id: museum.id, hasExhibits: true });
+    const outsider = randomUUID();
+    await db.query('INSERT INTO team_members(id,username,password_hash) VALUES($1,$2,$3)', [outsider, `entry-${outsider}`, 'test-only']);
+    assert.equal(await getOwnMuseumEntry(outsider, db), null);
+    await removeExhibit(actor, museum.id, exhibit.id, exhibit.version, db);
+    assert.deepEqual(await getOwnMuseumEntry(actor, db), { id: museum.id, hasExhibits: false });
+    await removeMuseum(actor, museum.id, await currentVersion(db, actor, museum.id), db);
+    assert.equal(await getOwnMuseumEntry(actor, db), null);
+    await db.query('UPDATE team_members SET active=false WHERE id=$1', [actor]);
+    await rejected(getOwnMuseumEntry(actor, db), 'UNAUTHORIZED');
   });
 });
