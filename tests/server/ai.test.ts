@@ -86,7 +86,7 @@ test('本地兼容服务收到隔离的system/user消息，返回经来源校验
       z.object({ role: z.literal('user'), content: z.string() }),
     ]),
     response_format: z.object({ type: z.literal('json_object') }),
-    max_completion_tokens: z.literal(1_024),
+    max_tokens: z.literal(2_000),
     stream: z.literal(false),
   }).parse(JSON.parse(request.body));
   assert.deepEqual(JSON.parse(sent.messages[1].content), input);
@@ -113,6 +113,16 @@ test('无效JSON、伪造来源与过大响应均为502，未自动重试且输�
   await expectAiError(generateDraft(input), 'AI_UNAVAILABLE', 502);
   assert.equal(count, 3);
   assert.deepEqual(input, original);
+});
+
+test('finish_reason=length 时返回受控的 AI_UNAVAILABLE', async (context) => {
+  await localService(context, (_request, response) => {
+    response.setHeader('Content-Type', 'application/json');
+    response.end(JSON.stringify({
+      choices: [{ finish_reason: 'length', message: { role: 'assistant', content: '' } }],
+    }));
+  });
+  await expectAiError(generateDraft(input), 'AI_UNAVAILABLE', 502);
 });
 
 test('AI未配置时明确不可用，不查找其他凭据或生成演示答案', async (context) => {
