@@ -1,13 +1,15 @@
 # 方向二共享契约提案
 
-版本：1.0（决定版）
-日期：2026年10月24日 20:50
-基线：main `afb41e4`
+版本：1.1（累计榜与地区已落库）
+日期：2026年10月24日 22:30
+基线：main `3a6010d`
 提出：方向二实现分支；契约 owner：C
 
 **状态说明。** v0.1/v0.2 是提案，本版把待定项定下来。D1–D5 由方向二实现方按"全权委托"拍板，C 可随时推翻；推翻时改本文件并在 PR 里注明，不要只改代码里的口径。
 
-**仍然成立的边界。** 本版不含任何迁移与 schema 变更。`migrations/**`、`src/server/core|db/**` 保持未改。界面部分只消费 DEMO fixture，并在数据结构与界面上双重标注。
+**仍然成立的边界（v1.1 起已部分改变）。** v1.0 时本版不含任何迁移与 schema 变更，界面只消费 DEMO fixture。
+`0008_discovery_views.sql` 已把「累计浏览榜 + 地区分布」真正落库，DEMO fixture 随删除，
+详见 **§15 落库实现（v1.1）**。仍未落库的是共同作者与多人讲述（`0009` 起，见 §16）。
 
 ## 0. 版本变更
 
@@ -21,12 +23,12 @@ v0.1 → v0.2（按代码审计修订）：
 
 v0.2 → v1.0：D1–D5 定稿（§13），并补本轮已实现范围（§14）。
 
-## 1. 仓库与分支状态（20:35 实测）
+## 1. 仓库与分支状态
 
-- main = `afb41e4`（PR #14 已合并）。
-- 迁移实况：`0001`–`0005` 在 main；`0006_model_generation.sql` 只在 PR #15 分支（open / clean / 未合并）。
-- 在途 PR：#15（生成任务编排，占 `0006`）。
-- 方向二实现分支：`feat/direction2-discovery-board`，基于 `afb41e4`。
+- v1.0 写作时 main = `afb41e4`（PR #14 已合并）；写作当天随后 `#15`/`#16`/`#17` 全部合入，main 到 `3a6010d`。
+- 迁移实况（v1.1 实测）：`0001`–`0007` 已在 main（`0006_model_generation.sql`、`0007_generation_submission_safety.sql` 均由 PR #15 带入）。
+- 方向二迁移取 `0008`（`0008_discovery_views.sql`），已在本地开发库与隔离测试库实际应用。
+- 方向二既有分支：`feat/direction2-discovery-board`（PR #16，已合并）、`feat/direction2-coauthor-contributions`（PR #17，已合并）、`feat/direction2-discovery-persistence`（本分支）。
 
 ## 2. 已存在、可复用
 
@@ -41,15 +43,19 @@ v0.2 → v1.0：D1–D5 定稿（§13），并补本轮已实现范围（§14）
 | 错误契约 | `src/contracts/errors.ts`（13 码，含 4xx/5xx 映射） |
 | 演示账号 | `pnpm team:create` |
 
-## 3. 不存在
+## 3. 不存在（v1.0 时）
 
-浏览计数与统计表、地域字段、地图资产与渲染、共同作者/贡献/撤回、可见性枚举、匿名读取路径。本 PR 只加了纯类型契约与界面，**没有任何表**。
+浏览计数与统计表、地域字段、地图资产与渲染、共同作者/贡献/撤回、可见性枚举、匿名读取路径。v1.0 的 PR 只加了纯类型契约与界面，没有任何表。
+
+**v1.1 已补齐：** 浏览计数表、`museums.region_city`、聚合查询与上报端点（见 §15）。仍然不存在：共同作者/贡献/撤回的表与端点（§16）、匿名读取路径（D1 不变）。
 
 ## 4. 迁移编号（D5 已定）
 
 `src/server/db/migrate.ts` 强制 `Migration sequence must start at 0001 with no gaps`。
 
 **决定：** 方向二不预占编号，也不在 #15 落地前创建迁移文件。契约 PR 合并时若 #15 已合入，按当时实际最大编号加一登记；#15 本轮包含 `0006`、`0007`，不得预占或复用这些编号。编号由 C 在合并当天登记，实现方不自选。
+
+**执行结果（v1.1）：** `#15` 合入后 main 的实际最大编号是 `0007`（`0007_generation_submission_safety.sql`），因此方向二取 `0008`。这与 v1.0 里"最早 0007"的预估不同——预估只能当参考，登记必须以合并当天的实际文件为准。
 
 ## 5. 可发现性（D1 已定）
 
@@ -155,18 +161,64 @@ PR 审查修复复验（2026-10-24，Linux 隔离工作树）：
 | D4 | 撤回是否立即失效快照 | 立即：停分享 + 版本 +1，重新发布后新快照不含该贡献 |
 | D5 | 迁移编号 | 不预占；按当时实际最大编号加一，由 C 登记 |
 
-## 14. 本轮已实现（DEMO）
+## 14. 本轮已实现（v1.0 DEMO，历史记录）
 
 | 文件 | 内容 |
 | --- | --- |
 | `src/contracts/discovery.ts` | 18 城白名单、榜单与地区分布的 zod 契约（含"名次连续""入榜不超总数"约束），纯类型无 DDL |
 | `src/features/discover/regions.ts` | 城市聚合与近似中心点；NULL 不计入城市桶，单列计数 |
 | `src/features/discover/leaderboard.ts` | 累计榜排序（次数降序 + 确定性平局）、筛选、DEMO 与真实混入即抛错 |
-| `src/features/discover/demo-fixtures.ts` | 9 条 DEMO fixture，`isDemo: true` 字面量锁定 |
+| `src/features/discover/demo-fixtures.ts` | 9 条 DEMO fixture，`isDemo: true` 字面量锁定（**v1.1 已删除**） |
 | `src/features/discover/henan-map.tsx` | 腾讯地图 GL JS，无 key / 加载失败均降级为文案 |
 | `src/features/discover/city-bars.tsx` | 城市分布，与地图共用同一份聚合结果 |
 | `src/features/discover/discover-board.tsx` | 组装、DEMO 横幅、筛选、口径脚注 |
 | `src/app/discover/page.tsx` | 登录门禁 + `noindex` + 从环境变量取 key |
 | 三个 `*.test.ts` | 16 例，覆盖排序 / 平局 / 筛选 / 聚合 / 白名单 / DEMO 混入 / 地图脚本超时清理与失败后重试 |
 
-未做（明确不声称）：真实浏览计数、真实聚合接口、匿名访问、共同作者、地图真实渲染、地图 key 的域名白名单验证。
+v1.0 未做（当时明确不声称）：真实浏览计数、真实聚合接口、匿名访问、共同作者、地图真实渲染、地图 key 的域名白名单验证。
+
+## 15. 落库实现（v1.1）
+
+迁移 `0008_discovery_views.sql`：`museums.region_city`（18 城 CHECK 白名单）+ `museum_view_events`（`museum_id` / `viewer_id` / `created_at`）。
+**不存 IP、UA、Referer、设备指纹**：只回答"谁看过哪座馆"。
+
+### 15.1 上榜范围是一条安全边界
+
+只有 **未删除 + 已发布 + 分享开着**（`deleted_at IS NULL AND share_enabled AND current_snapshot_id IS NOT NULL`）的馆进入榜单与地图聚合。
+
+理由不是"好看"，是防泄露：少了「已发布」，馆主还没公开的草稿标题会出现在全站榜单上（浏览数当然是 0，但标题已经出去了）；少了「分享开着」，已下架的馆仍被持续公示。这条口径写在 `src/server/core/discovery.ts` 的 `visibleMuseum` 常量里，只此一处。
+
+### 15.2 浏览口径（D2 的落实）
+
+- 上报走 `POST /api/share/[token]/views`，按 **token** 定位而不是 `museumId`：参观者手里只有 token，让他先换 id 等于把内部主键发给每台看展的机器。
+- 只有真能读到内容（token 有效、分享开着、快照已封存）才记；读不到就是 `SHARE_NOT_FOUND`，不记。
+- **馆主自查照实入库**，排除发生在聚合侧（`e.viewer_id <> m.created_by`）。事件表记事实，聚合算是口径；混在一处则改口径时要回改历史数据。
+- **不去重**：刷新、预加载、自动化的处理仍属未决，未决前如实记录，也未在任何界面或文档里声称防刷、未宣称独立访客。
+- 客户端上报只挡 React StrictMode 的双跑（`useRef` 一次性），**不是**统计去重；真实刷新与新标签页各计一次。
+
+### 15.3 地区（D3 的落实）
+
+- `region_city` 挂 `museums`，只到城市一级；白名单同时存在于迁移 CHECK 与 `henanCities`，由 `tests/contracts/region-whitelist.test.ts` 钉住，改一侧忘另一侧 CI 直接红。
+- **`region_city` 不进发布快照**：位置是馆的属性，不是某一版内容的属性。改城市不该要求重新发布，旧快照也不该带着过期城市。
+- `updateMuseumInputSchema.regionCity` 是 `nullable().optional()`：不传 = 不改，传 `null` = 清空。老客户端整份保存不会把馆主选的市抹掉。
+
+### 15.4 验证结果（本机实跑，不是推断）
+
+- 迁移在本机开发库与隔离测试库实际应用：`Applied migrations: 6, 7, 8`；`\d museum_view_events` 与 `information_schema` 核对通过。
+- `pnpm test:db` **56/56**：新增 8 例覆盖"馆主自查不计""未发布不上榜""停止分享立即退榜但事件保留""无效 token 不记""两次读取结果完全一致""未标注城市单列""不传地区不清空 / 传 null 才清空""数据库拒绝白名单外城市名"。
+- 端到端（dev server + 真实 HTTP）：未登录 `/discover` 307 → `/login`；登录 200、空态文案正确、HTML 内 **0 处 DEMO**。
+- 端到端计数：库内 3 条事件（2 条访客 + 1 条馆主），页面显示 **2 次**，馆主那条被聚合正确排除。
+- `updateMuseum` 四条路径实测：设洛阳 → 不带城市保存仍为洛阳 → 非法城市 400 → `null` 清空。
+- 共同作者/多人讲述**仍未落库**，见 §16。
+
+### 15.5 删除的东西
+
+`demo-fixtures.ts` 已删除（其注释原本就写着"真实聚合接入后本文件应删除"）；`leaderboard.ts` 的 `toLeaderboard`/`rankEntries`、`regions.ts` 的 `distributeByCity` 一并删除——真实链路的排序与聚合在 SQL，留着重名函数只会让人以为还有两条数据路径。`isDemo` 字段保留在契约里但恒为 `false`，留给将来可能的演示环境。
+
+## 16. 下一步（未做，明确不声称）
+
+1. 共同作者与多人讲述落库：邀请（四状态）、讲述（逐份同意）、撤回（只撤自己的）三张表，最早取 `0009`。规则层与契约已在 PR #17 合入，缺的是表与端点。
+2. 匿名只读通道：D1 未变，`/discover` 仍要登录；开放匿名需先定可见性枚举与匿名端点，届时只去掉一层门禁。
+3. 地图真实渲染未验证：`NEXT_PUBLIC_TMAP_KEY` 本机未配置，域名白名单仍需确认。
+4. 榜单条数上限 200（`leaderboardLimit`）只是防拖垮查询的硬顶，不是产品设计的 Top N 榜；超限时当前界面没有分页提示，属于已知缺口。
+
