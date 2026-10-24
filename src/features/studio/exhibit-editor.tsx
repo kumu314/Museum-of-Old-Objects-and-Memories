@@ -211,7 +211,7 @@ export function ExhibitEditor({ museum, initial, slotIndex, resetKey, cabinet, p
       <section className="workbench-column" id={`${id}-story`} role="tabpanel" aria-labelledby={`${id}-tab-story`} data-active={tab === 'story'}>
         <header className="workbench-section-heading"><h2>关于它，也关于你们</h2><span>02 / 记下回忆</span></header>
         <fieldset disabled={disabled} className="workbench-fields">
-          <Field label="共同回忆 · 原始讲述" hint="按自己的话写，记不清的地方也可以留下。原始讲述和录音文字合计最多 12000 字。"><textarea id={`${id}-story-input`} className="workbench-story-input" rows={8} value={fields.rawStory} placeholder="它与你和谁有关？你们一起经历过什么？为什么想把它留下来？从最想说的那一段开始。" onChange={(event) => change('rawStory', event.target.value)} /></Field>
+          <Field label="共同回忆 · 原始讲述" hint="按自己的话写，记不清的地方也可以留下。原始讲述和录音文字分别保存，当前编辑器中两项合计最多 12000 字。"><textarea id={`${id}-story-input`} className="workbench-story-input" rows={8} value={fields.rawStory} placeholder="它与你和谁有关？你们一起经历过什么？为什么想把它留下来？从最想说的那一段开始。" onChange={(event) => change('rawStory', event.target.value)} /></Field>
           <details className="workbench-details"><summary>添加录音整理文本（可选）</summary><Field label="人工整理的录音文字" hint="与上面的讲述分别保存。当前没有自动转写，请复听录音后填写。"><textarea rows={4} value={fields.transcript ?? ''} onChange={(event) => change('transcript', event.target.value || null)} /></Field></details>
         </fieldset>
         <div className="workbench-story-action"><div><h3>整理成一段展签</h3><p className="wb-hint">只整理你提供的事实，保留不确定的表达。</p></div><button type="button" className="wb-secondary" disabled={disabled || dirty || draftEdited || !saved || saved.sourceSegments.length === 0} onClick={generate}>{busy === '整理故事' ? '正在整理…' : '整理故事'}</button></div>
