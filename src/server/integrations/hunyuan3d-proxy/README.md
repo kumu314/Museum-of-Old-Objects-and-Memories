@@ -1,6 +1,6 @@
 # 混元 3D 网页反代适配器（演示路径）
 
-对接本机 [hunyuan3d-proxy](https://github.com/montezl/hunyuan3d-proxy)（腾讯混元 3D 网页端反向代理）的 **concept（概念站）** 通道，复用 `../hunyuan3d` 的共享类型、错误、GLB 校验与下载策略。生产路径仍是官方云 API 适配器（`../hunyuan3d`）；本模块是**演示用**的第二 provider，二者实现同一个 `Hunyuan3DClient` 接口，C 的编排层无需感知差别。
+对接本机 [hunyuan3d-proxy](https://github.com/montezl/hunyuan3d-proxy)（腾讯混元 3D 网页端反向代理）的 **concept（概念站）** 通道，复用 `../hunyuan3d` 的共享类型、错误、GLB 校验与下载策略。生产路径仍是官方云 API 适配器（`../hunyuan3d`）；本模块是**演示用**的第二 provider，二者实现同一个 `Hunyuan3DClient` 接口，但均尚未接入应用的持久化任务与发布链路。
 
 ## 合规与凭据边界
 
@@ -37,7 +37,7 @@ const client = createHunyuanWebProxyClient({
 ## 未验证项（真实试跑后核对）
 
 1. `genUploadInfo` 返回的 COS 临时凭证字段名（`encryptTmpSecretId/Key/Token` 等）来自网页 SPA 逆向记录，没有真实样本；`parseCosUploadInfo` 按别名容错，字段缺失时受控失败。
-2. 结果 GLB 的实际下载域名：默认沿用腾讯 COS 主机策略（`*.cos.*.myqcloud.com`，与官方桶域名清单一致）；真实响应出现其他域名时通过 `resultUrlPolicy` 显式调整，不放宽默认。
+2. 结果 GLB 的实际下载域名：默认沿用 [共享腾讯 COS 来源策略](../hunyuan3d/README.md#结果下载来源策略)，包含受约束的 `myqcloud.com` 与 `tencentcos.cn` 地域/存储桶端点。真实响应出现其他域名时，须先核实来源并复核共享允许策略；`resultUrlPolicy` 覆盖仅供测试注入本地假服务，不用于绕过真实结果的来源校验。
 3. 真实输出的坐标、正面、原点与尺度仍无保证；入库前按 §9.6 由 D 规范化。
 4. 上传与生成均会消耗网页端积分（concept 与主站积分池独立）。
 

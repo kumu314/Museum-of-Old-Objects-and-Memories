@@ -43,3 +43,37 @@ test('超过40个短段落时只合并相邻同来源片段，保留原文并符
     assert.deepEqual(sourceSegmentsFromText(rawStory, transcript, segments), segments);
   }
 });
+
+test('合并保留原文的空行、空格与缩进，所有片段都通过 AI 原文子串核对', () => {
+  for (const separator of ['\n\n\n', '\n \n', '\n\t\n', '\r\n\r\n', '  \n\n  ']) {
+    const paragraphs = Array.from({ length: 41 }, (_, index) => `第${index}段𠮷的讲述。`);
+    for (const source of ['rawStory', 'transcript'] as const) {
+      const original = `  ${paragraphs.join(separator)}  `;
+      const rawStory = source === 'rawStory' ? original : '';
+      const transcript = source === 'transcript' ? original : null;
+      const segments = sourceSegmentsSchema.parse(sourceSegmentsFromText(rawStory, transcript, []));
+      assert.equal(segments.length, 40);
+      assert.equal(segments[0]?.text, `${paragraphs[0]}${separator}${paragraphs[1]}`);
+      for (const segment of segments) {
+        assert.equal(segment.source, source);
+        assert.ok(original.includes(segment.text));
+      }
+      assert.deepEqual(sourceSegmentsFromText(rawStory, transcript, segments), segments);
+    }
+  }
+});
+
+test('合并预算包含原始空白，跳过超限组合后合并后续段落且不丢字', () => {
+  const first = '𠮷'.repeat(5_999);
+  const rest = Array.from({ length: 40 }, (_, index) => `讲述${index}。`);
+  const separator = '\n' + ' '.repeat(100) + '\n';
+  const rawStory = `${first}${separator}${rest.join(separator)}`;
+  assert.ok(Array.from(rawStory).length <= 12_000);
+  const segments = sourceSegmentsSchema.parse(sourceSegmentsFromText(rawStory, null, []));
+  assert.equal(segments.length, 40);
+  assert.equal(segments[0]?.text, first);
+  assert.equal(segments[1]?.text, `${rest[0]}${separator}${rest[1]}`);
+  assert.equal(segments.map(({ text }) => text).join(separator), rawStory);
+  assert.ok(segments.every(({ text }) => rawStory.includes(text)));
+  assert.deepEqual(sourceSegmentsFromText(rawStory, null, segments), segments);
+});

@@ -1,6 +1,6 @@
 # 个人展馆与建模接口准备
 
-2026-10-24 用户确认本轮完整实施，并授权推送与提交主仓库 PR。以下描述本分支实现范围，经草稿 [PR #9](https://github.com/kumu314/Museum-of-Old-Objects-and-Memories/pull/9) 交付，验收结果见验收清单；不表示已合并或部署。
+更新：2026-10-24。以下个人展馆与建模照片准备已进入当前 main，来源为 [PR #9](https://github.com/kumu314/Museum-of-Old-Objects-and-Memories/pull/9)。这不表示生成任务或生产部署已完成；最新验证及未执行项见 [验收清单第 8 节](11-验收清单.md#8-代码审查修复复验2026-10-24)。
 
 ## 入口与内容
 
@@ -30,7 +30,7 @@ FROM museums WHERE deleted_at IS NULL
 GROUP BY created_by HAVING count(*) > 1;
 ```
 
-## 混元两种模式的接入边界
+## 混元两种照片准备模式的接入边界
 
 本轮支持选择模式、上传、关联并保存建模准备照片，刷新后恢复。图片经过现有上传校验与脱敏，服务端逐项验证同馆归属和 image 类型。建模输入不自动进入分享快照；展示图仍由 `photoAssetId` 单独指定。
 
@@ -43,7 +43,7 @@ GROUP BY created_by HAVING count(*) > 1;
 } }
 ```
 
-公共契约位于 `src/contracts/model-generation.ts`，预留以下两个 POST 路径（由 `modelGenerationPaths` 提供）。**尚未注册任务提交路由**；这些是接入约定，不能作为已可调用的生成服务。本轮没有任务 ID、进度、生成结果、服务密钥或素材外传，界面按钮禁用并标注“混元 · 尚未接入”。
+公共契约位于 `src/contracts/model-generation.ts`，预留以下两个 POST 路径（由 `modelGenerationPaths` 提供）。**尚未注册任务提交路由**；这些是接入约定，不能作为已可调用的生成服务。当前工作台不会创建任务、展示生成进度或向生成服务传输素材，界面按钮禁用并标注“混元 · 尚未接入”。
 
 | 预留路径 | 校验 schema | 照片字段 |
 | --- | --- | --- |
@@ -54,4 +54,6 @@ GROUP BY created_by HAVING count(*) > 1;
 
 正式接入由 C/D 实现持久任务、幂等提交、状态查询、结果不明时的核对和资源限制；外部调用在事务外，返回后重新核对来源版本。生成结果需经过 GLB 安全与预算校验，再供预览、明确采纳、确认和发布，不能自动替换当前展示。
 
-模式参考腾讯官方开源实现的 [单图/多视图输入](https://github.com/Tencent-Hunyuan/Hunyuan3D-2/blob/main/gradio_app.py) 和 [多视图示例](https://github.com/Tencent-Hunyuan/Hunyuan3D-2/blob/main/examples/shape_gen_multiview.py)，未安装或调用其运行时。开源本地管线的输入能力不代表后续所选云 API 已经具备同样契约，实际供应商接口仍须 D 核实。
+服务端已有两套适配器：[官方云 API](../src/server/integrations/hunyuan3d/README.md) 面向生产，[concept 网页反代](../src/server/integrations/hunyuan3d-proxy/README.md) 仅用于演示，均未接入上述业务任务。官方 API 尚无真实账号调用证据；concept 的真实文生白模样本不代表照片生成与纹理成品链路已通过。
+
+照片准备模式参考腾讯官方开源实现的 [单图/多视图输入](https://github.com/Tencent-Hunyuan/Hunyuan3D-2/blob/main/gradio_app.py) 和 [多视图示例](https://github.com/Tencent-Hunyuan/Hunyuan3D-2/blob/main/examples/shape_gen_multiview.py)，应用未安装或调用其运行时。当前适配器提交入口为单图；四视图照片准备和请求 schema 不代表官方云 API 或 concept 已支持该提交方式，实际接入仍须 D 核实并对齐。

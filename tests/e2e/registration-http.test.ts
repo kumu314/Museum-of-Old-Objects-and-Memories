@@ -125,3 +125,17 @@ test('自助注册HTTP：注册节流不得锁死另一个账号的登录', asyn
   const sameName = await post('/api/auth/login', { username: target, password });
   assert.equal(sameName.status, 200, '注册节流不应波及同名账号的登录');
 });
+
+test('未知用户名轮换仍受限流，耗尽预算不影响已有账号登录', async () => {
+  const account = { username: `known-${randomUUID().slice(0, 12)}`, password };
+  assert.equal((await post('/api/auth/register', account)).status, 201);
+  const responses = await Promise.all(Array.from({ length: 11 }, () =>
+    post('/api/auth/login', { username: `missing-${randomUUID()}`, password }).then(failure)));
+  assert.ok(responses.every(({ status, code }) => status === 401 && code === 'UNAUTHORIZED'));
+  assert.ok(responses.some(({ message }) => message === '登录尝试过多，请五分钟后重试。'));
+  const exhausted = await failure(await post('/api/auth/login', { username: `missing-${randomUUID()}`, password }));
+  assert.equal(exhausted.message, '登录尝试过多，请五分钟后重试。');
+  const login = await post('/api/auth/login', account);
+  assert.equal(login.status, 200);
+  assert.ok(cookieOf(login));
+});

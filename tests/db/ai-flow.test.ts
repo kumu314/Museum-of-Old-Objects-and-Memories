@@ -98,6 +98,28 @@ test('AI草稿单独保存并复用；人工采纳才修改展签，原文保留
   }, pool);
 });
 
+test('他人请求同一展品的 AI 整理在调用上游前被拒绝，不复用拥有者的在途结果', async (context) => {
+  const setup = await fixture(context);
+  const stranger = randomUUID();
+  await pool.query('INSERT INTO team_members(id,username,password_hash) VALUES($1,$2,$3)',
+    [stranger, `ai-stranger-${stranger}`, 'test-only']);
+  context.after(async () => { await pool.query('DELETE FROM team_members WHERE id=$1', [stranger]); });
+  let calls = 0;
+  const arrived = Promise.withResolvers<ServerResponse>();
+  await service(context, (response) => { calls += 1; arrived.resolve(response); });
+  const request = { expectedVersion: setup.exhibit.version };
+  const ownerOperation = requestAiDraft(setup.actor, setup.museum.id, setup.exhibit.id, request, pool);
+  const response = await arrived.promise;
+  try {
+    await assert.rejects(requestAiDraft(stranger, setup.museum.id, setup.exhibit.id, request, pool),
+      (error: unknown) => error instanceof HttpError && error.failure.code === 'NOT_FOUND');
+    assert.equal(calls, 1);
+  } finally {
+    complete(response);
+    await ownerOperation;
+  }
+});
+
 test('AI服务故障或输出无效不改变已保存内容与确认，失败后仍可人工编辑并重新确认', async (context) => {
   const setup = await fixture(context);
   let mode: 'unavailable' | 'invalid' = 'unavailable';

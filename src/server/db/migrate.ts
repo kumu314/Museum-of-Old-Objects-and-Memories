@@ -9,6 +9,7 @@ export interface Migration {
   checksum: string;
   sql: string;
 }
+type AppliedMigration = Pick<Migration, 'version' | 'filename' | 'checksum'>;
 
 export async function loadMigrations(directory: string): Promise<Migration[]> {
   const filenames = (await readdir(directory)).filter((name) => name.endsWith('.sql')).sort();
@@ -23,6 +24,26 @@ export async function loadMigrations(directory: string): Promise<Migration[]> {
   }
   if (migrations.length === 0) throw new Error('No SQL migrations found.');
   return migrations;
+}
+
+function verifyAppliedMigrations(migrations: readonly Migration[], applied: readonly AppliedMigration[]): void {
+  for (const row of applied) {
+    const migration = migrations[row.version - 1];
+    if (!migration || migration.filename !== row.filename || migration.checksum !== row.checksum) {
+      throw new Error(`Applied migration ${row.version} has changed or is missing.`);
+    }
+  }
+  if (applied.some((row, index) => row.version !== index + 1)) {
+    throw new Error('Applied migration history is not contiguous.');
+  }
+}
+
+/** Health checks inspect the migration ledger without applying or repairing migrations. */
+export async function verifyMigrationsCurrent(database: Pick<Pool, 'query'>, directory = resolve(process.cwd(), 'migrations')): Promise<void> {
+  const migrations = await loadMigrations(directory);
+  const applied = await database.query<AppliedMigration>('SELECT version, filename, checksum FROM schema_migrations ORDER BY version');
+  verifyAppliedMigrations(migrations, applied.rows);
+  if (applied.rows.length !== migrations.length) throw new Error('Database migrations are incomplete.');
 }
 
 export async function migrate(pool: Pool, directory = resolve(process.cwd(), 'migrations')): Promise<number[]> {
@@ -42,18 +63,10 @@ export async function migrate(pool: Pool, directory = resolve(process.cwd(), 'mi
       checksum text NOT NULL,
       applied_at timestamptz NOT NULL DEFAULT now()
     )`);
-    const applied = await client.query<{ version: number; filename: string; checksum: string }>(
+    const applied = await client.query<AppliedMigration>(
       'SELECT version, filename, checksum FROM schema_migrations ORDER BY version',
     );
-    for (const row of applied.rows) {
-      const migration = migrations[row.version - 1];
-      if (!migration || migration.filename !== row.filename || migration.checksum !== row.checksum) {
-        throw new Error(`Applied migration ${row.version} has changed or is missing.`);
-      }
-    }
-    if (applied.rows.some((row, index) => row.version !== index + 1)) {
-      throw new Error('Applied migration history is not contiguous.');
-    }
+    verifyAppliedMigrations(migrations, applied.rows);
     const newVersions: number[] = [];
     for (const migration of migrations.slice(applied.rows.length)) {
       await client.query(migration.sql);

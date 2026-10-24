@@ -8,6 +8,7 @@ import { getServerConfig } from '../config';
 import { getPool, withTransaction } from '../db/pool';
 import { HttpError } from '../http';
 import { hashPassword, verifyPassword } from './password';
+import { allowUnknownLoginAttempt } from './unknown-login-throttle';
 
 const lifetimeSeconds = 8 * 60 * 60;
 const cookieSchema = z.strictObject({ sessionId: z.uuid() });
@@ -62,6 +63,9 @@ export async function loginMember(input: LoginInput) {
   const member = z.object({ id: z.uuid(), username: z.string(), password_hash: z.string() }).optional().parse(result.rows[0]);
   // Unknown usernames must not create unbounded rows in the throttle table.
   if (!member) {
+    if (!allowUnknownLoginAttempt()) {
+      throw new HttpError({ code: 'UNAUTHORIZED', message: '登录尝试过多，请五分钟后重试。' });
+    }
     await verifyPassword(input.password, `scrypt:${'0'.repeat(48)}:${'0'.repeat(128)}`);
     throw new HttpError({ code: 'UNAUTHORIZED', message: '账号或密码不正确。' });
   }
