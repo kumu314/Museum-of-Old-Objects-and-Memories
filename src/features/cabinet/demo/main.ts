@@ -156,7 +156,8 @@ function update() {
     storyRoot.render(createElement(ExhibitStory, { key: item.id,
       exhibit: { name: description.title, era: description.era, caption: description.description, modelKey: stageItem.modelKey,
         approximation: '当前为交互样例，非物主藏品精确复原。实拍、物主故事与录音尚未接入。', sourceNotice: description.source },
-      photoUrl: null, audioUrl: null, active: state.phase !== 'returning' }));
+      // 独立样例没有多人讲述数据：没有后端就没有作者，给空数组比伪造署名更诚实。
+      photoUrl: null, audioUrl: null, contributions: [], active: state.phase !== 'returning' }));
   } else storyRoot.render(null);
   storySelection = state.selectedId;
   const retry = document.getElementById('retry-model');

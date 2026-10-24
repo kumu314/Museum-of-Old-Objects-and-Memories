@@ -33,7 +33,7 @@ export function MyContributions({ initial }: { readonly initial: MyContributions
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const [composing, setComposing] = useState<string | null>(null);
-  const [draft, setDraft] = useState({ story: '', sourceNote: '', publishConsent: true });
+  const [draft, setDraft] = useState({ story: '', sourceNote: '', publishConsent: false });
 
   async function run(work: () => Promise<string>) {
     if (busy) return;
@@ -65,7 +65,7 @@ export function MyContributions({ initial }: { readonly initial: MyContributions
         contributionSchema,
         jsonRequest('POST', { story: draft.story.trim(), sourceNote: draft.sourceNote.trim(), publishConsent: draft.publishConsent }));
       setComposing(null);
-      setDraft({ story: '', sourceNote: '', publishConsent: true });
+      setDraft({ story: '', sourceNote: '', publishConsent: false });
       return '已记录你的讲述，署名是你本人；它不会和别人的内容合并。';
     });
   }
@@ -148,7 +148,7 @@ export function MyContributions({ initial }: { readonly initial: MyContributions
                     <label className={styles.check}>
                       <input type="checkbox" checked={draft.publishConsent}
                         onChange={(event) => setDraft({ ...draft, publishConsent: event.target.checked })} />
-                      我同意这份内容出现在公开版本里（提交后可撤回这份讲述）
+                      我同意这份讲述在展品已发布且分享开启时立即向登录参观者公开，无需馆主再次发布（可撤回）
                     </label>
                     <div className={styles.actions}>
                       <button type="button" className={styles.primary} disabled={busy || draft.story.trim() === '' || draft.sourceNote.trim() === ''}
@@ -157,7 +157,7 @@ export function MyContributions({ initial }: { readonly initial: MyContributions
                     </div>
                   </div>
                 ) : (
-                  <button type="button" className={styles.link} onClick={() => { setComposing(item.invitation.id); setDraft({ story: '', sourceNote: '', publishConsent: true }); }}>
+                  <button type="button" className={styles.link} onClick={() => { setComposing(item.invitation.id); setDraft({ story: '', sourceNote: '', publishConsent: false }); }}>
                     写一份讲述
                   </button>
                 )}
@@ -173,8 +173,8 @@ export function MyContributions({ initial }: { readonly initial: MyContributions
           <p className={styles.panelNote}>{data.contributions.length} 份 · 各自署名，不合并</p>
         </div>
         <p className={styles.muted}>
-          公开参观页目前还不展示多人讲述（发布快照的格式尚未扩展），所以「同意公开」现在只是把授权记录下来：
-          等人讲述进入公开版本时，它决定你的内容是否出现。已撤回的内容永远不会被放进去。
+          同意公开的讲述独立展示在已发布展品旁，无需馆主再次发布。撤回后，新请求不再返回这份讲述，
+          不影响其他讲述或整馆分享；已打开页面需重新读取，已下载副本无法撤回。
         </p>
         {data.contributions.length === 0 ? (
           <p className={styles.muted}>你还没有写过讲述。</p>

@@ -2,7 +2,7 @@ import { notFound, redirect } from 'next/navigation';
 import { loginDestination } from '../../../features/studio/login-destination';
 import { SharedMuseum } from '../../../features/viewer/shared-museum';
 import { requireMember } from '../../../server/auth/session';
-import { readShare } from '../../../server/core/sharing';
+import { readSharedVisit } from '../../../server/core/sharing';
 import { HttpError } from '../../../server/http';
 
 export const dynamic = 'force-dynamic';
@@ -15,9 +15,9 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
     }
     throw error;
   });
-  const museum = await readShare(member.id, token).catch((error: unknown) => {
+  const shared = await readSharedVisit(member.id, token).catch((error: unknown) => {
     if (error instanceof HttpError && error.failure.code === 'SHARE_NOT_FOUND') notFound();
     throw error;
   });
-  return <SharedMuseum key={token} token={token} initialMuseum={museum} />;
+  return <SharedMuseum key={token} token={token} initialMuseum={shared.museum} initialContributions={shared.contributions} />;
 }

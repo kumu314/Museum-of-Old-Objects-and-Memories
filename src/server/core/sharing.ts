@@ -2,6 +2,8 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type { PoolClient } from 'pg';
 import { z } from 'zod';
 import { cabinetPosition, displayPhotoRequiredMessage, idSchema, missingDisplayPhoto, publicMuseumSchema, publishResultSchema, shareNotFoundMessage, shareTokenSchema, toPublicExhibit } from '../../contracts';
+import { sharedContributionsSchema } from '../../contracts/contributors';
+import { sharedVisitSchema } from '../../contracts/shared-visit';
 import { HttpError } from '../http';
 import { inTransaction, museumDraft } from './museums';
 import { assertVersion, assetRecord, exhibitRecords, invalid, museumRecord, requireActor, validateAssets } from './records';
@@ -105,6 +107,56 @@ export function recordMuseumView(actorId: string, token: string, client?: PoolCl
     return { ok: true as const };
   }, client);
 }
+/**
+ * 参观页读取多人讲述（方向二 · 第五块）。
+ *
+ * **讲述不进 `published_snapshots`，这是刻意的。** 三条理由，按重要性排：
+ *
+ * 1. **撤回必须立即生效。** 封存的快照有 `guard_snapshot_mutation` 触发器，改不了；
+ *    要把一条讲述从快照里拿掉，只能新建快照 → 整馆 version+1、所有展品重新封存。
+ *    一个人撤回自己那一段，引发整馆重发，代价和权限都不对。
+ * 2. **讲述的作者不是馆主。** 快照的语义是"馆主发布那一刻的定稿"。把别人的内容封进
+ *    馆主的快照，等于馆主发布时替所有共同作者做了一次不可撤销的定稿，之后作者改不了。
+ * 3. **两套生命周期本来就不同。** 快照管展品结构（馆主的），讲述管"谁讲过什么"（作者的）。
+ *
+ * 所以这里的分工是：快照给"有哪些展品"，活表给"谁在上面讲过话"。
+ * 安全边界仍然只有一道，且是同一道：先过 `shareRecord`（token 有效 + 分享开着 +
+ * 未删除 + 快照已封存）。读不到快照就 404，讲述一个字都不会返回。
+ *
+ * 可见条件只有两条：作者本人同意公开、且没有撤回。**与邀请状态无关**——
+ * 已经写下的讲述不因馆主事后收回邀请而消失，那是作者的内容；收回邀请只是不能再新增。
+ * 展品范围严格取快照里的展品 id：发布后被软删的展品，其讲述只跟着快照一起出现或消失，
+ * 不会因为活表里还留着行就漏到别的展品上。
+ */
+export function readShareContributions(actorId: string, token: string, client?: PoolClient) {
+  return inTransaction(async (db) => {
+    await requireActor(db, actorId);
+    const share = await shareRecord(db, token);
+    return contributionsForShare(db, share);
+  }, client);
+}
+
+async function contributionsForShare(db: PoolClient, share: z.infer<typeof shareRecordSchema>) {
+  const exhibitIds = share.data.exhibits.map((exhibit) => exhibit.id);
+  if (exhibitIds.length === 0) return sharedContributionsSchema.parse({ museumId: share.id, contributions: [] });
+  const result = await db.query<Record<string, unknown>>(`SELECT c.id,c.exhibit_id AS "exhibitId",
+    c.author_name AS "authorName",c.author_role AS "authorRole",c.story,c.source_note AS "sourceNote"
+    FROM contributions c
+    WHERE c.museum_id=$1 AND c.exhibit_id=ANY($2::uuid[]) AND c.publish_consent AND c.withdrawn_at IS NULL
+    ORDER BY c.created_at,c.id`, [share.id, exhibitIds]);
+  return sharedContributionsSchema.parse({ museumId: share.id, contributions: result.rows });
+}
+
+/** 展馆与实时讲述共用一次快照读取，避免重新发布时拼接两个版本的展品范围。 */
+export function readSharedVisit(actorId: string, token: string, client?: PoolClient) {
+  return inTransaction(async (db) => {
+    await requireActor(db, actorId);
+    const share = await shareRecord(db, token);
+    const shared = await contributionsForShare(db, share);
+    return sharedVisitSchema.parse({ museum: share.data, contributions: shared.contributions });
+  }, client);
+}
+
 export function getShareAsset(actorId: string, token: string, assetId: string, client?: PoolClient) {
   return inTransaction(async (db) => {
     await requireActor(db, actorId);
