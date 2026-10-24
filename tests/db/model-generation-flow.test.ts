@@ -14,6 +14,7 @@ import { getIsolatedTestDatabaseUrl } from '../../src/server/db/test-database';
 import { resolveAssetPath } from '../../src/server/assets/storage';
 import { HttpError } from '../../src/server/http';
 
+process.env.NODE_ENV = 'test';
 const pool = new Pool({ connectionString: getIsolatedTestDatabaseUrl(), max: 1, connectionTimeoutMillis: 1000 });
 // getServerConfig 是进程级单例：整个文件共享一个上传根目录，用例内以
 // uuid 存储键隔离，避免目录切换被缓存吞掉。
@@ -104,6 +105,8 @@ async function fixture(context: TestContext) {
 
 type ProxyState = {
   submitErrNo?: number | undefined;
+  disconnectSubmit?: boolean;
+  beforeSubmit?: () => Promise<void>;
   geometryStatus: number;
   textureStatus: number | null;
   glbWithMaterial: boolean;
@@ -114,11 +117,12 @@ async function fakeProxy(context: TestContext, state: ProxyState) {
   const previous = names.map((name) => [name, process.env[name]] as const);
   let putBodyLength = 0;
   let textureSubmits = 0;
+  let geometrySubmits = 0;
   const server = createServer((request: IncomingMessage, response: ServerResponse) => {
     request.on('error', () => {}); response.on('error', () => {});
     const chunks: Buffer[] = [];
     request.on('data', (chunk: Buffer) => chunks.push(chunk));
-    request.on('end', () => {
+    request.on('end', async () => {
       const url = request.url ?? '';
       if (request.method === 'PUT') {
         putBodyLength = Buffer.concat(chunks).length;
@@ -138,8 +142,11 @@ async function fakeProxy(context: TestContext, state: ProxyState) {
         return;
       }
       if (url === '/game3d/geometry_generation/image2geometry') {
+        geometrySubmits += 1;
+        if (state.beforeSubmit) await state.beforeSubmit();
+        if (state.disconnectSubmit) { response.destroy(); return; }
         if (state.submitErrNo !== undefined) {
-          response.end(JSON.stringify({ errNo: state.submitErrNo, errMsg: '输入参数错误', data: null })); return;
+          response.end(JSON.stringify({ errNo: state.submitErrNo, errMsg: 'secret-token /private/path 输入参数错误', data: null })); return;
         }
         response.end(JSON.stringify({ errNo: 0, errMsg: '', data: { worksId: 'geo-1' } })); return;
       }
@@ -182,7 +189,7 @@ async function fakeProxy(context: TestContext, state: ProxyState) {
   process.env.HUNYUAN_PROXY_BASE_URL = `http://127.0.0.1:${address.port}`;
   // 本地假上游不是 HTTPS COS：显式开启测试注入口，生产不得设置。
   process.env.HUNYUAN_PROXY_ALLOW_INSECURE_UPLOAD = '1';
-  return { get putLength() { return putBodyLength; }, get textureSubmits() { return textureSubmits; } };
+  return { get geometrySubmits() { return geometrySubmits; }, get putLength() { return putBodyLength; }, get textureSubmits() { return textureSubmits; } };
 }
 
 function request(setup: Awaited<ReturnType<typeof fixture>>) {
@@ -265,4 +272,82 @@ test('白模结果被判失败；崩溃遗留的 SUBMITTING 按提交结果未�
     requestSingleModelGeneration(setup.actor, setup.museum.id, setup.exhibit.id, request(setup), pool),
     (error: unknown) => error instanceof HttpError && error.failure.code === 'VALIDATION_ERROR',
   );
+});
+
+
+test('提交响应丢失保持未知；轮询和新 requestId 均不会重复付费', async (context) => {
+  const setup = await fixture(context);
+  const proxy = await fakeProxy(context, { disconnectSubmit: true, geometryStatus: 0, textureStatus: null, glbWithMaterial: true });
+  const input = request(setup);
+  const unknown = await requestSingleModelGeneration(setup.actor, setup.museum.id, setup.exhibit.id, input, pool);
+  assert.equal(unknown.status, 'SUBMITTING');
+  assert.equal(unknown.errorCode, 'SUBMIT_UNKNOWN');
+  assert.equal((await getModelGenerationJob(setup.actor, setup.museum.id, setup.exhibit.id, unknown.id, pool)).status, 'SUBMITTING');
+  assert.equal((await requestSingleModelGeneration(setup.actor, setup.museum.id, setup.exhibit.id, input, pool)).id, unknown.id);
+  await assert.rejects(requestSingleModelGeneration(setup.actor, setup.museum.id, setup.exhibit.id, request(setup), pool), HttpError);
+  assert.equal(proxy.geometrySubmits, 1);
+});
+
+test('提交中并发读取保持状态；相同失败 requestId 不再次提交且不泄露上游文本', async (context) => {
+  const setup = await fixture(context);
+  const state: ProxyState = { submitErrNo: 200002, geometryStatus: 0, textureStatus: null, glbWithMaterial: true,
+    beforeSubmit: async () => {
+      const rows = await pool.query<{ id: string }>('SELECT id FROM model_generation_jobs WHERE exhibit_id=$1', [setup.exhibit.id]);
+      const id = rows.rows[0]?.id; assert.ok(id);
+      assert.equal((await getModelGenerationJob(setup.actor, setup.museum.id, setup.exhibit.id, id, pool)).status, 'SUBMITTING');
+    },
+  };
+  const proxy = await fakeProxy(context, state);
+  const input = request(setup);
+  const failed = await requestSingleModelGeneration(setup.actor, setup.museum.id, setup.exhibit.id, input, pool);
+  assert.equal(failed.status, 'FAIL');
+  assert.doesNotMatch(failed.errorMessage ?? '', /secret-token|private/);
+  assert.equal((await requestSingleModelGeneration(setup.actor, setup.museum.id, setup.exhibit.id, input, pool)).id, failed.id);
+  assert.equal(proxy.geometrySubmits, 1);
+});
+
+test('独立连接推进纹理只提交一次；完成后新来源版本创建新任务', async (context) => {
+  const setup = await fixture(context);
+  const state: ProxyState = { geometryStatus: 2, textureStatus: null, glbWithMaterial: true };
+  const proxy = await fakeProxy(context, state);
+  const submitted = await requestSingleModelGeneration(setup.actor, setup.museum.id, setup.exhibit.id, request(setup), pool);
+  const otherPool = new Pool({ connectionString: getIsolatedTestDatabaseUrl(), max: 2 });
+  try {
+    await Promise.all([pool, otherPool].map((db) => getModelGenerationJob(setup.actor, setup.museum.id, setup.exhibit.id, submitted.id, db)));
+    assert.equal(proxy.textureSubmits, 1);
+    const record = await pool.query('SELECT texture_submission_started, texture_external_job_id FROM model_generation_jobs WHERE id=$1', [submitted.id]);
+    assert.deepEqual(record.rows[0], { texture_submission_started: true, texture_external_job_id: 'tex-1' });
+    state.textureStatus = 2;
+    const results = await Promise.all([pool, otherPool].map((db) => getModelGenerationJob(setup.actor, setup.museum.id, setup.exhibit.id, submitted.id, db)));
+    assert.equal(results[0]?.modelAssetId, results[1]?.modelAssetId);
+    assert.equal((await pool.query('SELECT id FROM model_assets WHERE job_id=$1', [submitted.id])).rowCount, 1);
+    await pool.query('UPDATE exhibits SET version=version+1 WHERE id=$1', [setup.exhibit.id]);
+    const next = await requestSingleModelGeneration(setup.actor, setup.museum.id, setup.exhibit.id,
+      { ...request(setup), expectedVersion: setup.exhibit.version + 1 }, pool);
+    assert.notEqual(next.id, submitted.id);
+    assert.equal(proxy.geometrySubmits, 2);
+  } finally { await otherPool.end(); }
+});
+
+test('他人不可提交或读取生成任务，归属检查在上游调用前完成', async (context) => {
+  const setup = await fixture(context);
+  const other = await fixture(context);
+  const proxy = await fakeProxy(context, { geometryStatus: 0, textureStatus: null, glbWithMaterial: true });
+  await assert.rejects(requestSingleModelGeneration(other.actor, setup.museum.id, setup.exhibit.id, request(setup), pool), HttpError);
+  assert.equal(proxy.geometrySubmits, 0);
+  const submitted = await requestSingleModelGeneration(setup.actor, setup.museum.id, setup.exhibit.id, request(setup), pool);
+  await assert.rejects(getModelGenerationJob(other.actor, setup.museum.id, setup.exhibit.id, submitted.id, pool), HttpError);
+});
+
+
+test('历史未知任务即使不是最新任务也阻止新付费提交', async (context) => {
+  const setup = await fixture(context);
+  const proxy = await fakeProxy(context, { geometryStatus: 0, textureStatus: null, glbWithMaterial: true });
+  const job = await requestSingleModelGeneration(setup.actor, setup.museum.id, setup.exhibit.id, request(setup), pool);
+  await pool.query("UPDATE model_generation_jobs SET status='SUBMITTING',external_job_id=NULL WHERE id=$1", [job.id]);
+  await pool.query(`INSERT INTO model_generation_jobs(id,museum_id,exhibit_id,source_version,mode,input_asset_id,provider,status,created_by)
+    VALUES($1,$2,$3,$4,'single',$5,'hunyuan-proxy','FAIL',$6)`,
+    [randomUUID(), setup.museum.id, setup.exhibit.id, setup.exhibit.version, setup.photo, setup.actor]);
+  await assert.rejects(requestSingleModelGeneration(setup.actor, setup.museum.id, setup.exhibit.id, request(setup), pool), HttpError);
+  assert.equal(proxy.geometrySubmits, 1);
 });

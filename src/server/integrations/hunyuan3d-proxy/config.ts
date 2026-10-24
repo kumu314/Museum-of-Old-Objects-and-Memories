@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { Hunyuan3DError } from '../hunyuan3d/errors';
 import { HttpError } from '../../http';
 import type { HunyuanProxyConfig } from './types';
 
@@ -27,8 +28,17 @@ export function readHunyuanProxyConfig(environment: Readonly<Record<string, stri
   // 仅限本地假上游测试：显式开启后允许 http 上传与下载地址；生产环境不得
   // 设置，默认策略仍要求腾讯 COS 的 HTTPS 上传与下载来源。
   if (environment.HUNYUAN_PROXY_ALLOW_INSECURE_UPLOAD === '1') {
-    config.cosHostPolicy = () => {};
-    config.resultUrlPolicy = () => {};
+    if (environment.NODE_ENV !== 'test') {
+      throw new HttpError({ code: 'GENERATION_UNAVAILABLE', message: '不安全的生成来源开关仅允许测试环境使用。' });
+    }
+    const loopbackOnly = (url: URL): void => {
+      if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password ||
+        !['127.0.0.1', '[::1]'].includes(url.hostname)) {
+        throw new Hunyuan3DError('RESULT_URL_REJECTED', '测试生成来源仅允许环回地址。');
+      }
+    };
+    config.cosHostPolicy = loopbackOnly;
+    config.resultUrlPolicy = loopbackOnly;
   }
   return config;
 }

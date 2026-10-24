@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readHunyuanProxyConfig } from '../../src/server/integrations/hunyuan3d-proxy/config';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { test, type TestContext } from 'node:test';
 import {
@@ -379,7 +380,7 @@ test('HTTPS 上传地址必须命中腾讯 COS 来源', async (context) => {
   }), 'UPSTREAM_ERROR');
 });
 
-test('几何失败映射为 FAIL；纹理提交失败后按失败上报且进程内不自动重试', async (context) => {
+test('几何失败映射为 FAIL；纹理提交结果未知保持 RUN 且不自动重试', async (context) => {
   const state: ProxyState = {
     loggedIn: true,
     geometryStatus: 3,
@@ -421,13 +422,13 @@ test('几何失败映射为 FAIL；纹理提交失败后按失败上报且进程
   state.geometryStatus = 2;
   state.geometryError = undefined;
   const textureFailure = await client.queryJob('geo-1');
-  assert.equal(textureFailure.status, 'FAIL');
-  assert.equal(textureFailure.errorCode, 'TEXTURE_STAGE_SUBMIT_FAILED');
+  assert.equal(textureFailure.status, 'RUN');
+  assert.equal(textureFailure.errorCode, 'TEXTURE_SUBMIT_UNKNOWN');
   assert.equal(state.textureSubmitCount, 1);
 
   const again = await client.queryJob('geo-1');
-  assert.equal(again.status, 'FAIL');
-  assert.equal(again.errorCode, 'TEXTURE_STAGE_SUBMIT_FAILED');
+  assert.equal(again.status, 'RUN');
+  assert.equal(again.errorCode, 'TEXTURE_SUBMIT_UNKNOWN');
   assert.equal(state.textureSubmitCount, 1, '失败后进程内不得自动重复提交纹理阶段');
 });
 
@@ -487,8 +488,8 @@ test('纹理封装 ok=true 不掩盖内层拒绝', async (context) => {
     } }));
   });
   const client = createHunyuanWebProxyClient({ baseUrl: proxy.origin });
-  assert.equal((await client.queryJob('geo-1')).status, 'FAIL');
-  assert.equal((await client.queryJob('geo-1')).status, 'FAIL');
+  assert.equal((await client.queryJob('geo-1')).errorCode, 'TEXTURE_SUBMIT_UNKNOWN');
+  assert.equal((await client.queryJob('geo-1')).errorCode, 'TEXTURE_SUBMIT_UNKNOWN');
   assert.equal(textureCalls, 1);
 });
 
@@ -632,4 +633,49 @@ test('真实上游形状：多个 JSON 文档拼接时仍能取到作品列表�
   assert.equal(job.status, 'FAIL');
   assert.equal(job.errorCode, '400');
   assert.match(job.errorMessage ?? '', /Bad Request/);
+});
+
+
+test('持久化纹理抢占跨实例防重复，响应丢失后通过列表恢复且兼容 status', async (context) => {
+  let submitted = 0;
+  let visible = false;
+  let claimed = false;
+  const recorded: string[] = [];
+  const proxy = await fakeServer(context, (request, response, body) => {
+    if (request.url === '/api/text3d/texture') {
+      submitted += 1;
+      response.destroy();
+      return;
+    }
+    const parsed: unknown = JSON.parse(body);
+    const geometry = typeof parsed === 'object' && parsed !== null && 'worksIds' in parsed;
+    response.end(JSON.stringify({ errNo: 0, data: { list: geometry ? [
+      { worksId: 'geo-1', status: 2 },
+    ] : visible ? [{ worksId: 'tex-1', status: 1, dependonWorksInfo: { worksId: 'geo-1' } }] : [] } }));
+  });
+  const config: HunyuanProxyConfig = {
+    baseUrl: proxy.origin,
+    claimTextureSubmission: async () => { if (claimed) return false; claimed = true; return true; },
+    recordTextureSubmission: async (geometryId, textureId) => { recorded.push(`${geometryId}:${textureId}`); },
+  };
+  const first = createHunyuanWebProxyClient(config);
+  assert.equal((await first.queryJob('geo-1')).status, 'RUN');
+  const restarted = createHunyuanWebProxyClient(config);
+  assert.equal((await restarted.queryJob('geo-1')).status, 'RUN');
+  assert.equal(submitted, 1);
+  visible = true;
+  assert.equal((await restarted.queryJob('geo-1')).status, 'RUN');
+  assert.deepEqual(recorded, ['geo-1:tex-1']);
+});
+
+test('不安全来源开关仅测试环境可用，且只允许环回 URL', async () => {
+  const environment = { HUNYUAN_PROXY_BASE_URL: 'http://127.0.0.1:8812', HUNYUAN_PROXY_ALLOW_INSECURE_UPLOAD: '1' };
+  assert.throws(() => readHunyuanProxyConfig({ ...environment, NODE_ENV: 'production' }));
+  assert.throws(() => readHunyuanProxyConfig(environment));
+  const config = readHunyuanProxyConfig({ ...environment, NODE_ENV: 'test' });
+  await config.resultUrlPolicy?.(new URL('http://127.0.0.1:1234/model.glb'));
+  for (const value of ['http://169.254.169.254/model.glb', 'https://example.com/model.glb', 'http://user:password@127.0.0.1/model.glb']) {
+    assert.throws(() => config.cosHostPolicy?.(new URL(value)));
+    await assert.rejects(async () => config.resultUrlPolicy?.(new URL(value)));
+  }
 });

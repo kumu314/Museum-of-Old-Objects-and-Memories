@@ -16,6 +16,10 @@ export type HunyuanProxyModelVersion = 'v3.0' | 'v3.1' | 'v3.5-preview' | 'v3.5'
 export type HunyuanProxyConfig = {
   /** 反代服务地址，例如 http://127.0.0.1:8812。默认只绑定本机，不能对公网开放。 */
   baseUrl: string;
+  /** 持久化抢占纹理提交；false 表示已有提交或结果未知，禁止重复付费。 */
+  claimTextureSubmission?: (geometryId: string) => Promise<boolean>;
+  /** 保存已受理或查询恢复的纹理任务号。 */
+  recordTextureSubmission?: (geometryId: string, textureId: string) => Promise<void>;
   timeoutMs?: number;
   maxDownloadBytes?: number;
   /** concept 管线的几何模型版本，默认 v3.1。 */

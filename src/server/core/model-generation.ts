@@ -20,33 +20,25 @@ import type { Hunyuan3DClient } from '../integrations/hunyuan3d/types';
 import { HttpError } from '../http';
 import { assertVersion, assetRecord, exhibitRecord, invalid, museumRecord, notFound, requireActor } from './records';
 
-/**
- * 照片生成 3D 的最小编排闭环（初版，C 需复核归属/额度/快照边界）：
- *
- * - 提交：校验照片准备与版本一致 → 同展品已有未终态任务直接复用（防重复
- *   扣积分）→ 事务外调反代提交 → 写回外部任务号。提交网络失败按 FAIL
- *   记录并允许显式重试；"上游已受理但响应丢失"目前无法与"未受理"区分，
- *   该不确定性如实落在错误信息里（B06 的完整对账待反代支持后补）。
- * - 轮询：查询外部状态；DONE 时下载 GLB（适配器已做来源策略、流式上限
- *   与可加载性校验，且拒绝白模）→ 私有落盘 → model_assets 入库 → 任务
- *   DONE。轮询查询失败视为瞬时错误，不改变任务状态。
- * - 进程内对同一任务只跑一个推进循环，避免并发重复下载/入库。
- */
-
+/** 网络调用在事务外；提交结果未知保留 SUBMITTING，核对上游前不再付费提交。 */
 const PROVIDER = 'hunyuan-proxy';
 
-// 适配器实例按配置缓存：纹理阶段去重等进程内状态必须跨轮询保留，
-// 否则每次轮询都会重复提交纹理任务、重复消耗积分。
-const clients = new Map<string, Hunyuan3DClient>();
-function proxyClient(): Hunyuan3DClient {
-  const config = readHunyuanProxyConfig();
-  const key = `${config.baseUrl}|${process.env.HUNYUAN_PROXY_ALLOW_INSECURE_UPLOAD === '1' ? 'insecure' : 'strict'}`;
-  let client = clients.get(key);
-  if (client === undefined) {
-    client = createHunyuanWebProxyClient(config);
-    clients.set(key, client);
-  }
-  return client;
+function proxyClient(pool: Pool, jobId: string): Hunyuan3DClient {
+  return createHunyuanWebProxyClient({
+    ...readHunyuanProxyConfig(),
+    // 持久化 claim 在发送纹理请求前完成；多进程与重启后也不会重复提交。
+    async claimTextureSubmission(geometryId) {
+      const claimed = await pool.query(
+        `UPDATE model_generation_jobs SET texture_submission_started=true, updated_at=now()
+         WHERE id=$1 AND external_job_id=$2 AND NOT texture_submission_started
+         AND status IN ('WAIT','RUN') RETURNING id`, [jobId, geometryId]);
+      return claimed.rowCount === 1;
+    },
+    async recordTextureSubmission(geometryId, textureId) {
+      await pool.query(`UPDATE model_generation_jobs SET texture_external_job_id=$3, texture_submission_started=true,
+        updated_at=now() WHERE id=$1 AND external_job_id=$2`, [jobId, geometryId, textureId]);
+    },
+  });
 }
 
 const jobRowSchema = z.strictObject({
@@ -107,10 +99,8 @@ function describeFailure(error: unknown): { code: string; message: string } {
       JOB_FAILED: '上游任务执行失败，可重新生成。',
     };
     const message = messages[error.code] ?? '三维生成服务暂时不可用，请稍后重试。';
-    // Hunyuan3DError 的 message 按可展示标准设计；优先保留它（含具体原因），
-    // 仅在缺失时退回通用文案。错误码优先保留上游码（如 errNo）。
-    const display = error.message.length > 0 ? error.message : message;
-    return { code: error.upstreamCode ?? error.code, message: display };
+    // 上游任意文本不可进入 API 或数据库错误字段。
+    return { code: error.upstreamCode && /^\d{1,12}$/.test(error.upstreamCode) ? error.upstreamCode : error.code, message };
   }
   if (error instanceof HttpError) return { code: 'GENERATION_UNAVAILABLE', message: error.message };
   return { code: 'GENERATION_UNAVAILABLE', message: '三维生成服务暂时不可用，请稍后重试。' };
@@ -125,7 +115,7 @@ async function failJob(db: PoolClient, jobId: string, code: string, message: str
 async function generateModelFile(client: Hunyuan3DClient, externalJobId: string, uploadDir: string) {
   const remote = await client.queryJob(externalJobId);
   if (remote.status === 'FAIL') {
-    return { kind: 'fail' as const, code: remote.errorCode ?? 'JOB_FAILED', message: remote.errorMessage ?? '上游任务执行失败，可重新生成。' };
+    return { kind: 'fail' as const, code: 'JOB_FAILED', message: '上游任务执行失败，可重新生成。' };
   }
   if (remote.status !== 'DONE') return { kind: 'pending' as const, status: remote.status };
   const file = remote.files.find((entry) => entry.type.toLowerCase() === 'glb');
@@ -141,13 +131,23 @@ export async function requestSingleModelGeneration(
   pool: Pool = getPool(),
 ): Promise<ModelGenerationJob> {
   // 配置缺失在任务创建前受控失败，避免留下无意义的失败任务。
-  const proxyConfig = readHunyuanProxyConfig();
+  readHunyuanProxyConfig();
   const uploadDir = getServerConfig().uploadDir;
 
   const claim = await withTransaction(async (db) => {
     await requireActor(db, actorId);
     await museumRecord(db, actorId, museumId, true);
     const exhibit = await exhibitRecord(db, museumId, exhibitId);
+    const repeated = await db.query<Record<string, unknown>>(
+      `SELECT ${jobColumns} FROM model_generation_jobs WHERE exhibit_id=$1 AND request_id=$2`,
+      [exhibitId, input.requestId]);
+    if (repeated.rows[0]) {
+      const row = jobRowSchema.parse(repeated.rows[0]);
+      if (row.sourceVersion !== input.expectedVersion || row.inputAssetId !== input.imageAssetId) {
+        invalid('同一请求标识不能用于不同的建模输入。');
+      }
+      return { existing: rowToJob(row, await loadStats(db, row.modelAssetId)) };
+    }
     assertVersion(exhibit.version, input.expectedVersion);
     if (exhibit.modelInput.mode !== 'single' || exhibit.modelInput.imageAssetId !== input.imageAssetId) {
       invalid('请先保存与本请求一致的单张照片准备，再发起生成。');
@@ -155,49 +155,59 @@ export async function requestSingleModelGeneration(
     const stored = await assetRecord(db, museumId, input.imageAssetId);
     if (stored.asset.kind !== 'image') invalid('生成需要图片素材。');
 
+    const outstanding = await db.query(
+      `SELECT id FROM model_generation_jobs WHERE exhibit_id=$1 AND status IN ('SUBMITTING','WAIT','RUN') LIMIT 1`, [exhibitId]);
+    if (outstanding.rowCount) invalid('已有任务正在执行或提交结果待核对，请先查看任务状态，不要重复提交。');
+
     const latest = await db.query<Record<string, unknown>>(
       `SELECT ${jobColumns} FROM model_generation_jobs WHERE exhibit_id=$1 AND museum_id=$2
        ORDER BY created_at DESC LIMIT 1`, [exhibitId, museumId]);
     const latestRow = latest.rows[0];
     if (latestRow !== undefined) {
       const row = jobRowSchema.parse(latestRow);
-      // 上一次提交还在进行中或结果未知：拒绝再次提交，避免重复扣积分。
-      if (row.status === 'SUBMITTING' && row.externalJobId === null) {
-        invalid('上一次提交尚未完成或结果未知，为避免重复扣积分，请稍后再试。');
-      }
-      if (row.status !== 'FAIL') {
-        // 已有执行中或已完成任务：直接复用，不重复消耗积分。
+      if (row.status === 'DONE' && row.sourceVersion === exhibit.version && row.inputAssetId === input.imageAssetId) {
+        // 同一来源已完成：直接复用，不重复消耗积分。
         const stats = await loadStats(db, row.modelAssetId);
         return { existing: rowToJob(row, stats) };
       }
     }
     const id = randomUUID();
     await db.query(
-      `INSERT INTO model_generation_jobs(id,museum_id,exhibit_id,source_version,mode,input_asset_id,provider,status,created_by)
-       VALUES($1,$2,$3,$4,'single',$5,$6,'SUBMITTING',$7)`,
-      [id, museumId, exhibitId, exhibit.version, input.imageAssetId, PROVIDER, actorId]);
+      `INSERT INTO model_generation_jobs(id,museum_id,exhibit_id,source_version,mode,input_asset_id,provider,status,created_by,request_id)
+       VALUES($1,$2,$3,$4,'single',$5,$6,'SUBMITTING',$7,$8)`,
+      [id, museumId, exhibitId, exhibit.version, input.imageAssetId, PROVIDER, actorId, input.requestId]);
     return { jobId: id, stored };
   }, pool);
   if ('existing' in claim) return claim.existing;
 
-  // 事务外执行网络调用；失败把任务记为 FAIL，允许显式重试。
+  // 仅确定未进入付费提交，或上游明确拒绝时才允许新请求。
+  let submissionStarted = false;
+  let externalAccepted = false;
   try {
     const stored = claim.stored;
     if (stored.asset.kind !== 'image') invalid('生成需要图片素材。');
     const bytes = new Uint8Array(await readFile(resolveAssetPath(uploadDir, stored.storageKey)));
-    const { jobId } = await proxyClient().submitImage({
+    submissionStarted = true;
+    const { jobId } = await proxyClient(pool, claim.jobId).submitImage({
       image: { bytes, mime: stored.asset.contentType as 'image/webp', width: stored.asset.width, height: stored.asset.height },
     });
+    externalAccepted = true;
     await withTransaction(async (db) => {
       await db.query(
         `UPDATE model_generation_jobs SET external_job_id=$2, status='WAIT', updated_at=now()
          WHERE id=$1 AND status='SUBMITTING'`, [claim.jobId, jobId]);
     }, pool);
   } catch (error) {
-    const failure = describeFailure(error);
+    const rejected = !externalAccepted && (!submissionStarted || (error instanceof Hunyuan3DError &&
+      (['CONFIG_INVALID', 'INPUT_INVALID'].includes(error.code) || error.upstreamCode !== undefined)));
+    const failure = rejected ? describeFailure(error) : {
+      code: 'SUBMIT_UNKNOWN', message: '提交结果未知，请由管理员核对上游任务后处理，当前不会再次提交。',
+    };
     await withTransaction(async (db) => {
-      await failJob(db, claim.jobId, failure.code, failure.message);
-    }, pool).catch(() => { /* 状态更新失败时保留 SUBMITTING，轮询按提交结果未知处理 */ });
+      if (rejected) await failJob(db, claim.jobId, failure.code, failure.message);
+      else await db.query(`UPDATE model_generation_jobs SET error_code=$2, error_message=$3, updated_at=now()
+        WHERE id=$1 AND status='SUBMITTING'`, [claim.jobId, failure.code, failure.message]);
+    }, pool);
   }
   const finalJob = await withTransaction(async (db) => {
     const row = await loadJob(db, museumId, exhibitId, claim.jobId);
@@ -236,21 +246,18 @@ async function advanceJob(actorId: string, museumId: string, exhibitId: string, 
     return rowToJob(snapshot.row, snapshot.stats);
   }
   if (snapshot.row.externalJobId === null) {
-    // 提交进程崩溃遗留：外部任务号未知，可能已扣积分，不盲目重提。
-    await withTransaction(async (db) => {
-      await failJob(db, jobId, 'SUBMIT_UNKNOWN', '提交结果未知（服务中断），为避免重复扣积分未自动重试。');
-    }, pool);
-    return rowToJob({ ...snapshot.row, status: 'FAIL', errorCode: 'SUBMIT_UNKNOWN',
-      errorMessage: '提交结果未知（服务中断），为避免重复扣积分未自动重试。' }, null);
+    // 也可能是另一个请求仍在提交，读取状态不能把它改为失败。
+    return rowToJob(snapshot.row, null);
   }
   if (snapshot.row.status === 'SUBMITTING') {
     // 外部任务号已写回、状态尚未推进的瞬态：直接返回，下次轮询推进。
     return rowToJob(snapshot.row, null);
   }
 
+  let preparedId: string | undefined;
   try {
     const uploadDir = getServerConfig().uploadDir;
-    const outcome = await generateModelFile(proxyClient(), snapshot.row.externalJobId, uploadDir);
+    const outcome = await generateModelFile(proxyClient(pool, jobId), snapshot.row.externalJobId, uploadDir);
     if (outcome.kind === 'pending') {
       await withTransaction(async (db) => {
         await db.query(`UPDATE model_generation_jobs SET status=$2, updated_at=now() WHERE id=$1 AND status IN ('SUBMITTING','WAIT','RUN')`,
@@ -264,6 +271,7 @@ async function advanceJob(actorId: string, museumId: string, exhibitId: string, 
       }, pool);
       return rowToJob({ ...snapshot.row, status: 'FAIL', errorCode: outcome.code, errorMessage: outcome.message }, null);
     }
+    preparedId = outcome.prepared.id;
     const stats = modelGlbStatsSchema.parse({
       byteLength: outcome.stats.byteLength,
       meshCount: outcome.stats.meshCount,
@@ -273,6 +281,12 @@ async function advanceJob(actorId: string, museumId: string, exhibitId: string, 
     const modelAssetId = await withTransaction(async (db) => {
       await requireActor(db, actorId);
       await museumRecord(db, actorId, museumId, true);
+      const current = await loadJob(db, museumId, exhibitId, jobId);
+      if (current.status === 'DONE') {
+        console.warn('[model-generation] 并发下载的未引用文件待核对清理', { jobId, preparedId });
+        return current.modelAssetId;
+      }
+      if (current.status === 'FAIL') throw new Error('Generation already failed.');
       const inserted = await db.query<{ id: string }>(
         `INSERT INTO model_assets(id,museum_id,job_id,byte_size,storage_key,sha256,stats)
          VALUES(gen_random_uuid(),$1,$2,$3,$4,$5,$6) RETURNING id`,
@@ -286,10 +300,12 @@ async function advanceJob(actorId: string, museumId: string, exhibitId: string, 
     }, pool);
     return rowToJob({ ...snapshot.row, status: 'DONE', modelAssetId, errorCode: null, errorMessage: null }, stats);
   } catch (error) {
+    if (preparedId) console.warn('[model-generation] 文件已写入，提交结果需核对后清理', { jobId, preparedId });
     // 轮询/下载失败：下载与 GLB 校验类错误视为终态；查询类瞬时错误保持原
     // 状态等待下次轮询。非上游错误（如数据库故障）记录日志便于排查。
     if (!(error instanceof Hunyuan3DError)) {
-      console.error('[model-generation] 轮询推进失败:', error);
+      console.error('[model-generation] 轮询推进失败', { jobId, category: error instanceof Error ? error.name : 'unknown' });
+      throw error;
     }
     if (error instanceof Hunyuan3DError && ['INVALID_GLB', 'RESULT_MISSING', 'RESULT_URL_REJECTED', 'DOWNLOAD_FAILED'].includes(error.code)) {
       const failure = describeFailure(error);

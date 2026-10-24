@@ -28,8 +28,8 @@ import { isTencentCosResultHost } from '../hunyuan3d/url-policy';
  *
  * 对上层（C 的任务编排）仍呈现单一的 jobId（几何 worksId）：纹理阶段由
  * queryJob 在几何完成后自动接续，纹理作品通过 dependonWorksInfo 关联找到，
- * 演示期间复用同一客户端实例；接入持久化编排前仍需保存纹理提交记录。
- * 提交失败按任务失败上报，重建实例或进程重启后须先核对上游结果。
+ * 编排层通过提交抢占与任务记录钩子持久化纹理阶段，防止重启重复付费。
+ * 提交结果不明保持运行中，仅查询上游作品以恢复状态，不重新提交。
  *
  * ⚠️ 上游是逆向的网页端接口（个人 Cookie 会话），仅用于演示；生产路径仍是
  * 官方云 API 适配器。Cookie 属于凭据，绝不进入本仓库、客户端或日志。
@@ -213,8 +213,7 @@ function failedJob(worksId: string, item: Record<string, unknown>): HunyuanJob {
 
 export function createHunyuanWebProxyClient(config: HunyuanProxyConfig): HunyuanProxyClient {
   const resolved = resolveConfig(config);
-  const textureStarts = new Map<string, Promise<'started' | 'failed'>>();
-  const textureStartFailed = new Set<string>();
+  const textureStarts = new Map<string, Promise<void>>();
 
   async function request(
     method: 'GET' | 'POST',
@@ -322,22 +321,18 @@ export function createHunyuanWebProxyClient(config: HunyuanProxyConfig): Hunyuan
     return info.resourceUrl;
   }
 
-  /**
-   * 实例内去重的纹理阶段提交：同一几何任务最多自动提交一次。已结算的
-   * promise 保留在 map 中，轮询重复到达时直接复用结果；失败记入
-   * textureStartFailed，后续轮询按任务失败上报，不自动重试。
-   */
-  async function startTextureStage(geometryWorksId: string): Promise<'started' | 'failed' | 'failed-before'> {
-    if (textureStartFailed.has(geometryWorksId)) return 'failed-before';
+  /** 提交前持久化抢占；响应丢失或记录失败仍保留抢占，轮询只做上游对账。 */
+  async function startTextureStage(geometryWorksId: string): Promise<void> {
     let tracked = textureStarts.get(geometryWorksId);
     if (tracked === undefined) {
       tracked = (async () => {
+        if (config.claimTextureSubmission !== undefined &&
+          !await config.claimTextureSubmission(geometryWorksId)) return;
         const submission = await proxyLocal('/api/text3d/texture', {
           worksId: geometryWorksId,
           method: 'image',
           modelVersion: resolved.modelVersion,
         });
-        // Go 反代的 ok 只表示本地封装成功，实际上游状态在 status/body 内。
         if (!isRecord(submission) || typeof submission.status !== 'number' ||
           submission.status < 200 || submission.status >= 300 || !isRecord(submission.body)) {
           upstreamError('纹理阶段未返回有效的上游提交结果。');
@@ -345,15 +340,14 @@ export function createHunyuanWebProxyClient(config: HunyuanProxyConfig): Hunyuan
         const body = submission.body;
         if (body.errNo !== undefined && body.errNo !== 0) upstreamError('纹理阶段提交被上游拒绝。');
         const result = isRecord(body.data) ? body.data : body;
-        if (asString(result.worksId) === undefined) upstreamError('纹理阶段提交未返回 worksId。');
-        return 'started' as const;
-      })().catch(() => {
-        textureStartFailed.add(geometryWorksId);
-        return 'failed' as const;
-      });
+        const textureId = asString(result.worksId);
+        if (textureId === undefined) upstreamError('纹理阶段提交未返回 worksId。');
+        await config.recordTextureSubmission?.(geometryWorksId, textureId);
+      })();
       textureStarts.set(geometryWorksId, tracked);
     }
-    return tracked;
+    // rejected promise 同样保留：外部可能已受理，不允许后续轮询重新付费提交。
+    await tracked;
   }
 
   return {
@@ -396,7 +390,9 @@ export function createHunyuanWebProxyClient(config: HunyuanProxyConfig): Hunyuan
         isRecord(item) && dependsOn(item, id));
 
       if (textureItem !== undefined) {
-        const textureStatus = mapPipelineStatus(textureItem.pipelineStatus);
+        const textureId = asString(textureItem.worksId);
+        if (textureId !== undefined) await config.recordTextureSubmission?.(id, textureId);
+        const textureStatus = mapPipelineStatus(textureItem.pipelineStatus ?? textureItem.status);
         if (textureStatus === undefined) upstreamError('混元 3D 上游返回了未知任务状态。');
         if (!textureStatus.terminal) return { jobId: id, status: textureStatus.status, files: [] };
         if (textureStatus.status === 'FAIL') return failedJob(id, textureItem);
@@ -406,13 +402,12 @@ export function createHunyuanWebProxyClient(config: HunyuanProxyConfig): Hunyuan
         return { jobId: id, status: 'DONE', files: [file] };
       }
 
-      // 几何完成但还没有纹理作品：自动接续纹理阶段（进程内去重）。
-      const outcome = await startTextureStage(id);
-      if (outcome !== 'started') {
-        const job: HunyuanJob = { jobId: id, status: 'FAIL', files: [] };
-        job.errorCode = 'TEXTURE_STAGE_SUBMIT_FAILED';
-        job.errorMessage = '几何生成已完成，但纹理阶段提交失败；需显式重试，不会自动重复消耗积分。';
-        return job;
+      // 缺少作品可能只是上游列表延迟；提交异常不等于任务失败，保留待核对状态。
+      try {
+        await startTextureStage(id);
+      } catch {
+        return { jobId: id, status: 'RUN', files: [], errorCode: 'TEXTURE_SUBMIT_UNKNOWN',
+          errorMessage: '纹理提交结果尚未确认，正在核对上游任务，不会重复提交。' };
       }
       return { jobId: id, status: 'RUN', files: [] };
     },
