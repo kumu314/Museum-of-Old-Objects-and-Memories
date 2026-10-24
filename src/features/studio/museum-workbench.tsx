@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { z } from 'zod';
 import { missingDisplayPhoto, museumDraftSchema, updateMuseumInputSchema, type ExhibitDraft, type MuseumDraft } from '../../contracts/museum';
+import { henanCities, type RegionCity } from '../../contracts/discovery';
 import { publishResultSchema, shareTokenSchema } from '../../contracts/session';
 import { ApiFailure, apiRequest, describeFailure, jsonRequest } from './api';
 import { CabinetPreview } from './cabinet-preview';
@@ -39,9 +40,11 @@ export function MuseumWorkbench({ museumId }: { museumId: string }) {
 function MuseumEditor({ initial }: { initial: MuseumDraft }) {
   const router = useRouter();
   const [museum, setMuseum] = useState(initial);
-  const [metadataBase, setMetadataBase] = useState({ title: initial.title, description: initial.description, version: initial.version });
+  const [metadataBase, setMetadataBase] = useState({ title: initial.title, description: initial.description, regionCity: initial.regionCity, version: initial.version });
   const [title, setTitle] = useState(initial.title);
   const [description, setDescription] = useState(initial.description);
+  // 地区只到城市一级，空字符串表示「未标注」；系统不会按 IP 或其他线索替馆主猜一个。
+  const [regionCity, setRegionCity] = useState<RegionCity | null>(initial.regionCity);
   const [selection, setSelection] = useState(initial.exhibits[0]?.id ?? 'new');
   const [newSlot, setNewSlot] = useState(() => firstEmptySlot(initial.exhibits));
   const [editorGeneration, setEditorGeneration] = useState(0);
@@ -52,7 +55,7 @@ function MuseumEditor({ initial }: { initial: MuseumDraft }) {
   const [message, setMessage] = useState<string | null>(null);
   const [refreshRequired, setRefreshRequired] = useState(false);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
-  const metadataDirty = title !== metadataBase.title || description !== metadataBase.description;
+  const metadataDirty = title !== metadataBase.title || description !== metadataBase.description || regionCity !== metadataBase.regionCity;
   const anyDirty = metadataDirty || editorDirty;
   const busy = action !== null || editorBusy;
   const path = `/api/museums/${museum.id}`;
@@ -75,7 +78,7 @@ function MuseumEditor({ initial }: { initial: MuseumDraft }) {
     setAction('重新读取'); setError(null); setMessage(null);
     try {
       const result = await apiRequest(path, museumDraftSchema);
-      setMuseum(result); setMetadataBase({ title: result.title, description: result.description, version: result.version }); setTitle(result.title); setDescription(result.description);
+      setMuseum(result); setMetadataBase({ title: result.title, description: result.description, regionCity: result.regionCity, version: result.version }); setTitle(result.title); setDescription(result.description); setRegionCity(result.regionCity);
       if (!result.exhibits.some(({ id }) => id === selection)) setSelection(result.exhibits[0]?.id ?? 'new');
       setNewSlot(firstEmptySlot(result.exhibits)); setEditorGeneration((value) => value + 1);
       setEditorDirty(false); setRefreshRequired(false);
@@ -102,9 +105,10 @@ function MuseumEditor({ initial }: { initial: MuseumDraft }) {
     event.preventDefault(); setAction('保存展馆'); setError(null); setMessage(null);
     try {
       // Exhibit edits can advance the museum version without changing its metadata.
-      const version = museum.title === metadataBase.title && museum.description === metadataBase.description ? museum.version : metadataBase.version;
-      const result = await apiRequest(path, museumDraftSchema, jsonRequest('PATCH', updateMuseumInputSchema.parse({ title, description, expectedVersion: version })));
-      setMuseum(result); setMetadataBase({ title: result.title, description: result.description, version: result.version }); setTitle(result.title); setDescription(result.description); setMessage('展馆资料已保存。');
+      const version = museum.title === metadataBase.title && museum.description === metadataBase.description && museum.regionCity === metadataBase.regionCity
+        ? museum.version : metadataBase.version;
+      const result = await apiRequest(path, museumDraftSchema, jsonRequest('PATCH', updateMuseumInputSchema.parse({ title, description, regionCity, expectedVersion: version })));
+      setMuseum(result); setMetadataBase({ title: result.title, description: result.description, regionCity: result.regionCity, version: result.version }); setTitle(result.title); setDescription(result.description); setRegionCity(result.regionCity); setMessage('展馆资料已保存。');
     } catch (failure) { fail(failure); }
     finally { setAction(null); }
   }
@@ -183,6 +187,12 @@ function MuseumEditor({ initial }: { initial: MuseumDraft }) {
     <details id="museum-introduction" className="workbench-introduction"><summary><strong>展馆名称与简介</strong><span>{museum.title}{metadataDirty ? ' · 有未保存修改' : ''}</span></summary><p className="wb-hint">简介展示在展馆首页的馆名下方，用来概括整座展馆。每件旧物的回忆和展签在下方单独收录。</p>
       <form onSubmit={saveMetadata}><Field label="展馆名称"><input required maxLength={120} value={title} onChange={(event) => setTitle(event.target.value)} disabled={busy || refreshRequired} /></Field>
         <Field label="展馆简介"><textarea rows={3} maxLength={2000} value={description} onChange={(event) => setDescription(event.target.value)} disabled={busy || refreshRequired} /></Field>
+        <Field label="所在城市" hint="只用于记忆地图的城市聚合，精确到市一级。留空表示不标注，系统不会按访问来源推断位置。">
+          <select value={regionCity ?? ''} onChange={(event) => setRegionCity(event.target.value === '' ? null : event.target.value as RegionCity)} disabled={busy || refreshRequired}>
+            <option value="">不标注</option>
+            {henanCities.map((city) => <option key={city} value={city}>{city}</option>)}
+          </select>
+        </Field>
         <div><button className="wb-secondary" disabled={busy || !metadataDirty || refreshRequired}>保存展馆资料</button></div></form></details>
     <ExhibitEditor resetKey={`${selection}:${editorGeneration}`} museum={museum} initial={selected} slotIndex={newSlot}
       blocked={action !== null || refreshRequired} onSaved={savedExhibit} onDeleted={deletedExhibit} onDirty={setEditorDirty} onBusy={setEditorBusy}

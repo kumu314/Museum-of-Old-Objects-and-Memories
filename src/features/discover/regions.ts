@@ -46,38 +46,15 @@ export function isRegionCity(value: string): value is RegionCity {
   return (henanCities as readonly string[]).includes(value);
 }
 
-export type DistributionInput = {
-  readonly regionCity: RegionCity | null;
-  readonly viewCount: number;
-};
-
+/**
+ * 地图与列表共用的分布结构。
+ *
+ * 聚合本身在服务端完成（`src/server/core/discovery.ts` 的 `readRegionDistribution`）：
+ * 真实链路的数据量不允许把全馆逐条拉到浏览器再聚合。这里只留下结构定义。
+ */
 export type Distribution = {
   /** 18 个城市按固定顺序输出，没有馆的也要出现，避免地图与列表每次重排。 */
   readonly cities: readonly RegionBucket[];
   /** 未选择城市，不参与地图聚合；单列出来是为了不让总数对不上。 */
   readonly unplacedMuseums: number;
 };
-
-/**
- * 按城市聚合。地区为 NULL 的馆不进城市桶（不猜测、不按 IP 推断），只计入 unplacedMuseums。
- */
-export function distributeByCity(entries: readonly DistributionInput[]): Distribution {
-  const counts = new Map<RegionCity, { museumCount: number; viewCount: number }>();
-  for (const city of henanCities) counts.set(city, { museumCount: 0, viewCount: 0 });
-  let unplacedMuseums = 0;
-  for (const entry of entries) {
-    if (entry.regionCity === null) { unplacedMuseums += 1; continue; }
-    const bucket = counts.get(entry.regionCity);
-    if (bucket === undefined) continue;
-    bucket.museumCount += 1;
-    bucket.viewCount += entry.viewCount;
-  }
-  return {
-    cities: henanCities.map((city) => ({
-      city,
-      museumCount: counts.get(city)?.museumCount ?? 0,
-      viewCount: counts.get(city)?.viewCount ?? 0,
-    })),
-    unplacedMuseums,
-  };
-}
