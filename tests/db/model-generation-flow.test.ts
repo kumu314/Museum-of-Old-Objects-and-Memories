@@ -420,3 +420,4 @@ test('云 API 通道：配置齐全时走官方 Pro 协议，任务记录 provid
   assert.ok(done.modelAssetId);
   assert.ok(actions.includes('QueryHunyuanTo3DProJob'));
 });
+

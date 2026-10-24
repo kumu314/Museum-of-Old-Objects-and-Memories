@@ -57,3 +57,36 @@ test('官方端点覆盖和不安全结果仅允许测试环境环回服务', as
     if (value !== 'invalid') await assert.rejects(async () => configured.config.resultUrlPolicy?.(new URL(value)));
   }
 });
+
+
+test('可替换配置文件：优先于环境变量，改文件即可换 API 与凭据', async () => {
+  const { mkdtemp, writeFile, rm } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { readHunyuanCloudConfig, readForcedProvider, readProviderSettings } = await import('../../src/server/integrations/hunyuan3d/config');
+  const directory = await mkdtemp(join(tmpdir(), 'provider-settings-'));
+  const file = join(directory, 'model-provider.json');
+  try {
+    await writeFile(file, JSON.stringify({
+      provider: 'hunyuan-cloud',
+      cloud: { secretId: 'file-id', secretKey: 'file-key', region: 'ap-shanghai', model: '3.0', endpoint: 'https://gateway.example.com/ai3d' },
+    }));
+    const configured = readHunyuanCloudConfig({ HUNYUAN_SECRET_ID: 'env-id', HUNYUAN_SECRET_KEY: 'env-key', HUNYUAN_REGION: 'ap-guangzhou' }, file);
+    assert.ok(configured);
+    assert.equal(configured.config.secretId, 'file-id', '配置文件必须优先于环境变量');
+    assert.equal(configured.config.region, 'ap-shanghai');
+    assert.equal(configured.config.endpoint, 'https://gateway.example.com/ai3d');
+    assert.equal(configured.config.model, '3.0');
+    assert.equal(readForcedProvider({ HUNYUAN_PROVIDER: 'proxy' }, file), 'hunyuan-cloud');
+
+    await writeFile(file, JSON.stringify({ cloud: { secretId: 'id', secretKey: 'key', region: 'ap-guangzhou', endpoint: 'http://remote.example.com' } }));
+    assert.throws(() => readHunyuanCloudConfig({}, file),
+      (error: unknown) => error instanceof HttpError && error.failure.code === 'GENERATION_UNAVAILABLE');
+
+    await writeFile(file, '{ not json');
+    assert.throws(() => readProviderSettings(file),
+      (error: unknown) => error instanceof HttpError && error.failure.code === 'GENERATION_UNAVAILABLE');
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});

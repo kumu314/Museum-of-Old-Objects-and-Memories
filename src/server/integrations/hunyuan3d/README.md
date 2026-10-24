@@ -76,6 +76,34 @@ if (job.status === 'DONE') {
 5. 失败保留原照片、讲述和已有模型；提交结果不明时先查询，不自动重新付费提交。
 6. 与 A 确认模型朝向、陈列 scale、资源预算和目标设备；资源上限在实测后冻结，不预先编造。
 
+## 额度用完后如何替换 API 与凭据
+
+生产通道支持**服务端热替换**，不需要改代码或重启进程：编辑（或新建）
+`.local/model-provider.json`（Git 已忽略，仅本机可读），下一次生成请求即生效：
+
+```json
+{
+  "provider": "hunyuan-cloud",
+  "cloud": {
+    "secretId": "新的 SecretId",
+    "secretKey": "新的 SecretKey",
+    "region": "ap-guangzhou",
+    "endpoint": "https://ai3d.tencentcloudapi.com/",
+    "model": "3.1",
+    "timeoutMs": 60000
+  }
+}
+```
+
+- `endpoint` 可指向兼容同一协议（TC3-HMAC-SHA256 + `SubmitHunyuanTo3DProJob` /
+  `QueryHunyuanTo3DProJob`）的其他网关；生产必须是 HTTPS，且地址不携带凭据或查询串。
+- `provider` 可锁定 `hunyuan-cloud` 或 `hunyuan-proxy`（演示反代），便于在额度用完后
+  显式切换；也可省略，按可用性自动选择（配置了云 API 就用云 API）。
+- 配置文件优先于环境变量；文件语法错误或字段无效时请求受控失败，不会静默换通道。
+- 凭据只存在于服务端文件；不要通过 API 返回、不要写日志、不要提交仓库。
+- 不做自动降级：额度不足会明确提示，由你替换凭据或切换到演示通道，避免在不知情时
+  改用另一条付费/演示链路。
+
 ## 真实调用验证（2026-10-24）
 
 使用真实腾讯云账号对 Pro 接口完成一次端到端调用（768×768 合成 JPEG，`Model 3.1`、`EnablePBR`）：
