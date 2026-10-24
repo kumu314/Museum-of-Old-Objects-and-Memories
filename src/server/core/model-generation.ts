@@ -350,6 +350,16 @@ async function advanceJob(actorId: string, museumId: string, exhibitId: string, 
       if (assetId === undefined) throw new Error('Saved model asset could not be read.');
       await db.query(`UPDATE model_generation_jobs SET status='DONE', model_asset_id=$2, error_code=NULL, error_message=NULL, updated_at=now()
         WHERE id=$1 AND status IN ('SUBMITTING','WAIT','RUN')`, [jobId, assetId]);
+      // 自动入柜：生成完成即把模型挂到展品（建模照片未变更时）。展品版本 +1、
+      // 旧确认失效；照片保留为公开页兜底与失败回退。照片已变更时跳过自动
+      // 入柜，交由用户重新生成或手动处理。
+      await db.query(
+        `UPDATE exhibits SET generated_model_asset_id=$2, version=version+1, confirmed_version=NULL,
+           confirmation_note=NULL, confirmed_by=NULL, confirmed_at=NULL, updated_at=now()
+         WHERE id=$1 AND museum_id=$3
+           AND generated_model_asset_id IS DISTINCT FROM $2
+           AND model_input->>'imageAssetId' = $4`,
+        [exhibitId, assetId, museumId, snapshot.row.inputAssetId]);
       return assetId;
     }, pool);
     return rowToJob({ ...snapshot.row, status: 'DONE', modelAssetId, errorCode: null, errorMessage: null }, stats);
@@ -403,13 +413,16 @@ export async function adoptGeneratedModel(
     await requireActor(db, actorId);
     await museumRecord(db, actorId, museumId, true);
     const current = await exhibitRecord(db, museumId, exhibitId);
-    assertVersion(current.version, expectedVersion);
     const job = await loadJob(db, museumId, exhibitId, jobId);
     if (job.status !== 'DONE' || job.modelAssetId === null) invalid('只能采纳已完成的生成任务。');
-    assertVersion(current.version, job.sourceVersion);
+    // 幂等：同一模型重复采纳直接返回当前展品，重复点击不再撞版本冲突。
+    if (current.generatedModelAssetId === job.modelAssetId) return current;
+    assertVersion(current.version, expectedVersion);
     if (current.modelInput.mode !== 'single' || job.inputAssetId !== current.modelInput.imageAssetId) {
       invalid('当前展品的建模照片已变更，请重新生成后再采纳。');
     }
+    // 采纳校验输入与展品版本（B09）：展品已演进时旧任务不得入柜。
+    assertVersion(current.version, job.sourceVersion);
     await db.query(
       `UPDATE exhibits SET generated_model_asset_id=$2, version=version+1, confirmed_version=NULL,
          confirmation_note=NULL, confirmed_by=NULL, confirmed_at=NULL, updated_at=now()
