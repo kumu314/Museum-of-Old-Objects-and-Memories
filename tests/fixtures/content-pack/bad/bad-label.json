@@ -1,0 +1,67 @@
+{
+  "_fixture": true,
+  "id": "EX-01",
+  "name": "示例旧物",
+  "era": "约 1980 年代",
+  "category": "简单立体",
+  "facts": {
+    "originalNarrative": "这东西是我爸年轻时用的，具体哪年记不清了。",
+    "transcript": "嗯……这个是我爸年轻时候用的，哪年我真记不清。",
+    "narrativeSource": {
+      "who": "测试物主",
+      "when": "2026-10-24",
+      "channel": "当面"
+    },
+    "sourceSegments": [
+      {
+        "id": "S1",
+        "source": "rawStory",
+        "text": "这东西是我爸年轻时用的"
+      }
+    ],
+    "photos": [
+      {
+        "file": "ex01.jpg",
+        "original": true
+      }
+    ],
+    "audio": null,
+    "knownDoubts": [
+      "具体哪年记不清"
+    ]
+  },
+  "curation": {
+    "aiDraft": {
+      "text": "草稿",
+      "sourceSegmentIds": [
+        "S1"
+      ],
+      "model": "test",
+      "generatedAt": "2026-10-24"
+    },
+    "humanEdits": [],
+    "questions": [
+      "哪一年拿到的"
+    ],
+    "currentLabel": "展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展展"
+  },
+  "confirmation": {
+    "version": "v1",
+    "confirmedBy": "测试物主",
+    "confirmedAt": "2026-10-24 20:00",
+    "channel": "当面",
+    "scope": "全部",
+    "visibility": "仅限家人"
+  },
+  "licenses": [
+    {
+      "file": "ex01.jpg",
+      "source": "物主提供",
+      "licenseScope": "仅内部验收",
+      "authorizedBy": "测试物主",
+      "authorizedAt": "2026-10-24",
+      "approximation": "无"
+    }
+  ],
+  "missing": []
+}

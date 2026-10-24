@@ -13,7 +13,7 @@
     "start": "next start --hostname 127.0.0.1 --port 17682",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src tests scripts/*.ts",
-    "test": "node --env-file-if-exists=.env.local --import tsx --test tests/contracts/*.test.ts tests/server/*.test.ts",
+    "test": "node --env-file-if-exists=.env.local --import tsx --test tests/contracts/*.test.ts tests/server/*.test.ts tests/content/*.test.mjs",
     "test:db": "node --env-file-if-exists=.env.local --import tsx --test tests/db/*.test.ts",
     "test:http": "node --env-file-if-exists=.env.local --import tsx scripts/test-http.ts",
     "db:migrate": "node --env-file-if-exists=.env.local --import tsx scripts/migrate.ts",
