@@ -10,6 +10,7 @@ export type Hunyuan3DErrorCode =
   | 'UPSTREAM_ERROR'
   | 'JOB_FAILED'
   | 'RESULT_MISSING'
+  | 'RESULT_URL_REJECTED'
   | 'DOWNLOAD_FAILED'
   | 'INVALID_GLB'
   | 'TIMEOUT';
@@ -61,6 +62,12 @@ export type Hunyuan3DConfig = {
   region: string;
   /** Must remain the official endpoint outside tests. */
   endpoint?: string;
+  /**
+   * Overrides the built-in download URL allowlist (HTTPS + Tencent COS host +
+   * public addresses). For tests against a local fake upstream only; production
+   * must keep the default policy.
+   */
+  resultUrlPolicy?: (url: URL) => Promise<void> | void;
   model?: '3.0' | '3.1';
   timeoutMs?: number;
   maxDownloadBytes?: number;

@@ -1,6 +1,7 @@
 import { validateGlb } from './glb';
 import { Hunyuan3DError } from './errors';
 import { buildAuthorization, CONTENT_TYPE } from './sign';
+import { assertProviderResultUrl } from './url-policy';
 import {
   HUNYUAN_3D_ENDPOINT,
   HUNYUAN_3D_VERSION,
@@ -64,7 +65,7 @@ function resolveConfig(config: Hunyuan3DConfig) {
   const maxDownloadBytes = config.maxDownloadBytes ?? DEFAULT_MAX_DOWNLOAD_BYTES;
   if (!Number.isInteger(maxDownloadBytes) || maxDownloadBytes < 1) configError('混元 3D 下载上限无效。');
 
-  return { secretId, secretKey, region, endpoint, timeoutMs, maxDownloadBytes, model: config.model };
+  return { secretId, secretKey, region, endpoint, timeoutMs, maxDownloadBytes, model: config.model, resultUrlPolicy: config.resultUrlPolicy };
 }
 
 function validateInput(input: HunyuanGenerationInput, configuredModel: '3.0' | '3.1' | undefined) {
@@ -111,6 +112,42 @@ function responseRecord(value: unknown): Record<string, unknown> {
   return response;
 }
 
+/**
+ * Streams the body while enforcing a real byte cap: oversized responses are
+ * cancelled mid-read instead of being buffered in full first. Returns
+ * undefined when the response has no body at all.
+ */
+async function readResponseBytes(
+  response: Response,
+  maxBytes: number,
+  oversize: () => Hunyuan3DError,
+): Promise<Buffer | undefined> {
+  const declaredHeader = response.headers.get('content-length');
+  if (declaredHeader !== null) {
+    const declared = Number(declaredHeader);
+    if (Number.isInteger(declared) && declared >= 0 && declared > maxBytes) throw oversize();
+  }
+  if (!response.body) return undefined;
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel();
+        throw oversize();
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return Buffer.concat(chunks, total);
+}
+
 export function createHunyuan3DClient(config: Hunyuan3DConfig): Hunyuan3DClient {
   const resolved = resolveConfig(config);
 
@@ -146,11 +183,12 @@ export function createHunyuan3DClient(config: Hunyuan3DConfig): Hunyuan3DClient 
         body,
       });
       if (!response.ok) upstreamError('混元 3D 服务返回 HTTP 错误。');
-      const text = await response.text();
-      if (text.length === 0 || text.length > MAX_UPSTREAM_RESPONSE_BYTES) upstreamError('混元 3D 返回内容无效。');
+      const bytes = await readResponseBytes(response, MAX_UPSTREAM_RESPONSE_BYTES, () =>
+        new Hunyuan3DError('UPSTREAM_ERROR', '混元 3D 返回内容无效。'));
+      if (bytes === undefined || bytes.length === 0) upstreamError('混元 3D 返回内容无效。');
       let parsed: unknown;
       try {
-        parsed = JSON.parse(text);
+        parsed = JSON.parse(bytes.toString('utf8'));
       } catch {
         upstreamError('混元 3D 返回内容不是 JSON。');
       }
@@ -206,9 +244,9 @@ export function createHunyuan3DClient(config: Hunyuan3DConfig): Hunyuan3DClient 
       try {
         url = new URL(file.url);
       } catch {
-        throw new Hunyuan3DError('RESULT_MISSING', 'GLB 下载地址无效。');
+        throw new Hunyuan3DError('RESULT_URL_REJECTED', 'GLB 下载地址无效。');
       }
-      if (!['http:', 'https:'].includes(url.protocol)) throw new Hunyuan3DError('RESULT_MISSING', 'GLB 下载地址协议无效。');
+      const resultUrlPolicy = resolved.resultUrlPolicy ?? assertProviderResultUrl;
       const controller = new AbortController();
       let timedOut = false;
       const timer = setTimeout(() => {
@@ -216,31 +254,12 @@ export function createHunyuan3DClient(config: Hunyuan3DConfig): Hunyuan3DClient 
         controller.abort();
       }, resolved.timeoutMs);
       try {
+        await resultUrlPolicy(url);
         const response = await fetch(url, { redirect: 'error', signal: controller.signal });
         if (!response.ok) throw new Hunyuan3DError('DOWNLOAD_FAILED', 'GLB 下载失败。');
-        const length = response.headers.get('content-length');
-        if (length !== null && Number(length) > resolved.maxDownloadBytes) {
-          throw new Hunyuan3DError('DOWNLOAD_FAILED', 'GLB 超过允许的下载大小。');
-        }
-        if (!response.body) throw new Hunyuan3DError('DOWNLOAD_FAILED', 'GLB 响应没有内容。');
-        const reader = response.body.getReader();
-        const chunks: Uint8Array[] = [];
-        let total = 0;
-        try {
-          for (;;) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            total += value.byteLength;
-            if (total > resolved.maxDownloadBytes) {
-              await reader.cancel();
-              throw new Hunyuan3DError('DOWNLOAD_FAILED', 'GLB 超过允许的下载大小。');
-            }
-            chunks.push(value);
-          }
-        } finally {
-          reader.releaseLock();
-        }
-        const bytes = Buffer.concat(chunks, total);
+        const bytes = await readResponseBytes(response, resolved.maxDownloadBytes, () =>
+          new Hunyuan3DError('DOWNLOAD_FAILED', 'GLB 超过允许的下载大小。'));
+        if (bytes === undefined) throw new Hunyuan3DError('DOWNLOAD_FAILED', 'GLB 响应没有内容。');
         return { bytes, stats: validateGlb(bytes, resolved.maxDownloadBytes) };
       } catch (error) {
         if (error instanceof Hunyuan3DError) throw error;
