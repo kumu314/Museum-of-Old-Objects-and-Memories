@@ -40,6 +40,7 @@ export const createMuseumInputSchema = z.strictObject(museumFields);
 export const updateMuseumInputSchema = z.strictObject({
   ...museumFields,
   regionCity: regionCitySchema.nullable().optional(),
+  discoveryListed: z.boolean().optional(),
   expectedVersion: versionSchema,
 });
 export const versionInputSchema = z.strictObject({ expectedVersion: versionSchema });
@@ -69,6 +70,8 @@ export const exhibitDraftSchema = z.strictObject({
   ...draftFields,
   id: idSchema,
   museumId: idSchema,
+  // 工作台展柜优先渲染已采纳的生成模型；公开参观页在快照支持模型前仍用照片。
+  generatedModelAssetId: idSchema.nullable(),
   version: versionSchema,
   confirmedVersion: versionSchema.nullable(),
   confirmationNote: textSchema(1, 2_000).nullable(),
@@ -92,6 +95,7 @@ export const museumSummarySchema = z.strictObject({
    * 改城市不该要求重新发布，也不该让旧快照带着过期城市。
    */
   regionCity: regionCitySchema.nullable(),
+  discoveryListed: z.boolean(),
   createdAt: timestampSchema,
   updatedAt: timestampSchema,
 });

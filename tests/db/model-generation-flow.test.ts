@@ -19,12 +19,21 @@ const pool = new Pool({ connectionString: getIsolatedTestDatabaseUrl(), max: 1, 
 // getServerConfig 是进程级单例：整个文件共享一个上传根目录，用例内以
 // uuid 存储键隔离，避免目录切换被缓存吞掉。
 const uploadRoot = resolve('.local', `model-jobs-${randomUUID()}`);
+const providerEnv = ['HUNYUAN_PROVIDER', 'HUNYUAN_PROVIDER_CONFIG', 'HUNYUAN_SECRET_ID', 'HUNYUAN_SECRET_KEY', 'HUNYUAN_REGION'] as const;
+const previousProviderEnv = providerEnv.map((name) => [name, process.env[name]] as const);
 before(async () => {
   await mkdir(uploadRoot, { recursive: true });
   process.env.UPLOAD_DIR = uploadRoot;
+  // 隔离本机真实配置文件与云密钥：本文件的反代用例必须走假反代。
+  process.env.HUNYUAN_PROVIDER = 'proxy';
+  process.env.HUNYUAN_PROVIDER_CONFIG = resolve('.local', 'no-such-provider-config.json');
+  delete process.env.HUNYUAN_SECRET_ID;
+  delete process.env.HUNYUAN_SECRET_KEY;
+  delete process.env.HUNYUAN_REGION;
   await migrate(pool);
 });
 after(async () => {
+  for (const [name, value] of previousProviderEnv) { if (value === undefined) delete process.env[name]; else process.env[name] = value; }
   await pool.end();
   await rm(uploadRoot, { recursive: true, force: true });
 });
@@ -92,6 +101,8 @@ async function fixture(context: TestContext) {
       // jobs 与 model_assets 相互外键：先解引用（CHECK 要求 DONE 必须有结果），
       // 再删任务，最后删模型资产与其余数据。
       await db.query(`UPDATE model_generation_jobs SET status='FAIL', model_asset_id=NULL WHERE museum_id=$1`, [result.museum.id]);
+      // exhibits 引用 model_assets：先解引用再删模型资产。
+      await db.query('UPDATE exhibits SET generated_model_asset_id=NULL WHERE museum_id=$1', [result.museum.id]);
       await db.query('DELETE FROM model_assets WHERE museum_id=$1', [result.museum.id]);
       await db.query('DELETE FROM model_generation_jobs WHERE museum_id=$1', [result.museum.id]);
       await db.query('DELETE FROM exhibits WHERE museum_id=$1', [result.museum.id]);
@@ -354,7 +365,7 @@ test('历史未知任务即使不是最新任务也阻止新付费提交', async
 
 test('云 API 通道：配置齐全时走官方 Pro 协议，任务记录 provider 并完成落盘', async (context) => {
   const setup = await fixture(context);
-  const names = ['HUNYUAN_SECRET_ID', 'HUNYUAN_SECRET_KEY', 'HUNYUAN_REGION', 'HUNYUAN_3D_ENDPOINT', 'HUNYUAN_CLOUD_ALLOW_INSECURE_RESULT'] as const;
+  const names = ['HUNYUAN_PROVIDER', 'HUNYUAN_SECRET_ID', 'HUNYUAN_SECRET_KEY', 'HUNYUAN_REGION', 'HUNYUAN_3D_ENDPOINT', 'HUNYUAN_CLOUD_ALLOW_INSECURE_RESULT'] as const;
   const previous = names.map((name) => [name, process.env[name]] as const);
   let submitAction: string | undefined;
   const actions: string[] = [];
@@ -391,6 +402,7 @@ test('云 API 通道：配置齐全时走官方 Pro 协议，任务记录 provid
     server.closeAllConnections();
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   });
+  process.env.HUNYUAN_PROVIDER = 'cloud';
   process.env.HUNYUAN_SECRET_ID = 'synthetic-id';
   process.env.HUNYUAN_SECRET_KEY = 'synthetic-key';
   process.env.HUNYUAN_REGION = 'ap-guangzhou';
@@ -410,4 +422,61 @@ test('云 API 通道：配置齐全时走官方 Pro 协议，任务记录 provid
   assert.equal(done.stats?.materialCount, 1);
   assert.ok(done.modelAssetId);
   assert.ok(actions.includes('QueryHunyuanTo3DProJob'));
+});
+
+
+test('采纳完成的生成模型：展品记录模型资产、版本递增且旧确认失效', async (context) => {
+  const setup = await fixture(context);
+  const state: ProxyState = { geometryStatus: 2, textureStatus: 2, glbWithMaterial: true };
+  await fakeProxy(context, state);
+  const job = await requestSingleModelGeneration(setup.actor, setup.museum.id, setup.exhibit.id, request(setup), pool);
+  const done = await getModelGenerationJob(setup.actor, setup.museum.id, setup.exhibit.id, job.id, pool);
+  assert.equal(done.status, 'DONE');
+  const { adoptGeneratedModel } = await import('../../src/server/core/model-generation');
+  await pool.query('UPDATE exhibits SET confirmed_version=version,confirmed_by=$2,confirmed_at=now(),confirmation_note=$3 WHERE id=$1', [setup.exhibit.id, setup.actor, '已确认']);
+  const adopted = await adoptGeneratedModel(setup.actor, setup.museum.id, setup.exhibit.id, done.id, setup.exhibit.version, pool);
+  const confirmation = await pool.query('SELECT confirmed_by FROM exhibits WHERE id=$1', [setup.exhibit.id]);
+  assert.equal(confirmation.rows[0]?.confirmed_by, null);
+  assert.equal(adopted.generatedModelAssetId, done.modelAssetId);
+  assert.equal(adopted.version, setup.exhibit.version + 1);
+  assert.equal(adopted.confirmedVersion, null);
+  // 旧版本不能再次采纳；模型引用保持到下一次显式操作。
+  await assert.rejects(adoptGeneratedModel(setup.actor, setup.museum.id, setup.exhibit.id, done.id, setup.exhibit.version, pool),
+    (error: unknown) => error instanceof HttpError && error.failure.code === 'VERSION_CONFLICT');
+});
+
+
+test('过期生成结果即使照片不变也不能在新版本采纳', async (context) => {
+  const setup = await fixture(context);
+  await fakeProxy(context, { geometryStatus: 2, textureStatus: 2, glbWithMaterial: true });
+  const job = await requestSingleModelGeneration(setup.actor, setup.museum.id, setup.exhibit.id, request(setup), pool);
+  await getModelGenerationJob(setup.actor, setup.museum.id, setup.exhibit.id, job.id, pool);
+  await pool.query('UPDATE exhibits SET version=version+1 WHERE id=$1', [setup.exhibit.id]);
+  const { adoptGeneratedModel } = await import('../../src/server/core/model-generation');
+  await assert.rejects(adoptGeneratedModel(setup.actor, setup.museum.id, setup.exhibit.id, job.id, setup.exhibit.version + 1, pool),
+    (error: unknown) => error instanceof HttpError && error.failure.code === 'VERSION_CONFLICT');
+});
+
+test('JSON 反代配置实际用于提交与查询，并保留测试来源策略', async (context) => {
+  const setup = await fixture(context);
+  const proxy = await fakeProxy(context, { geometryStatus: 2, textureStatus: 2, glbWithMaterial: true });
+  const file = resolve(uploadRoot, 'model-provider.json');
+  const previousPath = process.env.HUNYUAN_PROVIDER_CONFIG;
+  const baseUrl = process.env.HUNYUAN_PROXY_BASE_URL;
+  assert.ok(baseUrl);
+  await mkdir(dirname(file), { recursive: true });
+  await writeFile(file, JSON.stringify({ provider: 'hunyuan-proxy', proxyBaseUrl: baseUrl }), { flag: 'wx' });
+  delete process.env.HUNYUAN_PROXY_BASE_URL;
+  process.env.HUNYUAN_PROVIDER_CONFIG = file;
+  try {
+    const job = await requestSingleModelGeneration(setup.actor, setup.museum.id, setup.exhibit.id, request(setup), pool);
+    assert.equal(proxy.geometrySubmits, 1);
+    const done = await getModelGenerationJob(setup.actor, setup.museum.id, setup.exhibit.id, job.id, pool);
+    assert.equal(done.status, 'DONE');
+  } finally {
+    process.env.HUNYUAN_PROXY_BASE_URL = baseUrl;
+    if (previousPath === undefined) delete process.env.HUNYUAN_PROVIDER_CONFIG;
+    else process.env.HUNYUAN_PROVIDER_CONFIG = previousPath;
+    await rm(file);
+  }
 });

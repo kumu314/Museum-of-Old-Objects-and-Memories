@@ -40,11 +40,12 @@ export function MuseumWorkbench({ museumId }: { museumId: string }) {
 function MuseumEditor({ initial }: { initial: MuseumDraft }) {
   const router = useRouter();
   const [museum, setMuseum] = useState(initial);
-  const [metadataBase, setMetadataBase] = useState({ title: initial.title, description: initial.description, regionCity: initial.regionCity, version: initial.version });
+  const [metadataBase, setMetadataBase] = useState({ title: initial.title, description: initial.description, regionCity: initial.regionCity, discoveryListed: initial.discoveryListed, version: initial.version });
   const [title, setTitle] = useState(initial.title);
   const [description, setDescription] = useState(initial.description);
   // 地区只到城市一级，空字符串表示「未标注」；系统不会按 IP 或其他线索替馆主猜一个。
   const [regionCity, setRegionCity] = useState<RegionCity | null>(initial.regionCity);
+  const [discoveryListed, setDiscoveryListed] = useState(initial.discoveryListed);
   const [selection, setSelection] = useState(initial.exhibits[0]?.id ?? 'new');
   const [newSlot, setNewSlot] = useState(() => firstEmptySlot(initial.exhibits));
   const [editorGeneration, setEditorGeneration] = useState(0);
@@ -55,7 +56,7 @@ function MuseumEditor({ initial }: { initial: MuseumDraft }) {
   const [message, setMessage] = useState<string | null>(null);
   const [refreshRequired, setRefreshRequired] = useState(false);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
-  const metadataDirty = title !== metadataBase.title || description !== metadataBase.description || regionCity !== metadataBase.regionCity;
+  const metadataDirty = title !== metadataBase.title || description !== metadataBase.description || regionCity !== metadataBase.regionCity || discoveryListed !== metadataBase.discoveryListed;
   const anyDirty = metadataDirty || editorDirty;
   const busy = action !== null || editorBusy;
   const path = `/api/museums/${museum.id}`;
@@ -78,7 +79,7 @@ function MuseumEditor({ initial }: { initial: MuseumDraft }) {
     setAction('重新读取'); setError(null); setMessage(null);
     try {
       const result = await apiRequest(path, museumDraftSchema);
-      setMuseum(result); setMetadataBase({ title: result.title, description: result.description, regionCity: result.regionCity, version: result.version }); setTitle(result.title); setDescription(result.description); setRegionCity(result.regionCity);
+      setMuseum(result); setMetadataBase({ title: result.title, description: result.description, regionCity: result.regionCity, discoveryListed: result.discoveryListed, version: result.version }); setTitle(result.title); setDescription(result.description); setRegionCity(result.regionCity); setDiscoveryListed(result.discoveryListed);
       if (!result.exhibits.some(({ id }) => id === selection)) setSelection(result.exhibits[0]?.id ?? 'new');
       setNewSlot(firstEmptySlot(result.exhibits)); setEditorGeneration((value) => value + 1);
       setEditorDirty(false); setRefreshRequired(false);
@@ -105,10 +106,10 @@ function MuseumEditor({ initial }: { initial: MuseumDraft }) {
     event.preventDefault(); setAction('保存展馆'); setError(null); setMessage(null);
     try {
       // Exhibit edits can advance the museum version without changing its metadata.
-      const version = museum.title === metadataBase.title && museum.description === metadataBase.description && museum.regionCity === metadataBase.regionCity
+      const version = museum.title === metadataBase.title && museum.description === metadataBase.description && museum.regionCity === metadataBase.regionCity && museum.discoveryListed === metadataBase.discoveryListed
         ? museum.version : metadataBase.version;
-      const result = await apiRequest(path, museumDraftSchema, jsonRequest('PATCH', updateMuseumInputSchema.parse({ title, description, regionCity, expectedVersion: version })));
-      setMuseum(result); setMetadataBase({ title: result.title, description: result.description, regionCity: result.regionCity, version: result.version }); setTitle(result.title); setDescription(result.description); setRegionCity(result.regionCity); setMessage('展馆资料已保存。');
+      const result = await apiRequest(path, museumDraftSchema, jsonRequest('PATCH', updateMuseumInputSchema.parse({ title, description, regionCity, discoveryListed, expectedVersion: version })));
+      setMuseum(result); setMetadataBase({ title: result.title, description: result.description, regionCity: result.regionCity, discoveryListed: result.discoveryListed, version: result.version }); setTitle(result.title); setDescription(result.description); setRegionCity(result.regionCity); setDiscoveryListed(result.discoveryListed); setMessage('展馆资料已保存。');
     } catch (failure) { fail(failure); }
     finally { setAction(null); }
   }
@@ -193,6 +194,8 @@ function MuseumEditor({ initial }: { initial: MuseumDraft }) {
             {henanCities.map((city) => <option key={city} value={city}>{city}</option>)}
           </select>
         </Field>
+        <label className="workbench-discovery-consent"><input type="checkbox" checked={discoveryListed} onChange={(event) => setDiscoveryListed(event.target.checked)} disabled={busy || refreshRequired} />我同意将已发布展馆的名称、所选城市与累计浏览次数收录到记忆地图和榜单，供所有登录用户查看。</label>
+        <p className="wb-hint">默认不收录。取消勾选并保存后退出地图和榜单，不会关闭现有参观链接。</p>
         <div><button className="wb-secondary" disabled={busy || !metadataDirty || refreshRequired}>保存展馆资料</button></div></form></details>
     <ExhibitEditor resetKey={`${selection}:${editorGeneration}`} museum={museum} initial={selected} slotIndex={newSlot}
       blocked={action !== null || refreshRequired} onSaved={savedExhibit} onDeleted={deletedExhibit} onDirty={setEditorDirty} onBusy={setEditorBusy}

@@ -22,7 +22,7 @@ export function listMuseums(actorId: string, client?: PoolClient) {
     await requireActor(db, actorId);
     // 只看自己创建的展馆：工作台列表不能泄露他人展馆的存在、标题与更新时间。
     const result = await db.query<Record<string, unknown>>(`SELECT m.id,m.title,m.description,m.version,p.museum_version AS "publishedVersion",
-      m.share_enabled AS "shareEnabled",m.region_city AS "regionCity",m.created_at AS "createdAt",m.updated_at AS "updatedAt"
+      m.share_enabled AS "shareEnabled",m.region_city AS "regionCity",m.discovery_listed AS "discoveryListed",m.created_at AS "createdAt",m.updated_at AS "updatedAt"
       FROM museums m LEFT JOIN published_snapshots p ON p.id=m.current_snapshot_id
       WHERE m.deleted_at IS NULL AND m.created_by=$1 ORDER BY m.updated_at DESC`, [actorId]);
     return result.rows.map((row) => museumSummarySchema.parse(dates(row)));
@@ -68,8 +68,9 @@ export function updateMuseum(actorId: string, id: string, input: UpdateMuseumInp
     // 未传 regionCity 表示"不改"；传 null 才是"清空"。两者不能合并，否则老客户端
     // 一次保存就会把馆主选好的城市悄悄抹掉。
     const regionCity = input.regionCity === undefined ? current.regionCity : input.regionCity;
-    await db.query('UPDATE museums SET title=$1,description=$2,region_city=$3,version=version+1,updated_at=now() WHERE id=$4',
-      [input.title, input.description, regionCity, id]);
+    const discoveryListed = input.discoveryListed ?? current.discoveryListed;
+    await db.query('UPDATE museums SET title=$1,description=$2,region_city=$3,discovery_listed=$4,version=version+1,updated_at=now() WHERE id=$5',
+      [input.title, input.description, regionCity, discoveryListed, id]);
     return museumDraft(db, actorId, id);
   }, client);
 }
