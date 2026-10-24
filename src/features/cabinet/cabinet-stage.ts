@@ -515,13 +515,24 @@ export function mountCabinetStage(canvas: HTMLCanvasElement, items: readonly Cab
   function onPointerLeave() { setHoveredSlot(null); }
   function onMotionPreferenceChange() { pointerOffset.set(0, 0); invalidate(); }
   function pick(event: PointerEvent) {
-    if (options.onSlotSelect && controller.getSnapshot().phase !== 'overview') return;
-    if (controller.getSnapshot().phase === 'overview') {
-      const slot = slotAtPointer(event);
-      if (slot !== null && options.onSlotSelect) { options.onSlotSelect(slot); return; }
-      const model = displayModels.find((entry) => entry.slot === slot);
-      if (model !== undefined) { controller.select(model.item.id); return; }
+    const state = controller.getSnapshot();
+    if (state.phase !== 'overview') {
+      // 检视中：点到模型本体就换一件，点到任何别的地方（柜体、背景、空白）就放回去。
+      // 这是「点空白收起」的唯一入口——没有它，收起只能靠 Escape，而 canvas 不保证有焦点。
+      pointRay(event);
+      const focused = raycaster.intersectObjects(displayModels.map((model) => model.group), true)[0];
+      if (focused === undefined) { controller.returnToOverview(); return; }
+      for (const model of displayModels) {
+        let node = focused.object;
+        while (node.parent !== null && node !== model.group) node = node.parent;
+        if (node === model.group) { controller.select(model.item.id); return; }
+      }
+      return;
     }
+    const slot = slotAtPointer(event);
+    if (slot !== null && options.onSlotSelect) { options.onSlotSelect(slot); return; }
+    const model = displayModels.find((entry) => entry.slot === slot);
+    if (model !== undefined) { controller.select(model.item.id); return; }
     pointRay(event);
     const hit = raycaster.intersectObjects(displayModels.map((model) => model.group), true)[0];
     if (hit === undefined) return;
@@ -595,12 +606,31 @@ export function mountCabinetStage(canvas: HTMLCanvasElement, items: readonly Cab
   function resetView() { yaw = 0; pitch = 0; zoom = 1; invalidate(); }
   function onDoubleClick() { if (controller.getSnapshot().phase === 'inspecting') resetView(); }
   function onKeyDown(event: KeyboardEvent) {
-    if (event.key === 'Escape') { if (slotDrag !== null) { event.preventDefault(); event.stopPropagation(); cancelDrag(); } else controller.returnToOverview(); return; }
+    // Escape 交给 window 级监听：canvas 不保证有焦点（首页的 canvas 由 effect 创建、未设 tabIndex），
+    // 绑在 canvas 上等于没有，用户按了也没反应。
     if (controller.getSnapshot().phase !== 'inspecting') return;
     if (event.key === 'ArrowLeft') yaw -= 0.15; else if (event.key === 'ArrowRight') yaw += 0.15;
     else if (event.key === 'ArrowUp') pitch = Math.max(-0.65, pitch - 0.1); else if (event.key === 'ArrowDown') pitch = Math.min(0.65, pitch + 0.1);
     else if (event.key === '+' || event.key === '=') zoom = Math.min(1.45, zoom + 0.1); else if (event.key === '-') zoom = Math.max(0.75, zoom - 0.1); else return;
     event.preventDefault(); invalidate();
+  }
+  function onWindowKeyDown(event: KeyboardEvent) {
+    if (event.key !== 'Escape' || destroyed) return;
+    const target = event.target;
+    if (target instanceof HTMLElement && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return;
+    if (slotDrag !== null) { event.preventDefault(); cancelDrag(); return; }
+    const state = controller.getSnapshot();
+    if (state.phase === 'focusing' || state.phase === 'inspecting') controller.returnToOverview();
+  }
+  function onDocumentPointerDown(event: PointerEvent) {
+    if (destroyed || editing) return;
+    const state = controller.getSnapshot();
+    if (state.phase !== 'focusing' && state.phase !== 'inspecting') return;
+    const target = event.target;
+    if (!(target instanceof Element) || canvas.contains(target)) return;
+    // 交互控件自己决定行为（重试、返回、编辑面板里的按钮），别抢。
+    if (target.closest('button,a,input,select,textarea,summary,[role="button"],[contenteditable="true"]') !== null) return;
+    controller.returnToOverview();
   }
   const unsubscribe = controller.subscribe(() => {
     cancelDrag();
@@ -617,6 +647,7 @@ export function mountCabinetStage(canvas: HTMLCanvasElement, items: readonly Cab
   canvas.addEventListener('wheel', onWheel, { passive: false }); canvas.addEventListener('dblclick', onDoubleClick); canvas.addEventListener('pointerleave', onPointerLeave);
   canvas.addEventListener('lostpointercapture', onPointerCancel);
   window.addEventListener('pointermove', onOverviewPointerMove); window.addEventListener('blur', onViewportLeave); document.addEventListener('mouseleave', onViewportLeave);
+  window.addEventListener('keydown', onWindowKeyDown); document.addEventListener('pointerdown', onDocumentPointerDown);
   reducedMotion.addEventListener('change', onMotionPreferenceChange);
   camera.position.set(0, 0.4, 16); initializeRenderer();
   for (const display of displayModels) void loadModel(display);
@@ -685,6 +716,7 @@ export function mountCabinetStage(canvas: HTMLCanvasElement, items: readonly Cab
       canvas.removeEventListener('wheel', onWheel); canvas.removeEventListener('dblclick', onDoubleClick); canvas.removeEventListener('pointerleave', onPointerLeave);
       canvas.removeEventListener('lostpointercapture', onPointerCancel);
       window.removeEventListener('pointermove', onOverviewPointerMove); window.removeEventListener('blur', onViewportLeave); document.removeEventListener('mouseleave', onViewportLeave);
+      window.removeEventListener('keydown', onWindowKeyDown); document.removeEventListener('pointerdown', onDocumentPointerDown);
       reducedMotion.removeEventListener('change', onMotionPreferenceChange); canvas.style.cursor = originalCursor;
       for (const surface of hoverSurfaces) if (surface.plaque !== null) surface.plaque.envMap = null;
       disposeResources(scene, ownedTextures); environmentTarget?.dispose(); glassEnvironmentTarget?.dispose(); renderer?.dispose();

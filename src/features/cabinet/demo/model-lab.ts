@@ -216,14 +216,43 @@ async function touch() {
   mount(); await settled();
 }
 
-const actions = { fixtures, delay: () => delayed(false), unmount: () => delayed(true), switches, mounts, remount, touch, initial: initialWebgl,
-  all: async () => { await fixtures(); await delayed(false); await delayed(true); await switches(); await mounts(); await remount(); await touch(); await initialWebgl(); } };
-for (const [name, action] of Object.entries(actions)) element(name).addEventListener('click', () => {
+// 检视态必须能自己退出：点画布空白、点画布外、按 Escape 三条路都算「放回去」。
+async function dismiss() {
+  assert(stage, '没有查看器');
+  const enter = async () => { controller.select(id); await until(() => controller.getSnapshot().phase === 'inspecting', '进入检视'); };
+  const leave = async (label: string) => {
+    await until(() => controller.getSnapshot().phase === 'overview', `${label}后没有回到总览`);
+    record(label, { passed: true });
+  };
+  const nativeSet = canvas.setPointerCapture; const nativeRelease = canvas.releasePointerCapture; const nativeHas = canvas.hasPointerCapture;
+  const captures = new Set<number>();
+  canvas.setPointerCapture = (value) => { captures.add(value); }; canvas.releasePointerCapture = (value) => { captures.delete(value); }; canvas.hasPointerCapture = (value) => captures.has(value);
+  try {
+    await enter();
+    // 画布最右边缘：展品都在格位里，这里只可能是柜体或背景。
+    const rect = canvas.getBoundingClientRect(); const x = rect.left + rect.width * 0.97; const y = rect.top + rect.height / 2;
+    const send = (type: string) => canvas.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, pointerId: 7, pointerType: 'mouse', button: 0, clientX: x, clientY: y }));
+    send('pointerdown'); send('pointerup');
+    await leave('点画布空白放回');
+
+    await enter();
+    document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, pointerId: 8, pointerType: 'mouse', button: 0 }));
+    await leave('点画布外放回');
+
+    await enter();
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    await leave('按 Escape 放回');
+  } finally { canvas.setPointerCapture = nativeSet; canvas.releasePointerCapture = nativeRelease; canvas.hasPointerCapture = nativeHas; }
+}
+
+const actions = { fixtures, delay: () => delayed(false), unmount: () => delayed(true), switches, mounts, remount, touch, dismiss, initial: initialWebgl,
+  all: async () => { await fixtures(); await delayed(false); await delayed(true); await switches(); await mounts(); await remount(); await touch(); await dismiss(); await initialWebgl(); } };
+for (const [name, action] of Object.entries(actions)) { const trigger = document.getElementById(name); if (trigger === null) continue; trigger.addEventListener('click', () => {
   const buttons = document.querySelectorAll('button'); buttons.forEach((button) => { button.disabled = true; }); status.textContent = '检查中…';
   void action().then(() => { status.textContent = '检查通过，详细记录见下方'; }).catch((error: unknown) => {
     status.textContent = `检查失败：${error instanceof Error ? error.message : String(error)}`;
     record(name, { passed: false, error: error instanceof Error ? error.message : String(error) });
   }).finally(() => { buttons.forEach((button) => { button.disabled = false; }); });
-});
+}); }
 window.addEventListener('pagehide', () => { closed.abort(); if (stage) destroy(); EventTarget.prototype.addEventListener = addListener; EventTarget.prototype.removeEventListener = removeListener; window.ResizeObserver = NativeResizeObserver; });
 mount(); void settled().then(() => { status.textContent = '检查台就绪'; }).catch((error: unknown) => { status.textContent = `检查台初始化失败：${String(error)}`; });
