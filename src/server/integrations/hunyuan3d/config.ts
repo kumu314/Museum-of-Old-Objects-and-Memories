@@ -47,11 +47,20 @@ export function readProviderSettings(
   try {
     mtimeMs = statSync(path).mtimeMs;
   } catch (error) {
-    if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) {
-      throw new HttpError({ code: 'GENERATION_UNAVAILABLE', message: '无法读取通道配置文件，请检查文件路径与权限。' });
+    const isMissing = error instanceof Error && 'code' in error && (error.code === 'ENOENT' || error.code === 'ENOTDIR');
+    // Windows 把“父路径是文件”也报成 ENOENT：此时父路径存在但不是目录，
+    // 属于坏路径必须抛错；只有整条链都不存在才算未配置。
+    if (isMissing) {
+      const parent = resolve(path, '..');
+      let parentIsFile = false;
+      try { parentIsFile = statSync(parent).isFile(); } catch { parentIsFile = false; }
+      if (parentIsFile) {
+        throw new HttpError({ code: 'GENERATION_UNAVAILABLE', message: '通道配置路径无效：父路径是文件而不是目录。' });
+      }
+      settingsCache = { path, mtimeMs: 0, loadedAt: Date.now(), value: null };
+      return null;
     }
-    settingsCache = { path, mtimeMs: 0, loadedAt: Date.now(), value: null };
-    return null;
+    throw new HttpError({ code: 'GENERATION_UNAVAILABLE', message: '无法读取通道配置文件，请检查文件路径与权限。' });
   }
   const now = Date.now();
   if (settingsCache?.path === path && settingsCache.mtimeMs === mtimeMs && now - settingsCache.loadedAt < cacheTtlMs) {
@@ -104,6 +113,7 @@ export function readHunyuanCloudConfig(
 ): HunyuanCloudConfiguration | undefined {
   const settings = settingsPath === undefined ? readProviderSettings() : readProviderSettings(settingsPath);
   const insecureResult = environment.HUNYUAN_CLOUD_ALLOW_INSECURE_RESULT === '1';
+  console.error('[debug] readHunyuanCloudConfig insecure=', insecureResult, 'argNODE_ENV=', environment.NODE_ENV, 'processNODE_ENV=', process.env.NODE_ENV, 'path=', settingsPath ?? 'default');
   if (insecureResult && environment.NODE_ENV !== 'test') {
     throw new HttpError({ code: 'GENERATION_UNAVAILABLE', message: '不安全的生成来源开关仅允许测试环境使用。' });
   }
