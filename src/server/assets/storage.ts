@@ -31,6 +31,8 @@ async function privateDirectory(uploadDir: string): Promise<string> {
   // Check before mkdir too, so a rejected configuration cannot create a public directory.
   function outsidePublic(path: string): boolean {
     const fromPublic = relative(canonicalPublic, path);
+    // On Windows, relative() returns an absolute path when the paths are on different drives.
+    if (isAbsolute(fromPublic)) return true;
     return fromPublic === '..' || fromPublic.startsWith(`..${sep}`);
   }
   if (!outsidePublic(resolve(uploadDir))) throw new Error('Asset storage must be outside public.');
@@ -63,6 +65,20 @@ export async function prepareAsset(processed: ProcessedAsset, uploadDir: string)
   return { id, kind: processed.kind, contentType: processed.contentType, originalName: processed.originalName,
     byteSize: processed.bytes.length, sha256: processed.sha256, storageKey, thumbnailStorageKey,
     width: processed.kind === 'image' ? processed.width : null, height: processed.kind === 'image' ? processed.height : null };
+}
+
+/**
+ * 失败后能否删掉已经写好的私有文件。规则只有一条：**只有确定没提交才允许删**。
+ *
+ * - 事务根本没开始（回滚无需确认）→ 可删
+ * - 事务回滚已被确认 → 可删
+ * - COMMIT 已经发出但结果未知 → **不可删**：它可能已经提交，删了就把已入库素材的文件删掉了
+ * - 提交成功但 HTTP 响应失败 → 根本不会走到清理分支；即便误判，COMMIT 标记也会挡住
+ *
+ * 宁可留下一个没人引用的孤儿文件，也不能删掉可能已被引用的文件。
+ */
+export function cleanupAllowed(state: { begun: boolean; commitAttempted: boolean; rollbackConfirmed: boolean }): boolean {
+  return !state.commitAttempted && (!state.begun || state.rollbackConfirmed);
 }
 
 /**
