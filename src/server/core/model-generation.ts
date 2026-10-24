@@ -19,7 +19,7 @@ import { createHunyuanWebProxyClient } from '../integrations/hunyuan3d-proxy';
 import { readHunyuanProxyConfig } from '../integrations/hunyuan3d-proxy/config';
 import type { Hunyuan3DClient } from '../integrations/hunyuan3d/types';
 import { HttpError } from '../http';
-import { assertVersion, assetRecord, exhibitRecord, invalid, museumRecord, notFound, requireActor } from './records';
+import { assertVersion, assetRecord, bumpMuseum, exhibitRecord, invalid, museumRecord, notFound, requireActor } from './records';
 
 /** 网络调用在事务外；提交结果未知保留 SUBMITTING，核对上游前不再付费提交。 */
 function selectedProvider(): 'hunyuan-cloud' | 'hunyuan-proxy' {
@@ -374,4 +374,32 @@ export async function getLatestModelGenerationJob(
   }, pool);
   if (latest === null) return null;
   return getModelGenerationJob(actorId, museumId, exhibitId, latest, pool);
+}
+
+/**
+ * 采纳已完成的生成模型到展柜。只替换工作台的展示模型引用，不改照片与讲述：
+ * 展品版本 +1、旧确认失效（与人工修改一致），公开快照仍需重新发布。
+ * 公开参观页在快照支持模型前继续使用照片。
+ */
+export async function adoptGeneratedModel(
+  actorId: string, museumId: string, exhibitId: string, jobId: string, expectedVersion: number,
+  pool: Pool = getPool(),
+) {
+  return withTransaction(async (db) => {
+    await requireActor(db, actorId);
+    await museumRecord(db, actorId, museumId, true);
+    const current = await exhibitRecord(db, museumId, exhibitId);
+    assertVersion(current.version, expectedVersion);
+    const job = await loadJob(db, museumId, exhibitId, jobId);
+    if (job.status !== 'DONE' || job.modelAssetId === null) invalid('只能采纳已完成的生成任务。');
+    if (current.modelInput.mode !== 'single' || job.inputAssetId !== current.modelInput.imageAssetId) {
+      invalid('当前展品的建模照片已变更，请重新生成后再采纳。');
+    }
+    await db.query(
+      `UPDATE exhibits SET generated_model_asset_id=$2, version=version+1, confirmed_version=NULL,
+         confirmation_note=NULL, confirmed_at=NULL, updated_at=now()
+       WHERE id=$1 AND museum_id=$3`, [exhibitId, job.modelAssetId, museumId]);
+    await bumpMuseum(db, museumId);
+    return exhibitRecord(db, museumId, exhibitId);
+  }, pool);
 }

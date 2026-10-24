@@ -100,6 +100,8 @@ async function fixture(context: TestContext) {
       // jobs 与 model_assets 相互外键：先解引用（CHECK 要求 DONE 必须有结果），
       // 再删任务，最后删模型资产与其余数据。
       await db.query(`UPDATE model_generation_jobs SET status='FAIL', model_asset_id=NULL WHERE museum_id=$1`, [result.museum.id]);
+      // exhibits 引用 model_assets：先解引用再删模型资产。
+      await db.query('UPDATE exhibits SET generated_model_asset_id=NULL WHERE museum_id=$1', [result.museum.id]);
       await db.query('DELETE FROM model_assets WHERE museum_id=$1', [result.museum.id]);
       await db.query('DELETE FROM model_generation_jobs WHERE museum_id=$1', [result.museum.id]);
       await db.query('DELETE FROM exhibits WHERE museum_id=$1', [result.museum.id]);
@@ -421,3 +423,20 @@ test('云 API 通道：配置齐全时走官方 Pro 协议，任务记录 provid
   assert.ok(actions.includes('QueryHunyuanTo3DProJob'));
 });
 
+
+test('采纳完成的生成模型：展品记录模型资产、版本递增且旧确认失效', async (context) => {
+  const setup = await fixture(context);
+  const state: ProxyState = { geometryStatus: 2, textureStatus: 2, glbWithMaterial: true };
+  await fakeProxy(context, state);
+  const job = await requestSingleModelGeneration(setup.actor, setup.museum.id, setup.exhibit.id, request(setup), pool);
+  const done = await getModelGenerationJob(setup.actor, setup.museum.id, setup.exhibit.id, job.id, pool);
+  assert.equal(done.status, 'DONE');
+  const { adoptGeneratedModel } = await import('../../src/server/core/model-generation');
+  const adopted = await adoptGeneratedModel(setup.actor, setup.museum.id, setup.exhibit.id, done.id, setup.exhibit.version, pool);
+  assert.equal(adopted.generatedModelAssetId, done.modelAssetId);
+  assert.equal(adopted.version, setup.exhibit.version + 1);
+  assert.equal(adopted.confirmedVersion, null);
+  // 旧版本不能再次采纳；模型引用保持到下一次显式操作。
+  await assert.rejects(adoptGeneratedModel(setup.actor, setup.museum.id, setup.exhibit.id, done.id, setup.exhibit.version, pool),
+    (error: unknown) => error instanceof HttpError && error.failure.code === 'VERSION_CONFLICT');
+});
