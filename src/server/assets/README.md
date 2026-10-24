@@ -10,7 +10,7 @@
 
 `cleanupUncommittedAsset(prepared, uploadDir, transaction, isReferenced)` 只适用于明确 `not-started` 或 `rolled-back` 的提交状态。调用者提供权威 DB 查询，确认素材记录和快照均未引用此 ID；存在引用或查询失败时保留文件。COMMIT 结果未知、或提交成功后 HTTP 响应发送失败，不能调用此函数。不得在一个笼统的路由 catch 中无条件清理。
 
-`resolveAssetPath(uploadDir, storageKey)` 只接受本模块生成的 UUID 文件键，且仅供服务器读取。路由必须先验证团队身份或当前分享 token、当前快照的素材集合，再读取文件；响应使用已记录 MIME、`private, no-store` 和 `nosniff`。不得将目录/存储键放入公共展示数据。
+`resolveAssetPath(uploadDir, storageKey)` 只接受本模块生成的 UUID 文件键，且仅供服务器读取。私有读取先验证有效用户身份与展馆归属；分享读取同时验证有效用户身份、当前分享 token 及当前快照的素材集合，再读取文件。响应使用已记录 MIME、`private, no-store` 和 `nosniff`。不得将目录/存储键放入公共展示数据。
 
 部署需要 Sharp 的原生运行依赖，以及可执行的 `ffprobe` / `ffmpeg`。此轮实测 FFmpeg 9.0.2，子进程无 shell、仅允许 file/pipe 协议、输出与执行时间有限，临时文件随机命名且仅当前用户可读。依赖缺失按服务器故障处理，不能把未验证音频当成功。
 
@@ -30,8 +30,8 @@ node --import tsx --test tests/server/media-http.acceptance.ts
 
 **这不是浏览器显示或播放验收。** 尚需 B/E 用真实获准素材，在演示浏览器和实际手机验证图片显示、音频主动播放/暂停及切换展品停止上一段音频；不能把 HTTP 200 或 FFmpeg 解码当作设备播放通过。
 
-## 向 C 交接的超限连接问题
+## 历史：向 C 交接的超限连接问题（2026-10-24）
 
-Windows + Node.js 26.12.0 的本地 Next 开发服务器中，`tests/e2e/assets-http.test.ts` 可复现以下顺序：超大 raw multipart 上传收到 413 `PAYLOAD_TOO_LARGE`，随后读取馆资料收到 200，再随后的创建展品 POST 可能 `ECONNRESET`。因此此前“超限请求本身直接失败”的描述不准确，不能仅凭服务端 413 日志宣布整条回归通过。
+当时 Windows + Node.js 26.12.0 的本地 Next 开发服务器中，`tests/e2e/assets-http.test.ts` 可复现以下顺序：超大 raw multipart 上传收到 413 `PAYLOAD_TOO_LARGE`，随后读取馆资料收到 200，再随后的创建展品 POST 可能 `ECONNRESET`。因此此前“超限请求本身直接失败”的描述不准确，不能仅凭服务端 413 日志宣布整条回归通过。
 
-C 需复核 `readAssetUpload` 的提前拒绝与后续连接复用行为。测试不得给创建展品加盲目重试，不能跳过该断言。此前尝试 cancel 请求体未解决，已撤销临时业务层改动；六格式验收是独立补充，不替代这条尚未通过的超限 HTTP 回归。
+该问题当时交给 C 复核；早期单独尝试 cancel 请求体未解决，临时业务层改动已撤销。主线现已采用有界丢弃、超限取消与普通阶段读流错误传播，并保留完整 HTTP 场景及 `tests/server/upload-boundary.test.ts` 回归；处理过程与 Windows 证据见 [素材与后端边界复核](../../../docs/素材与后端边界复核.md)，当前验证见 [验收清单第 8 节](../../../docs/11-验收清单.md#8-代码审查修复复验2026-10-24)。测试仍不得给创建展品加盲目重试或跳过断言，六格式验收也不能替代超限回归。

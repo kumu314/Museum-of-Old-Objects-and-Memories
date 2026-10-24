@@ -1,12 +1,12 @@
 # A：展柜与检视原型
 
-更新于 2026-10-24。本目录保留独立三维原型；同一场景现也由 `../viewer/shared-museum.tsx` 挂载到 `/share/[token]` 正式参观页。正式页面经公共 schema 校验后消费发布快照，联动展签、实拍和原声；独立预览的本地编辑不会写入正式展馆。真实 AI、内容和设备尚未完整验收，不能据此视为 G4 已完成。
+更新于 2026-10-24。本目录保留独立三维原型；同一场景由 `../viewer/shared-museum.tsx` 挂载到 `/share/[token]` 正式参观页，也由 `../studio/cabinet-preview.tsx` 接入工作台与 `/museum` 本人草稿预览。正式分享消费经公共 schema 校验的发布快照，本人预览消费草稿的展示字段投影；独立演示的本地编辑不会写入正式展馆。真实 AI、内容和设备尚未完整验收，不能据此视为 G4 已完成。最新工程验证及未执行项见 [验收清单第 8 节](../../../docs/11-验收清单.md#8-代码审查修复复验2026-10-24)。
 
 ## 入口与边界
 
 方案 B 的动态 GLB、制作预览、陈列设置与 C/D/B 交接说明见 [模型预览接口](../viewer/MODEL_INTEGRATION.md)。独立入口为 `/model-preview.html`；`/qa.html?preview=model` 使用相同检查台验证窄屏和图形故障，`&webgl=blocked` 模拟首次初始化失败。`/model-lab.html` 检查实际 GLB 边界、旧响应、双指和重复挂载；程序化资产与再生成命令见 [夹具说明](demo/fixtures/README.md)。这些入口采用已有演示或明确标识的合成资产，没有调用照片生成服务或保存到正式展馆。
 
-- `cabinet-stage.ts`：`mountCabinetStage(canvas, items, controller, options)`，一个 Canvas，消费展品 ID、格位、铭牌和受信任模型键；`photo-plane` 使用当前快照授权的处理图片生成有厚度的薄片，背面为示意；`glb` 消费本站受控模型地址。返回 `retry()`、`retryModel(id)`、`resetView()`、`setModelSource(id, source)`、`setModelPlacement(id, placement)`、`setEditing(enabled)`、`setArrangement(arrangement)`、`destroy()`；`onSlotDrop(id, targetSlot)` 只上报换位意图，由调用方更新权威陈列数据。
+- `cabinet-stage.ts`：`mountCabinetStage(canvas, items, controller, options)`，一个 Canvas，消费展品 ID、页内 0–5 格位、铭牌和受信任模型键；`photo-plane` 使用按本人归属或当前分享快照授权的处理图片生成有厚度的薄片，背面为示意；`glb` 消费本站受控模型地址。返回 `retry()`、`retryModel(id)`、`resetView()`、`setModelSource(id, source)`、`setModelPlacement(id, placement)`、`setEditing(enabled)`、`setArrangement(arrangement)`、`destroy()`；`onSlotDrop(id, targetSlot)` 只上报换位意图，由调用方更新权威陈列数据。可选 `onSlotSelect(slot)` 让总览点击只上报格位选择，取出检视另由控制器触发；未提供时保留点击取出的参观行为。
 - `../viewer/inspection-controller.ts`：`createInspectionController(ids)`，提供选择、返回、订阅和带 transitionId 的完成通知；旧回调无法完成新动画。
 - `model-fit.ts`：完整节点包围盒的最小等比适配与底部中心落点，三轴均保留至少 10%；当前三件米制 GLB 共用 `cabinet-layout.ts` 中的 `MODEL_UNITS_PER_METRE=14.18`，不再逐件按柜格宽度放大。
 - `cabinet-arrangement.ts`：演示陈列条目的校验、六格移动/互换和铭牌文字修改；每件展品恰好出现一次，格位为互不重复的整数 0–5。
@@ -14,7 +14,7 @@
 - `demo/index.html`、`demo/main.ts`、`demo/style.css`：可移植的演示页面源文件。通过根目录 Vite 配置与锁文件运行。
 - `demo/qa.html`、`demo/qa.ts`：单独检查台，支持视口、WebGL 中断、减少动态 fixture、合成悬停和静止一秒 RAF 计数；不是参观页面的操作入口。
 
-接入时在客户端挂载场景，并在对应生命周期调用 `destroy()`。销毁会释放指针捕获并关闭所属 WebGL 上下文；再次挂载使用新 Canvas。`zoomBy(factor)` 调整检视时的临时观察比例，`getDiagnostics()` 为检查台提供只读资源记录。调用方必须先按公共契约校验数据。`inspectionInset()` 返回画布右缘到右侧面板左缘的覆盖宽度（包含边距，单位像素）；窄屏面板在画布下方时返回 0。`onSurfaceStatus` 应显示故障说明、隐藏失效画布并保留图文入口；`onAssetStatus` 提供加载和失败状态。B 从同一个 controller 订阅当前选择，并在切换时停止旧音频，默认不自动播放。
+接入时在客户端挂载场景，并在对应生命周期调用 `destroy()`。销毁会释放指针捕获并关闭所属 WebGL 上下文；再次挂载使用新 Canvas。`zoomBy(factor)` 调整检视时的临时观察比例，`getDiagnostics()` 为检查台提供只读资源记录。调用方按相应契约校验与投影数据：分享使用发布契约，本人草稿预览允许尚未补齐展签或照片，但不传原始讲述、确认记录与建模输入。`inspectionInset()` 返回画布右缘到右侧面板左缘的覆盖宽度（包含边距，单位像素）；窄屏面板在画布下方时返回 0。`onSurfaceStatus` 应显示故障说明、隐藏失效画布并保留图文入口；`onAssetStatus` 提供加载和失败状态。检视状态由 controller 管理，工作台另以选中格位确定编辑对象；调用方在切换时停止旧音频，默认不自动播放。
 
 ## 当前实现（2026-10-24 三维模型、统一尺寸与陈列编辑）
 
@@ -24,7 +24,7 @@
 
 ### 编辑操作与保存边界
 
-1. 在主应用登录现有制作账号后打开 `http://127.0.0.1:17681/?studio`。该预览通过 `/api/auth/session` 校验会话，开发服务器仅代理此读取接口；未登录或核验失败时不显示“编辑陈列”与“展品目录”。普通 `/` 始终是参观视图。静态构建若没有同源会话接口，制作入口不会启用。
+1. 在主应用登录有效账号后打开 `http://127.0.0.1:17681/?studio`。该预览通过 `/api/auth/session` 校验会话，开发服务器仅代理此读取接口；未登录或核验失败时不显示“编辑陈列”与“展品目录”。普通 `/` 始终是参观视图。静态构建若没有同源会话接口，制作入口不会启用。
 2. 点击右上角“编辑陈列”。若正在检视，先沿原四态流程放回，回到 `overview` 后才进入独立编辑模式；完成编辑仍留在总览。
 3. 将展品拖到六格中的空格会移动，拖到有展品的格位会交换。格位按上排左至右 1–3、下排左至右 4–6 编号；不支持格内任意坐标摆放。拖出有效格位或按 Esc 取消本次拖动。
 4. 展开底部“修改铭牌 / 选择格位”，可用带标签的展品与格位下拉框及“移动 / 交换”按钮完成同样操作，支持键盘；工具面板可以收起，避免遮挡拖动区域。
@@ -33,7 +33,7 @@
 
 `demo/main.ts` 拥有陈列的权威状态。制作预览保存到同源浏览器的 `localStorage` 键 `shiwuguan.demo.arrangement.v1`，记录结构为 `{ version: 1, arrangement: [{ id, slot, plaqueText }] }`；仅在制作入口完成会话校验后读取。普通参观预览不读取或覆盖旧记录，固定使用第 1、2、5 格及本节下方的样例铭牌。读取时校验版本、完整 ID 集合、唯一格位及铭牌；无效记录会明确提示并使用初始陈列，在用户实际修改并保存前不覆盖旧记录。存储失败会提示当前画面已更新但刷新可能丢失。清除站点数据、换浏览器或换源不会共享这些修改。
 
-这只是本地演示编辑：复用现有团队会话核验入口，没有服务器陈列保存、个人归属、物主确认、发布快照或多人同步；不据此视为方案 B 身份隔离已完成。正式工作台写接口继续自行鉴权。“分享参观”和“音画设置”继续保持未接入状态。编辑文本按文本绘制，不解释 HTML。
+这只是本地演示编辑：复用账号会话核验入口，本地陈列记录不按账号隔离，也没有服务器保存、物主确认、发布快照或多人同步。正式工作台另有服务端个人归属与写入鉴权，不能用本地演示代替相关验收。演示页的“分享参观”和“音画设置”保持未接入状态。编辑文本按文本绘制，不解释 HTML。
 
 ### 视觉调整（2026-10-24）
 
@@ -53,13 +53,15 @@
 
 ![合成素材下的故事面板验收截图](../../../docs/images/inspection-story-20261024.jpg)
 
-### 原型验证记录（2026-10-24）
+### 历史原型验证记录（2026-10-24）
+
+以下保留原型阶段的检查数量、环境与证据，不代表当前全仓测试数量或正式应用状态；最新复验见验收清单第 8 节。
 
 已完成 strict、`noUncheckedIndexedAccess`、`exactOptionalPropertyTypes` 类型检查，35 项测试及生产构建；测试覆盖四态检视、统一米制比例、陈列唯一性、移动/互换、铭牌校验及旧有视差约束。生产主包约 695 kB / gzip 181 kB，仍有大于 500 kB 的既有包体提示。GLB 的构建统计见 `assets/model-source/build-report.json`，离线容器与纹理解码检查入口见 `assets/MODELS_SOURCE.md`。
 
 本次浏览器已实际验证：拖向空格移动、占用格互换、拖出柜外取消；在新格位取出、旋转和放回；检视中点击编辑后先放回；键盘替代表单换位、空白与 25 字符铭牌被拒绝且输入保留；刷新后恢复布局和铭牌。1600×900 与 390×844 视口下陈列工具可操作。WebGL 中断后显示错误、重试及目录入口，恢复后三件模型、纹理及柜体正常；QA 控制台 error/warn 为空，静止一秒新 RAF 调度与执行均为 0。
 
-对应本机证据目录为 `~/.local/share/codex-previews/heikesong-a/full-models-20261023/`，包含 `editor-final.png`、`editor-narrow.png`、`cassette-inspection-front.png`、`cassette-inspection-back.png`、`ticket-inspection-front.png`、`ticket-inspection-back.png` 与 `context-restored.png`。这是本机浏览器证据；真实手机 / Safari、完整应用部署、正式音频与发布链路尚未验证或接入。
+对应本机证据目录为 `~/.local/share/codex-previews/heikesong-a/full-models-20261023/`，包含 `editor-final.png`、`editor-narrow.png`、`cassette-inspection-front.png`、`cassette-inspection-back.png`、`ticket-inspection-front.png`、`ticket-inspection-back.png` 与 `context-restored.png`。这是原型阶段的本机浏览器证据；该轮未覆盖真实手机 / Safari、完整应用部署、正式音频与发布链路，不应据此判断后续接入状态。
 
 ## 运行与接入
 
