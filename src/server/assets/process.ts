@@ -96,7 +96,13 @@ async function validateAudio(bytes: Buffer, format: 'mp3' | 'm4a' | 'wav'): Prom
     await executeFile('ffmpeg', ['-v', 'error', '-xerror', '-err_detect', 'explode', '-max_alloc', '67108864', '-protocol_whitelist', 'file,pipe', '-threads', '1', '-i', path, '-map', '0:a', '-f', 'null', '-'], { timeout: 20_000, maxBuffer: 1_048_576 });
   } catch (error) {
     if (error instanceof HttpError) throw error;
-    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') throw new Error('Audio processing dependency is unavailable.', { cause: error });
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+      console.error(JSON.stringify({ category: 'audio-tool-missing' }));
+      throw new HttpError({ code: 'INTERNAL_ERROR', message: '音频处理依赖不可用，请稍后重试或联系管理员。' });
+    }
+    if (error instanceof Error && 'killed' in error && error.killed === true) {
+      throw new HttpError({ code: 'INTERNAL_ERROR', message: '音频处理超时，请稍后重试或联系管理员。' });
+    }
     invalid();
   } finally { await rm(directory, { recursive: true, force: true }); }
 }

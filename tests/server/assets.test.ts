@@ -143,6 +143,20 @@ test('ALAC M4A and mu-law WAV are unsupported; truncated WAV cannot be accepted 
   await assert.rejects(processAsset({ inputBuffer: wave(16044).subarray(0, 120), originalName: 'truncated.wav', mime: 'audio/wav' }), rejectsCode('VALIDATION_ERROR'));
 });
 
+test('missing ffprobe/ffmpeg is a controlled server failure', async () => {
+  const originalPath = process.env.PATH;
+  process.env.PATH = '';
+  try {
+    await assert.rejects(
+      processAsset({ inputBuffer: wave(16044), originalName: 'voice.wav', mime: 'audio/wav' }),
+      rejectsCode('INTERNAL_ERROR'),
+    );
+  } finally {
+    if (originalPath === undefined) delete process.env.PATH;
+    else process.env.PATH = originalPath;
+  }
+});
+
 test('exact 20 MiB valid PCM WAV succeeds and one extra byte returns 413', async () => {
   const inputBuffer = wave(uploadLimits.audioBytes);
   assert.equal((await processAsset({ inputBuffer, originalName: 'boundary.wav', mime: 'audio/wav' })).kind, 'audio');
@@ -168,7 +182,14 @@ test('private preparation retains complete unique files; cleanup never removes r
   const publicDirectory = join(fakeApp, 'public');
   const alias = join(workspace, 'public-alias');
   await mkdir(publicDirectory, { recursive: true });
-  await symlink(publicDirectory, alias);
+  try {
+    // Windows may require Developer Mode for symlinks; a directory junction tests the same alias.
+    await symlink(publicDirectory, alias, process.platform === 'win32' ? 'junction' : 'dir');
+  } catch (error) {
+    if (process.platform === 'win32' && error instanceof Error && 'code' in error &&
+      (error.code === 'EPERM' || error.code === 'EACCES')) return;
+    throw error;
+  }
   const originalCwd = process.cwd();
   try {
     process.chdir(fakeApp);
