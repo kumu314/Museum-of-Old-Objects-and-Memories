@@ -83,21 +83,22 @@ export function readLeaderboard(client?: PoolClient): Promise<Leaderboard> {
   return inTransaction(async (db) => {
     // 浏览数只算「不是馆主本人」的访问：馆主自己反复打开不该把自己的馆推上榜首。
     // 事件行仍然照实写入（见 recordMuseumView），排除发生在聚合这一侧，便于事后审计。
-    const rows = await db.query<{ museumId: string; title: string; regionCity: string | null; viewCount: number }>(
-      `SELECT m.id AS "museumId", m.title, m.region_city AS "regionCity", count(e.id)::int AS "viewCount"
+    // 总数与条目共用同一语句快照，避免并发停止分享导致总数小于条目数。
+    const rows = await db.query<{ museumId: string; title: string; regionCity: string | null; viewCount: number; totalMuseums: number }>(
+      `SELECT m.id AS "museumId", s.public_data->>'title' AS title, m.region_city AS "regionCity", count(e.id)::int AS "viewCount", count(*) OVER()::int AS "totalMuseums"
        FROM museums m
+       JOIN published_snapshots s ON s.id=m.current_snapshot_id AND s.museum_id=m.id AND s.sealed
        LEFT JOIN museum_view_events e ON e.museum_id = m.id AND e.viewer_id <> m.created_by
        WHERE ${visibleMuseum}
-       GROUP BY m.id, m.title, m.region_city
-       ORDER BY count(e.id) DESC, m.title ASC, m.id ASC
+       GROUP BY m.id, s.public_data, m.region_city
+       ORDER BY count(e.id) DESC, s.public_data->>'title' ASC, m.id ASC
        LIMIT $1`, [leaderboardLimit]);
-    const total = await db.query<{ n: number }>(`SELECT count(*)::int AS n FROM museums m WHERE ${visibleMuseum}`);
     return toLiveLeaderboard(rows.rows.map((row) => ({
       museumId: row.museumId,
       title: row.title,
       regionCity: row.regionCity === null ? null : regionCitySchema.parse(row.regionCity),
       viewCount: row.viewCount,
-    })), total.rows[0]?.n ?? 0);
+    })), rows.rows[0]?.totalMuseums ?? 0);
   }, client);
 }
 
