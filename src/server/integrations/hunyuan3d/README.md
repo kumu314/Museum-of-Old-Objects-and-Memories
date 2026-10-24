@@ -111,6 +111,7 @@ if (job.status === 'DONE') {
   `QueryHunyuanTo3DProJob`）的其他网关；生产必须是 HTTPS，且地址不携带凭据或查询串；HTTP 环回地址仅允许 `NODE_ENV=test`。
 - `provider` 可锁定 `hunyuan-cloud` 或 `hunyuan-proxy`（演示反代），便于在额度用完后
   显式切换；也可省略，按可用性自动选择（配置了云 API 就用云 API）。
+- `HUNYUAN_PROVIDER_CONFIG` 可指定服务端配置文件路径，默认 `.local/model-provider.json`；`HUNYUAN_PROVIDER=cloud|proxy` 可锁定通道，文件中的 `provider` 优先。
 - 配置文件优先于环境变量；只有文件不存在才回退环境变量，路径、权限、语法或字段错误均受控失败，不会静默换通道。
 - 演示反代可在 JSON 中设置 `proxyBaseUrl`，提交和查询均使用该地址，沿用 HTTP(S) 地址校验与测试来源开关限制。
 - 采纳结果要求展品仍处于生成时的来源版本；生成后保存其他改动需重新生成，采纳后旧确认（含确认人）失效。
