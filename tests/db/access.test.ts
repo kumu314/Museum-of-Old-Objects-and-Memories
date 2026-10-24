@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { after, before, test } from 'node:test';
 import { Pool, type PoolClient } from 'pg';
-import { publicMuseumSchema } from '../../src/contracts';
+import { publicMuseumSchema, updatePublicProfileInputSchema } from '../../src/contracts';
 import { confirmExhibit, createExhibit, createMuseum, getMuseum, getShareAsset, publishMuseum, getPublicProfile, readLeaderboard, readShare, rotateShareToken, stopSharing, updateMuseum, updateMuseumAccess, updatePublicProfile } from '../../src/server/core';
 import { loadMigrations, migrate } from '../../src/server/db/migrate';
 import { getIsolatedTestDatabaseUrl } from '../../src/server/db/test-database';
@@ -130,7 +130,7 @@ test('退出公开发现即撤销收录同意：榜单地图不再展示，参�
     const { token } = await rotateShareToken(actor, museum.id, museum.version, db);
     // 收录前提：登记的演示账号 + 已填公开昵称；标注城市并明确同意收录后开启公开发现。
     await db.query('INSERT INTO direction1_demo_accounts(user_id) VALUES($1)', [actor]);
-    await updatePublicProfile(actor, { operationId: randomUUID(), expectedVersion: 1, nickname: '演示收录者' }, db);
+    await updatePublicProfile(actor, { operationId: randomUUID(), expectedVersion: 1, nickname: '演示收录者', expectMissing: true }, db);
     const linked = await getMuseum(actor, museum.id, db);
     await updateMuseum(actor, museum.id, { title: 'DEMO 私密发布', description: '合成资料', regionCity: '洛阳', discoveryListed: true, expectedVersion: linked.version }, db);
     const discoverable = await updateMuseumAccess(actor, museum.id, { operationId: randomUUID(), expectedVersion: linked.version + 1, accessMode: 'discoverable' }, db);
@@ -165,18 +165,32 @@ test('首次保存必须声明预期缺失：两个 expectedVersion=1 的首次�
   });
 });
 
+test('预期缺失是不可缺省的创建契约：省略字段的请求在入口即被拒绝', async () => {
+  await fixture(async (db, actor) => {
+    await db.query('INSERT INTO direction1_demo_accounts(user_id) VALUES($1)', [actor]);
+    // 复现审查场景：两个请求仅携带 expectedVersion=1、不带 expectMissing——
+    // 现在契约层直接拒绝，不可能进入服务端逻辑造成静默覆盖。
+    assert.throws(() => updatePublicProfileInputSchema.parse({ operationId: randomUUID(), expectedVersion: 1, nickname: '省略声明' }), /expectMissing/);
+    // 更新语义遇上资料缺失：同样 409，不能把“更新”降级成创建。
+    await assert.rejects(
+      updatePublicProfile(actor, { operationId: randomUUID(), expectedVersion: 1, nickname: '更新语义', expectMissing: false }, db),
+      hasCode('VERSION_CONFLICT'));
+    assert.equal(await getPublicProfile(actor, db), null);
+  });
+});
+
 test('昵称编辑核对版本：过期 expectedVersion 返回 409，不静默覆盖', async () => {
   await fixture(async (db, actor) => {
     await db.query('INSERT INTO direction1_demo_accounts(user_id) VALUES($1)', [actor]);
     const first = await updatePublicProfile(actor, { operationId: randomUUID(), expectedVersion: 1, nickname: '第一次保存', expectMissing: true }, db);
     assert.ok(first);
     assert.equal(first.version, 1);
-    const second = await updatePublicProfile(actor, { operationId: randomUUID(), expectedVersion: first.version, nickname: '核对后的昵称' }, db);
+    const second = await updatePublicProfile(actor, { operationId: randomUUID(), expectedVersion: first.version, nickname: '核对后的昵称', expectMissing: false }, db);
     assert.ok(second);
     assert.equal(second.version, 2);
     // 仍带着旧视图 expectedVersion=1 的编辑请求：必须得到版本冲突，且不能覆盖已保存的昵称。
     await assert.rejects(
-      updatePublicProfile(actor, { operationId: randomUUID(), expectedVersion: 1, nickname: '过期覆盖' }, db),
+      updatePublicProfile(actor, { operationId: randomUUID(), expectedVersion: 1, nickname: '过期覆盖', expectMissing: false }, db),
       hasCode('VERSION_CONFLICT'));
     const final = await getPublicProfile(actor, db);
     assert.ok(final);

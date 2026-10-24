@@ -176,7 +176,7 @@ test('逐章许可与馆访问分开；编辑不改变已授权正文，撤销/�
     await publishMuseum(actor, museum.id, (await getMuseum(actor, museum.id, db)).version, db);
     const current = await book(db, actor, museum.id); const id = current.memoir.id;
     const answer = await source(db, actor, id, '私密回答哨兵'); const chapter = await edited(db, actor, id, answer.id);
-    await updatePublicProfile(actor, { ...operation(1), nickname: '合成书馆主' }, db);
+    await updatePublicProfile(actor, { ...operation(1), nickname: '合成书馆主', expectMissing: true }, db);
     let access = await updateMuseumAccess(actor, museum.id, { ...operation((await getMuseum(actor, museum.id, db)).version), accessMode: 'discoverable' }, db); assert.ok(access.accessEpoch);
     const epoch = access.accessEpoch;
     assert.equal((await readDiscoveryMemoirChapters(visitor, museum.id, epoch, page, db)).items.length, 0);

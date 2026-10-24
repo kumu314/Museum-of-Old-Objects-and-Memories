@@ -34,7 +34,7 @@ async function preparedMuseum(db: PoolClient, owner: string, title = 'DEMO 车�
   return museum.id;
 }
 async function open(db: PoolClient, owner: string, museumId: string, nickname = 'DEMO 昵称') {
-  await updatePublicProfile(owner, { operationId: randomUUID(), expectedVersion: 1, nickname }, db);
+  await updatePublicProfile(owner, { operationId: randomUUID(), expectedVersion: 1, nickname, expectMissing: true }, db);
   return updateMuseumAccess(owner, museumId, { operationId: randomUUID(), expectedVersion: (await getMuseum(owner, museumId, db)).version, accessMode: 'discoverable' }, db);
 }
 const pageInput = { query: '', cursor: null, limit: 50 };
@@ -44,7 +44,7 @@ test('发现由服务端演示名单控制；member 身份不能代替登记，�
     const real = await account(db, false);
     const museum = await preparedMuseum(db, real);
     await assert.rejects(listDiscovery(real, pageInput, db), hasCode('DEMO_ONLY'));
-    await assert.rejects(updatePublicProfile(real, { operationId: randomUUID(), expectedVersion: 1, nickname: '伪造 DEMO' }, db), hasCode('DEMO_ONLY'));
+    await assert.rejects(updatePublicProfile(real, { operationId: randomUUID(), expectedVersion: 1, nickname: '伪造 DEMO', expectMissing: true }, db), hasCode('DEMO_ONLY'));
     await assert.rejects(updateMuseumAccess(real, museum, { operationId: randomUUID(), expectedVersion: (await getMuseum(real, museum, db)).version, accessMode: 'discoverable' }, db), hasCode('DEMO_ONLY'));
     assert.equal((await getMuseumAccess(real, museum, db)).accessMode, 'private');
     assert.equal((await listDiscovery(visitor, pageInput, db)).items.some(({ museumId }) => museumId === museum), false);
@@ -62,7 +62,7 @@ test('开放发现要求已发布快照与主动填写昵称；陌生人不能�
     await assert.rejects(updateMuseumAccess(visitor, museum, { operationId: randomUUID(), expectedVersion: version, accessMode: 'private' }, db), hasCode('NOT_FOUND'));
     await assert.rejects(updateMuseumTags(visitor, museum, { operationId: randomUUID(), expectedVersion: version, tags: ['越权'] }, db), hasCode('NOT_FOUND'));
     const empty = await createMuseum(visitor, { title: '尚未发布', description: '' }, db);
-    await updatePublicProfile(visitor, { operationId: randomUUID(), expectedVersion: 1, nickname: '主动填写' }, db);
+    await updatePublicProfile(visitor, { operationId: randomUUID(), expectedVersion: 1, nickname: '主动填写', expectMissing: true }, db);
     await assert.rejects(updateMuseumAccess(visitor, empty.id, { operationId: randomUUID(), expectedVersion: empty.version, accessMode: 'discoverable' }, db), hasCode('VALIDATION_ERROR'));
     assert.equal((await getMuseumAccess(owner, museum, db)).accessMode, 'private');
   });
@@ -133,11 +133,11 @@ test('分页游标绑定搜索条件，按快照发布时间和 ID 稳定翻页�
 
 test('昵称、标签与访问操作使用持久回执，重放不重复写，旧版本冲突不覆盖新内容', async () => {
   await fixture(async (db, visitor) => {
-    const profileInput = { operationId: randomUUID(), expectedVersion: 1, nickname: '原昵称' };
+    const profileInput = { operationId: randomUUID(), expectedVersion: 1, nickname: '原昵称', expectMissing: true };
     const profile = await updatePublicProfile(visitor, profileInput, db); assert.ok(profile);
     assert.deepEqual(await updatePublicProfile(visitor, profileInput, db), profile);
-    await updatePublicProfile(visitor, { operationId: randomUUID(), expectedVersion: profile.version, nickname: '新昵称' }, db);
-    await assert.rejects(updatePublicProfile(visitor, { operationId: randomUUID(), expectedVersion: profile.version, nickname: '过期覆盖' }, db), hasCode('VERSION_CONFLICT'));
+    await updatePublicProfile(visitor, { operationId: randomUUID(), expectedVersion: profile.version, nickname: '新昵称', expectMissing: false }, db);
+    await assert.rejects(updatePublicProfile(visitor, { operationId: randomUUID(), expectedVersion: profile.version, nickname: '过期覆盖', expectMissing: false }, db), hasCode('VERSION_CONFLICT'));
     const museum = await preparedMuseum(db, visitor);
     const input = { operationId: randomUUID(), expectedVersion: (await getMuseum(visitor, museum, db)).version, tags: ['原标签'] };
     const saved = await updateMuseumTags(visitor, museum, input, db);

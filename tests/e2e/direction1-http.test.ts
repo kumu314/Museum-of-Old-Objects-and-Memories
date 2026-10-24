@@ -42,7 +42,7 @@ test('方向一真实 HTTP：服务端白名单、公开投影、关注收藏、
     await expectError(await request('/api/discovery', ordinary.cookie), 403, 'DEMO_ONLY');
     await db.query('INSERT INTO direction1_demo_accounts(user_id) SELECT unnest($1::uuid[])', [[owner.id, visitor.id]]);
     for (const actor of [owner, visitor]) {
-      const profile = await request('/api/profile', actor.cookie, 'PATCH', { operationId: randomUUID(), expectedVersion: 1, nickname: `DEMO ${actor.id.slice(0, 8)}` });
+      const profile = await request('/api/profile', actor.cookie, 'PATCH', { operationId: randomUUID(), expectedVersion: 1, nickname: `DEMO ${actor.id.slice(0, 8)}`, expectMissing: true });
       assert.equal(profile.status, 200);
     }
     const created = await request('/api/museums', owner.cookie, 'POST', { title: `DEMO 馆 ${owner.id}`, description: '仅供合成资料验收。' });

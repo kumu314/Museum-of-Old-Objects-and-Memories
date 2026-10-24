@@ -157,22 +157,29 @@ export function updatePublicProfile(actorId: string, input: UpdatePublicProfileI
       ? publicProfileSchema.parse({ ...locked.rows[0], updatedAt: locked.rows[0].updatedAt instanceof Date ? locked.rows[0].updatedAt.toISOString() : locked.rows[0].updatedAt })
       : null;
     if (operation.replayed) return current;
-    if (input.expectMissing === true && current) {
-      // 另一页面的首次保存已经创建了资料行：这次“预期缺失”的提交必须 409，而不是覆盖。
-      throw new HttpError({ code: 'VERSION_CONFLICT', message: '昵称已由另一次首次保存创建，请刷新后核对。' });
-    }
-    assertVersion(current?.version ?? 1, input.expectedVersion);
-    if (current) await db.query('UPDATE public_profiles SET nickname=$1,version=version+1,updated_at=now() WHERE user_id=$2', [input.nickname, actorId]);
-    else {
+    if (input.expectMissing) {
+      // 创建语义：调用方声明资料尚不存在。行已存在说明另一页面的首次保存已生效，
+      // 或调用方视图过期——两种情况都必须 409，不能静默覆盖。
+      if (current) {
+        throw new HttpError({ code: 'VERSION_CONFLICT', message: '昵称已由另一次首次保存创建，请刷新后核对。' });
+      }
+      assertVersion(1, input.expectedVersion);
       try {
         await db.query('INSERT INTO public_profiles(user_id,nickname) VALUES($1,$2)', [actorId, input.nickname]);
       } catch (error) {
-        // 并发首次保存：另一半事务已插入同名资料行，按版本冲突处理。
+        // 并发首次保存在锁外撞行：唯一约束兜底，同样按版本冲突处理。
         if ((error as { code?: string }).code === '23505') {
           throw new HttpError({ code: 'VERSION_CONFLICT', message: '昵称刚刚被另一次保存创建，请刷新后核对。' });
         }
         throw error;
       }
+    } else {
+      // 更新语义：调用方声明资料已存在。缺失说明视图过期，必须 409。
+      if (!current) {
+        throw new HttpError({ code: 'VERSION_CONFLICT', message: '公开昵称尚未创建，请先完成首次保存。' });
+      }
+      assertVersion(current.version, input.expectedVersion);
+      await db.query('UPDATE public_profiles SET nickname=$1,version=version+1,updated_at=now() WHERE user_id=$2', [input.nickname, actorId]);
     }
     await operation.finish();
     return profileRecord(db, actorId);

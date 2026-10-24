@@ -18,7 +18,7 @@
 
 | 路径 | 方法 | 已实现行为 |
 | --- | --- | --- |
-| `/api/profile` | GET / PATCH | 本人的公开资料，未填写返回 null；首次 PATCH 使用 expectedVersion=1，之后使用实际资料版本。不自动使用登录名 |
+| `/api/profile` | GET / PATCH | 本人的公开资料，未填写返回 null。PATCH 必填 `expectMissing`：`true` 为创建语义（资料已存在返回 409），`false` 为更新语义（资料缺失或 expectedVersion 过期返回 409）。创建固定从版本 1 开始，之后使用实际资料版本。不自动使用登录名 |
 | `/api/museums/:museumId/access` | GET / PATCH | 馆主读取/设置三态访问；开放前必须有有效快照；公开发现额外检查演示资格及昵称 |
 | `/api/museums/:museumId/tags` | GET / PATCH | 馆主标签；完整替换明确数组，空数组清空；增加馆版本，发布后才更新发现 |
 | `/api/discovery` | GET | query、cursor、limit（默认 20，最多 50）；仅搜索发布的昵称、馆名、展品名、标签；通配符作为文字处理 |
