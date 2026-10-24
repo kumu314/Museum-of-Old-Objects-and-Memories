@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import type { PoolClient } from 'pg';
 import { shareNotFoundMessage, uploadLimits, type Asset } from '../../contracts';
-import { cleanupUncommittedAsset, prepareAsset, processAsset, resolveAssetPath, type AssetInput } from '../assets';
+import { cleanupAllowed, cleanupUncommittedAsset, prepareAsset, processAsset, resolveAssetPath, type AssetInput } from '../assets';
 import { getServerConfig } from '../config';
 import { getPool } from '../db/pool';
 import { HttpError, privateHeaders } from '../http';
@@ -9,24 +9,35 @@ import { getMuseum } from './museums';
 import { assetRecord, museumRecord, type StoredAsset } from './records';
 
 const multipartLimit = uploadLimits.audioBytes + 65_536;
+/** 超限后最多再读这么多字节用于清空请求体，更离谱的体积直接放弃、不陪跑。 */
+const drainCeiling = multipartLimit * 2;
 export async function readAssetUpload(request: Request): Promise<AssetInput> {
   const contentType = request.headers.get('content-type') ?? '';
   if (!/^multipart\/form-data\s*;/i.test(contentType)) throw new HttpError({ code: 'UNSUPPORTED_MEDIA_TYPE', message: '请使用文件上传表单。' });
   const tooLarge = () => new HttpError({ code: 'PAYLOAD_TOO_LARGE', message: '上传请求超过允许大小。' });
-  if (Number(request.headers.get('content-length')) > multipartLimit) throw tooLarge();
   const reader = request.body?.getReader();
   if (!reader) throw new HttpError({ code: 'VALIDATION_ERROR', message: '请选择一个文件。' });
+  // 声明超限也要把请求体读空再拒绝。请求体没读完就返回 413，这条连接会带着
+  // 未消费的字节回到客户端连接池，下一个请求复用它就是 ECONNRESET。
+  let overflow = Number(request.headers.get('content-length')) > multipartLimit;
   const chunks: Uint8Array[] = [];
   let size = 0;
+  let dropped = 0;
   try {
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
+      if (overflow) {
+        dropped += value.byteLength;
+        if (dropped > drainCeiling) break;
+        continue;
+      }
       size += value.byteLength;
-      if (size > multipartLimit) { await reader.cancel(); throw tooLarge(); }
+      if (size > multipartLimit) { overflow = true; chunks.length = 0; continue; }
       chunks.push(value);
     }
   } finally { reader.releaseLock(); }
+  if (overflow) throw tooLarge();
   let form: FormData;
   try { form = await new Response(Buffer.concat(chunks), { headers: { 'Content-Type': contentType } }).formData(); }
   catch { throw new HttpError({ code: 'VALIDATION_ERROR', message: '上传表单不完整，请重新选择文件。' }); }
@@ -69,7 +80,7 @@ export async function uploadAsset(actorId: string, museumId: string, input: Asse
     }
     client?.release(!begun || !rollbackConfirmed);
     client = null;
-    if (!commitAttempted && (!begun || rollbackConfirmed)) {
+    if (cleanupAllowed({ begun, commitAttempted, rollbackConfirmed })) {
       try {
         await cleanupUncommittedAsset(prepared, directory, begun ? 'rolled-back' : 'not-started', async (id) => {
           const result = await pool.query<{ referenced: boolean }>(`SELECT EXISTS(
