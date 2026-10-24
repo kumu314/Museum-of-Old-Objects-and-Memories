@@ -71,28 +71,45 @@ test('HTTP制作发布与分享撤销：会话、CAS、确认、快照和统一�
     const published = publishResponseSchema.parse(await publication.json()).data;
     assert.ok(published.token);
     const token = published.token;
-    const share = await request(`/api/share/${token}`, 'GET', undefined, false);
+    await expectError(await request(`/api/share/${token}`, 'GET', undefined, false), 401, 'UNAUTHORIZED');
+    await expectError(await request('/api/share/invalid', 'GET', undefined, false), 401, 'UNAUTHORIZED');
+    const share = await request(`/api/share/${token}`);
     assert.equal(share.status, 200);
     assert.match(share.headers.get('cache-control') ?? '', /no-store/);
     const before = publicMuseumResponseSchema.parse(await share.json()).data;
     assert.equal(JSON.stringify(before).includes('内部原文不应公开'), false);
+    const visitorLogin = await request('/api/auth/login', 'POST', {
+      username: process.env.E2E_SECOND_USERNAME, password: process.env.E2E_SECOND_PASSWORD,
+    }, false);
+    assert.equal(visitorLogin.status, 200);
+    const visitorCookie = visitorLogin.headers.getSetCookie().map((value) => value.split(';')[0]).join('; ');
+    const visit = () => fetch(new URL(`/api/share/${token}`, origin), {
+      headers: { Cookie: visitorCookie }, signal: AbortSignal.timeout(15_000),
+    });
+    const visitorShare = await visit();
+    assert.equal(visitorShare.status, 200, '已登录的非所有者可凭有效链接参观');
+    assert.deepEqual(publicMuseumResponseSchema.parse(await visitorShare.json()).data, before);
+    assert.equal((await fetch(new URL('/api/auth/logout', origin), {
+      method: 'POST', headers: { Origin: origin, Cookie: visitorCookie }, signal: AbortSignal.timeout(15_000),
+    })).status, 200);
+    await expectError(await visit(), 401, 'UNAUTHORIZED');
     const edit = await request(`${base}/exhibits/${exhibit.id}`, 'PATCH', { ...exhibitFields, name: '修改后的相机', expectedVersion: exhibit.version });
     assert.equal(edit.status, 200);
     const changed = exhibitDraftResponseSchema.parse(await edit.json()).data;
     assert.equal(changed.confirmedVersion, null);
     await expectError(await request(`${base}/exhibits/${exhibit.id}`, 'PATCH', { ...exhibitFields, expectedVersion: exhibit.version }), 409, 'VERSION_CONFLICT');
-    const unchangedShare = await request(`/api/share/${token}`, 'GET', undefined, false);
+    const unchangedShare = await request(`/api/share/${token}`);
     assert.deepEqual(publicMuseumResponseSchema.parse(await unchangedShare.json()).data, before);
     const rotation = await request(`${base}/share`, 'POST', { expectedVersion: (await museum()).version });
     assert.equal(rotation.status, 200);
     const rotated = shareLinkResponseSchema.parse(await rotation.json()).data;
-    const expired = await expectError(await request(`/api/share/${token}`, 'GET', undefined, false), 404, 'SHARE_NOT_FOUND');
-    const invalid = await expectError(await request('/api/share/invalid', 'GET', undefined, false), 404, 'SHARE_NOT_FOUND');
+    const expired = await expectError(await request(`/api/share/${token}`), 404, 'SHARE_NOT_FOUND');
+    const invalid = await expectError(await request('/api/share/invalid'), 404, 'SHARE_NOT_FOUND');
     assert.equal(expired.message, invalid.message);
     const stopped = await request(`${base}/share`, 'DELETE', { expectedVersion: (await museum()).version });
     assert.equal(stopped.status, 200);
     mutationSuccessSchema.parse(await stopped.json());
-    await expectError(await request(`/api/share/${rotated.token}`, 'GET', undefined, false), 404, 'SHARE_NOT_FOUND');
+    await expectError(await request(`/api/share/${rotated.token}`), 404, 'SHARE_NOT_FOUND');
   } finally {
     if (museumId && cookie) {
       const latest = await museum();

@@ -5,7 +5,7 @@ import { Pool, type PoolClient } from 'pg';
 import type { CreateExhibitInput } from '../../src/contracts';
 import { adoptAiDraft } from '../../src/server/core/ai';
 import { createExhibit, createMuseum, confirmExhibit, getMuseum, getPrivateAsset, listMuseums, publishMuseum,
-  removeMuseum, rotateShareToken, stopSharing, updateMuseum } from '../../src/server/core';
+  removeMuseum, rotateShareToken, stopSharing, updateMuseum, readShare, getShareAsset } from '../../src/server/core';
 import { migrate } from '../../src/server/db/migrate';
 import { getIsolatedTestDatabaseUrl } from '../../src/server/db/test-database';
 import { HttpError } from '../../src/server/http';
@@ -88,19 +88,30 @@ test('归属隔离：列表、读取、写入、素材与删除都不越权', as
 test('归属隔离：发布、分享换链与停止分享只能由归属账号执行', async () => {
   await twoAccounts(async (db, owner, stranger) => {
     const mine = await createMuseum(owner.id, { title: '发布归属馆', description: '' }, db);
-    const exhibit = await createExhibit(owner.id, mine.id, exhibitInput(mine.version), db);
+    const image = randomUUID();
+    await db.query(`INSERT INTO assets(id,museum_id,original_name,kind,mime,byte_size,storage_key,width,height,sha256,created_by)
+      VALUES($1,$2,'shared.webp','image','image/webp',100,$3,10,10,$4,$5)`,
+      [image, mine.id, `${image}.processed`, '0'.repeat(64), owner.id]);
+    const exhibit = await createExhibit(owner.id, mine.id, { ...exhibitInput(mine.version), photoAssetId: image }, db);
     await confirmExhibit(owner.id, mine.id, exhibit.id,
       { expectedVersion: exhibit.version, confirmationNote: '归属测试确认' }, db);
     const version = (await getMuseum(owner.id, mine.id, db)).version;
 
     await hidden(publishMuseum(stranger.id, mine.id, version, db));
     const published = await publishMuseum(owner.id, mine.id, version, db);
-    assert.ok(published.token);
+    const token = published.token;
+    assert.ok(token);
 
     await hidden(rotateShareToken(stranger.id, mine.id, (await getMuseum(owner.id, mine.id, db)).version, db));
     await hidden(stopSharing(stranger.id, mine.id, (await getMuseum(owner.id, mine.id, db)).version, db));
 
-    // 分享是公开读取，不按账号归属；但停止分享只能属于归属账号，上面已经验证。
+    // 登录后持链接可参观，参观者不必是所有者；制作权限仍按归属隔离。
+    assert.equal((await readShare(stranger.id, token, db)).id, mine.id);
+    assert.equal((await getShareAsset(stranger.id, token, image, db)).asset.id, image);
+    await db.query('UPDATE team_members SET active=false WHERE id=$1', [stranger.id]);
+    for (const action of [() => readShare(stranger.id, token, db), () => getShareAsset(stranger.id, token, image, db)]) {
+      await assert.rejects(action(), (error: unknown) => error instanceof HttpError && error.failure.code === 'UNAUTHORIZED');
+    }
     assert.equal((await getMuseum(owner.id, mine.id, db)).shareEnabled, true);
   });
 });

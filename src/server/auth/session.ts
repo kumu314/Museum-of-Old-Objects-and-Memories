@@ -20,7 +20,7 @@ async function cookieSession() {
   });
 }
 function unauthorized() {
-  return new HttpError({ code: 'UNAUTHORIZED', message: '请登录团队制作账号。' });
+  return new HttpError({ code: 'UNAUTHORIZED', message: '请先登录账号。' });
 }
 export async function requireMember() {
   const cookie = await cookieSession();
@@ -100,7 +100,6 @@ export async function registerUser(input: RegisterInput) {
   if (!getServerConfig().selfRegistration) {
     throw new HttpError({ code: 'FORBIDDEN', message: '当前未开放自助注册，请联系管理员开通账号。' });
   }
-  const pool = getPool();
   const attempts = await countAttempt('register', input.username);
   if (attempts > throttleLimit) throw new HttpError({ code: 'UNAUTHORIZED', message: '注册尝试过多，请五分钟后重试。' });
 
@@ -116,9 +115,11 @@ export async function registerUser(input: RegisterInput) {
       );
       const id = created.rows[0]?.id;
       if (!id) throw new Error('Registered member could not be read back.');
+      if (session.sessionId) await db.query('DELETE FROM team_sessions WHERE id=$1', [session.sessionId]);
       await db.query('DELETE FROM team_sessions WHERE expires_at <= now()');
       await db.query("INSERT INTO team_sessions(id,member_id,expires_at) VALUES($1,$2,now()+$3::integer*interval '1 second')",
         [sessionId, id, lifetimeSeconds]);
+      await db.query("DELETE FROM login_attempts WHERE scope='register' AND username=$1", [input.username]);
       return id;
     });
   } catch (error) {
@@ -126,7 +127,6 @@ export async function registerUser(input: RegisterInput) {
     if (isUniqueViolation(error)) throw new HttpError({ code: 'VALIDATION_ERROR', message: '该用户名已被占用，请换一个。' });
     throw error;
   }
-  await pool.query("DELETE FROM login_attempts WHERE scope='register' AND username=$1", [input.username]);
   session.sessionId = sessionId;
   await session.save();
   return teamMemberSchema.parse({ id: memberId, username: input.username });

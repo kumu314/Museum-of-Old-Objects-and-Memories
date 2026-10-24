@@ -79,11 +79,15 @@ async function shareRecord(db: PoolClient, token: string) {
   if (!result.rows[0]) shareNotFound();
   return shareRecordSchema.parse(result.rows[0]);
 }
-export function readShare(token: string, client?: PoolClient) {
-  return inTransaction(async (db) => (await shareRecord(db, token)).data, client);
-}
-export function getShareAsset(token: string, assetId: string, client?: PoolClient) {
+export function readShare(actorId: string, token: string, client?: PoolClient) {
   return inTransaction(async (db) => {
+    await requireActor(db, actorId);
+    return (await shareRecord(db, token)).data;
+  }, client);
+}
+export function getShareAsset(actorId: string, token: string, assetId: string, client?: PoolClient) {
+  return inTransaction(async (db) => {
+    await requireActor(db, actorId);
     if (!idSchema.safeParse(assetId).success) shareNotFound();
     const share = await shareRecord(db, token);
     const member = await db.query('SELECT asset_id FROM snapshot_assets WHERE snapshot_id=$1 AND museum_id=$2 AND asset_id=$3', [share.snapshotId, share.id, assetId]);

@@ -80,9 +80,11 @@ test('自助注册HTTP：校验、唯一性、注册即可用与归属隔离', a
   const museumId = museumDraftResponseSchema.parse(await museum.json()).data.id;
 
   // 第二个注册账号看不到第一个账号的展馆，直接构造 ID 也拿不到。
-  const otherRegistered = await post('/api/auth/register', second);
+  const otherRegistered = await post('/api/auth/register', second, reloginCookie);
   assert.equal(otherRegistered.status, 201);
   const secondCookie = cookieOf(otherRegistered);
+  const replacedSession = await failure(await get('/api/auth/session', reloginCookie));
+  assert.deepEqual([replacedSession.status, replacedSession.code], [401, 'UNAUTHORIZED'], '注册切换账号后旧会话必须失效');
   const otherList = await get('/api/museums', secondCookie);
   assert.equal(museumListResponseSchema.parse(await otherList.json()).data.some((item) => item.id === museumId), false);
   const denial = await failure(await get(`/api/museums/${museumId}`, secondCookie));
