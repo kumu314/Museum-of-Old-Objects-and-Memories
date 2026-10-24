@@ -3,7 +3,7 @@
 import { useId, useState, type FormEvent, type ReactNode } from 'react';
 import { z } from 'zod';
 import { adoptAiInputSchema, aiDraftSchema, type AiDraft } from '../../contracts/ai';
-import { confirmExhibitInputSchema, createExhibitInputSchema, exhibitDraftSchema, updateExhibitInputSchema, type CreateExhibitInput, type ExhibitDraft, type MuseumDraft } from '../../contracts/museum';
+import { confirmExhibitInputSchema, createExhibitInputSchema, displayPhotoRequiredMessage, exhibitDraftSchema, missingDisplayPhoto, updateExhibitInputSchema, type CreateExhibitInput, type ExhibitDraft, type MuseumDraft } from '../../contracts/museum';
 import { modelKeySchema } from '../../contracts/primitives';
 import { apiRequest, describeFailure, jsonRequest } from './api';
 import { AiDraftPanel } from './ai-draft-panel';
@@ -58,10 +58,12 @@ export function ExhibitEditor({ museum, initial, slotIndex, resetKey, cabinet, p
   const disabled = blocked || busy !== null;
   const captionLength = Array.from(fields.caption.trim()).length;
   const confirmed = saved !== null && saved.confirmedVersion === saved.version;
+  const photoMissing = missingDisplayPhoto(fields);
   const path = `/api/museums/${museum.id}/exhibits`;
   let confirmationLabel = '尚未保存';
   if (saved) confirmationLabel = `v${saved.version} · 待确认`;
   if (saved && confirmed && !dirty) confirmationLabel = `v${saved.version} · 已确认`;
+  if (saved && photoMissing) confirmationLabel = `v${saved.version} · 待补图片`;
   let saveStatus = '尚未保存';
   if (saved) saveStatus = `已保存 · v${saved.version}`;
   if (dirty) saveStatus = '有未保存修改';
@@ -102,7 +104,7 @@ export function ExhibitEditor({ museum, initial, slotIndex, resetKey, cabinet, p
     } finally { pending(null); }
   }
   async function confirm() {
-    if (!saved || disabled || dirty || draftEdited) return;
+    if (!saved || disabled || dirty || draftEdited || missingDisplayPhoto(saved)) return;
     pending('确认'); setError(null); setMessage(null);
     try {
       const input = confirmExhibitInputSchema.parse({ expectedVersion: saved.version, confirmationNote: note });
@@ -209,9 +211,10 @@ export function ExhibitEditor({ museum, initial, slotIndex, resetKey, cabinet, p
           aria-invalid={captionLength > 120} aria-describedby={`${id}-caption-count`} placeholder="把你希望参观者读到的回忆写在这里。也可以从故事草稿中采纳，再亲自修订。" onChange={(event) => change('caption', event.target.value)} /></Field>
         <p id={`${id}-caption-count`} className={`workbench-count ${captionLength > 120 ? 'wb-error' : ''}`}>{captionLength} / 120 字</p>
         <p className="wb-hint">确认前请核对展签、展示方式和素材。修改公开内容后，需要重新确认。</p>
-        {confirmed && !dirty ? <p className="workbench-confirmed">✓ 当前版本已确认<span>{saved.confirmationNote}</span></p>
+        {photoMissing && <p className="wb-hint" role="status">{displayPhotoRequiredMessage}<button type="button" className="wb-text-link" onClick={() => setTab('materials')}>前往素材补图 →</button></p>}
+        {confirmed && !dirty && !photoMissing ? <p className="workbench-confirmed">✓ 当前版本已确认<span>{saved.confirmationNote}</span></p>
           : <div className="workbench-fields"><Field label="确认记录" hint="仅自己可见，例如“已核对照片与讲述一致”。"><textarea rows={2} value={note} disabled={disabled || !saved} onChange={(event) => { setNote(event.target.value); onDirty(dirty || draftEdited || event.target.value.length > 0); }} /></Field>
-            <button type="button" className="wb-primary wb-full" disabled={disabled || dirty || draftEdited || !saved || !note.trim() || captionLength === 0 || captionLength > 120} onClick={confirm}>明确确认当前版本</button>
+            <button type="button" className="wb-primary wb-full" disabled={disabled || dirty || draftEdited || !saved || !note.trim() || photoMissing || captionLength === 0 || captionLength > 120} onClick={confirm}>明确确认当前版本</button>
             {(!saved || dirty) && <p className="wb-hint">请先保存草稿，确认只针对已保存的当前版本。</p>}</div>}
         {publishing}
         {saved && <button type="button" className="wb-text-link wb-danger" disabled={disabled} onClick={remove}>移除这件旧物的草稿</button>}

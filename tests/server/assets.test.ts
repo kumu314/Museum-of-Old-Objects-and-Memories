@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
@@ -8,7 +9,7 @@ import { after, before, test } from 'node:test';
 import sharp from 'sharp';
 import { uploadLimits } from '../../src/contracts/assets';
 import { HttpError } from '../../src/server/http';
-import { cleanupUncommittedAsset, prepareAsset, processAsset, resolveAssetPath } from '../../src/server/assets';
+import { cleanupAllowed, cleanupUncommittedAsset, prepareAsset, processAsset, resolveAssetPath } from '../../src/server/assets';
 
 const executeFile = promisify(execFile);
 let workspace: string;
@@ -143,6 +144,20 @@ test('ALAC M4A and mu-law WAV are unsupported; truncated WAV cannot be accepted 
   await assert.rejects(processAsset({ inputBuffer: wave(16044).subarray(0, 120), originalName: 'truncated.wav', mime: 'audio/wav' }), rejectsCode('VALIDATION_ERROR'));
 });
 
+test('missing ffprobe/ffmpeg is a controlled server failure', async () => {
+  const originalPath = process.env.PATH;
+  process.env.PATH = '';
+  try {
+    await assert.rejects(
+      processAsset({ inputBuffer: wave(16044), originalName: 'voice.wav', mime: 'audio/wav' }),
+      rejectsCode('INTERNAL_ERROR'),
+    );
+  } finally {
+    if (originalPath === undefined) delete process.env.PATH;
+    else process.env.PATH = originalPath;
+  }
+});
+
 test('exact 20 MiB valid PCM WAV succeeds and one extra byte returns 413', async () => {
   const inputBuffer = wave(uploadLimits.audioBytes);
   assert.equal((await processAsset({ inputBuffer, originalName: 'boundary.wav', mime: 'audio/wav' })).kind, 'audio');
@@ -168,10 +183,46 @@ test('private preparation retains complete unique files; cleanup never removes r
   const publicDirectory = join(fakeApp, 'public');
   const alias = join(workspace, 'public-alias');
   await mkdir(publicDirectory, { recursive: true });
-  await symlink(publicDirectory, alias);
+  // Windows 上不传 type 建出来是普通空目录，lstat 不是链接、realpath 也不解析，守卫测不到。
+  // 这两个平台各自的目录链接形式都要真正指向 public，否则下面的拒绝断言是空转。
+  await symlink(publicDirectory, alias, process.platform === 'win32' ? 'junction' : 'dir');
+  assert.equal(await realpath(alias), await realpath(publicDirectory));
   const originalCwd = process.cwd();
   try {
     process.chdir(fakeApp);
     await assert.rejects(prepareAsset(processed, alias), /outside public/);
   } finally { process.chdir(originalCwd); }
+});
+
+test('只有确定没提交的事务才允许清理文件，COMMIT 结果未知必须保留', () => {
+  // 文件已写好、事务还没开始：允许清理。
+  assert.equal(cleanupAllowed({ begun: false, commitAttempted: false, rollbackConfirmed: false }), true);
+  // 事务内失败且回滚已确认：允许清理。
+  assert.equal(cleanupAllowed({ begun: true, commitAttempted: false, rollbackConfirmed: true }), true);
+  // 事务内失败但回滚没确认：不可清理，可能还有未断开的写入。
+  assert.equal(cleanupAllowed({ begun: true, commitAttempted: false, rollbackConfirmed: false }), false);
+  // COMMIT 已发出、结果未知：不可清理，可能已经提交。
+  assert.equal(cleanupAllowed({ begun: true, commitAttempted: true, rollbackConfirmed: false }), false);
+  // COMMIT 之后无论回滚结论如何，都不得清理。
+  assert.equal(cleanupAllowed({ begun: true, commitAttempted: true, rollbackConfirmed: true }), false);
+  // 未开事务却声称 COMMIT 过：保守保留。
+  assert.equal(cleanupAllowed({ begun: false, commitAttempted: true, rollbackConfirmed: false }), false);
+});
+
+test('清理只动自己那一份文件：旧素材与同目录其他资产都不受影响', async () => {
+  const directory = join(workspace, 'isolation');
+  const processed = await processAsset({ inputBuffer: await image(), originalName: 'photo.png', mime: 'image/png' });
+  const kept = await prepareAsset(processed, directory);
+  const dropped = await prepareAsset(processed, directory);
+  // 事务未开始就失败，也要能被清理。
+  assert.equal(await cleanupUncommittedAsset(dropped, directory, 'not-started', async () => false), true);
+  assert.deepEqual(await readdir(directory), [kept.id]);
+  assert.deepEqual(await readFile(resolveAssetPath(directory, kept.storageKey)), processed.bytes);
+  // 事务状态不明确时直接拒绝清理，不靠调用方自觉。
+  await assert.rejects(cleanupUncommittedAsset(kept, directory, 'committed' as 'rolled-back', async () => false),
+    /definitively uncommitted/);
+  // 身份与存储键对不上时不得据此删目录。
+  await assert.rejects(cleanupUncommittedAsset({ ...kept, id: randomUUID() }, directory, 'rolled-back', async () => false),
+    /does not match its storage key/);
+  assert.deepEqual(await readdir(directory), [kept.id]);
 });

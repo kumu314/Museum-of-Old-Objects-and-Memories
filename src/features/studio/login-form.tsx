@@ -8,7 +8,7 @@ import { apiRequest, describeFailure, jsonRequest } from './api';
 
 const AUTH_BG = 'https://images.unsplash.com/photo-1452587925148-ce544e77e70d?auto=format&fit=crop&w=1100&q=70';
 
-export function LoginForm() {
+export function LoginForm({ returnTo = '/studio' }: { returnTo?: string }) {
   const router = useRouter();
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [username, setUsername] = useState('');
@@ -28,7 +28,7 @@ export function LoginForm() {
         await apiRequest('/api/auth/register', sessionUserSchema, jsonRequest('POST', registerInputSchema.parse({ username, password })));
         setPassword(''); setConfirm('');
       }
-      router.replace('/studio');
+      router.replace(returnTo);
     } catch (failure) { setError(describeFailure(failure)); }
     finally { setPending(false); }
   }
