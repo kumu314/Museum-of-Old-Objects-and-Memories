@@ -1,7 +1,7 @@
 'use client';
 
 import Image from 'next/image';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { assetSchema } from '../../contracts/assets';
 import {
   modelAssetPath, modelGenerationJobSchema, modelGenerationPaths,
@@ -17,11 +17,9 @@ export function ModelGenerationFields({ museumId, exhibitId, exhibitVersion, dir
   onChange: (input: ModelInput) => void; onBusy: (busy: boolean) => void; onError: (error: string | null) => void;
 }) {
   const assetPath = `/api/museums/${encodeURIComponent(museumId)}/assets`;
-  const [job, setJob] = useState<ModelGenerationJob | null>(null);
+  const [storedJob, setJob] = useState<ModelGenerationJob | null>(null);
+  const job = storedJob?.exhibitId === exhibitId ? storedJob : null;
   const [pollError, setPollError] = useState<string | null>(null);
-  const jobRef = useRef<ModelGenerationJob | null>(null);
-  // ref 在 effect 内同步，避免渲染期间写 ref（React 并发渲染下不安全）。
-  useEffect(() => { jobRef.current = job; }, [job]);
   const active = job !== null && (job.status === 'SUBMITTING' || job.status === 'WAIT' || job.status === 'RUN');
   const terminal = job?.status === 'FAIL' || job?.status === 'DONE';
 
@@ -33,36 +31,40 @@ export function ModelGenerationFields({ museumId, exhibitId, exhibitVersion, dir
       try {
         const latest = await apiRequest(modelGenerationPaths(museumId, exhibitId).latest,
           modelGenerationJobSchema.nullable(), { signal: controller.signal });
-        if (latest !== null && !controller.signal.aborted) setJob(latest);
+        if (!controller.signal.aborted) { setJob(latest); setPollError(null); }
       } catch (error) {
         if (!controller.signal.aborted) onError(describeFailure(error));
       }
     })();
     return () => controller.abort();
-    // 只在展品变化时恢复；轮询结果不回写触发重复请求。
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [museumId, exhibitId]);
+  }, [museumId, exhibitId, onError]);
 
-  // 轮询任务状态；终态（FAIL/DONE）后停止。瞬时错误只提示，不把任务判死。
+  const jobId = job?.id;
+  // 一次请求完成后再安排下一次，慢响应不会叠加；切换展品或任务后丢弃旧结果。
   useEffect(() => {
-    const current = jobRef.current;
-    if (!current || terminal) return;
+    if (exhibitId === null || jobId === undefined || terminal) return;
     const controller = new AbortController();
-    const timer = setInterval(() => {
-      void (async () => {
-        try {
-          const next = await apiRequest(modelGenerationPaths(museumId, current.exhibitId).job(current.id),
-            modelGenerationJobSchema, { signal: controller.signal });
-          setJob(next);
-          setPollError(null);
-        } catch (error) {
-          if (controller.signal.aborted) return;
-          setPollError(`状态刷新失败，正在重试：${describeFailure(error)}`);
-        }
-      })();
-    }, 3_000);
-    return () => { clearInterval(timer); controller.abort(); };
-  }, [museumId, job?.id, terminal]);
+    const jobPath = modelGenerationPaths(museumId, exhibitId).job(jobId);
+    let timer: ReturnType<typeof setTimeout>;
+    async function poll() {
+      let finished = false;
+      try {
+        const next = await apiRequest(jobPath,
+          modelGenerationJobSchema, { signal: controller.signal });
+        if (controller.signal.aborted) return;
+        setJob(next);
+        setPollError(null);
+        finished = next.status === 'FAIL' || next.status === 'DONE';
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        setPollError(`状态刷新失败，正在重试：${describeFailure(error)}`);
+      } finally {
+        if (!controller.signal.aborted && !finished) timer = setTimeout(() => { void poll(); }, 3_000);
+      }
+    }
+    timer = setTimeout(() => { void poll(); }, 3_000);
+    return () => { clearTimeout(timer); controller.abort(); };
+  }, [museumId, exhibitId, jobId, terminal]);
 
   function mode(next: ModelInput['mode']) {
     if (next === input.mode) return;
@@ -103,12 +105,15 @@ export function ModelGenerationFields({ museumId, exhibitId, exhibitVersion, dir
     : input.imageAssetId === null ? '请先选择或关联一张建模照片。'
     : dirty || exhibitId === null || exhibitVersion === null ? '请先点击“保存草稿”（需填写素材来源说明），保存后即可生成。'
     : null;
+  const submissionUnknown = job?.status === 'SUBMITTING' && job.errorCode === 'SUBMIT_UNKNOWN';
+  const staleResult = job?.status === 'DONE' && job.sourceVersion !== exhibitVersion;
   const statusText = job === null ? null
+    : submissionUnknown ? '提交结果未知，需由管理员核对上游任务；核对前不会再次提交。'
     : job.status === 'FAIL' ? `失败：${job.errorMessage ?? '请稍后重试。'}`
-    : job.status === 'DONE' ? '模型已生成（已通过加载与纹理校验）'
+    : job.status === 'DONE' ? staleResult ? '旧版生成结果：展品已修改，此模型不对应当前版本。' : '模型已生成（已通过模型校验）'
     : STATUS_LABELS[job.status];
   return <section className="workbench-model-note" aria-label="照片生成三维准备">
-    <div className="wb-row"><strong>照片生成 3D</strong><span className="wb-badge">混元反代 · 演示链路</span></div>
+    <div className="wb-row"><strong>照片生成 3D</strong><span className="wb-badge">生成任务</span></div>
     <div className="wb-actions" role="group" aria-label="建模照片模式"><button type="button" className="wb-secondary" aria-pressed={input.mode === 'single'} disabled={disabled} onClick={() => mode('single')}>单张生成</button><button type="button" className="wb-secondary" aria-pressed={input.mode === 'multiview'} disabled={disabled} onClick={() => mode('multiview')}>四视图生成</button></div>
     <p>{input.mode === 'single' ? '准备一张主体清晰、遮挡较少的照片。' : '分别准备同一件旧物的正面、背面、左侧和右侧照片。'}点击“生成”即代表允许把该照片提交给混元 3D 用于建模；模型只能近似呈现，不能保证未拍摄细节准确。</p>
     <div className="workbench-model-photos">{photos.map((photo) => <div key={photo.key}>
@@ -117,10 +122,10 @@ export function ModelGenerationFields({ museumId, exhibitId, exhibitVersion, dir
       {photo.assetId && <button type="button" className="wb-text-link" disabled={disabled} onClick={() => photo.assign(null)}>移除关联</button>}
     </div>)}</div>
     {input.mode === 'single' && photoAssetId && input.imageAssetId !== photoAssetId && <button type="button" className="wb-text-link" disabled={disabled} onClick={() => onChange({ mode: 'single', imageAssetId: photoAssetId })}>使用上方实拍照片</button>}
-    <p>生成前请先保存草稿；四视图生成暂未开放。生成消耗演示额度，重复点击会复用进行中的任务，不会重复扣费。</p>
+    <p>生成前请先保存草稿；四视图生成暂未开放。生成可能消耗服务额度；已有进行中或待核对任务时不会再次提交。</p>
     {input.mode === 'multiview'
       ? <button type="button" className="wb-secondary" disabled>四视图生成 · 暂未支持</button>
-      : <button type="button" className="wb-secondary" disabled={!canGenerate} onClick={() => { void generate(); }}>{active && job ? STATUS_LABELS[job.status] : job?.status === 'FAIL' ? '重新生成 3D 模型' : '生成 3D 模型'}</button>}
+      : <button type="button" className="wb-secondary" disabled={!canGenerate} onClick={() => { void generate(); }}>{submissionUnknown ? '提交结果待核对' : active && job ? STATUS_LABELS[job.status] : job?.status === 'FAIL' ? '重新生成 3D 模型' : '生成 3D 模型'}</button>}
     {!active && generateBlockReason && <p className="wb-hint">{generateBlockReason}</p>}
     {pollError && <p role="status" className="wb-hint">{pollError}</p>}
     {statusText && <p role="status">{statusText}{job?.status === 'DONE' && job.modelAssetId && <> · <a href={modelAssetPath(museumId, job.modelAssetId)} download={`model-${job.id}.glb`}>下载 GLB</a></>}</p>}

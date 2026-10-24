@@ -1,6 +1,6 @@
 # 混元 3D 网页反代适配器（演示路径）
 
-对接本机 [hunyuan3d-proxy](https://github.com/montezl/hunyuan3d-proxy)（腾讯混元 3D 网页端反向代理）的 **concept（概念站）** 通道，复用 `../hunyuan3d` 的共享类型、错误、GLB 校验与下载策略。生产路径仍是官方云 API 适配器（`../hunyuan3d`）；本模块是**演示用**的第二 provider，二者实现同一个 `Hunyuan3DClient` 接口，但均尚未接入应用的持久化任务与发布链路。
+对接本机 [hunyuan3d-proxy](https://github.com/montezl/hunyuan3d-proxy)（腾讯混元 3D 网页端反向代理）的 **concept（概念站）** 通道，复用 `../hunyuan3d` 的共享类型、错误、GLB 校验与下载策略。生产路径仍是官方云 API 适配器（`../hunyuan3d`）；本模块是**演示用**的第二 provider，二者实现同一个 `Hunyuan3DClient` 接口，现已接入应用持久化任务，尚未接入采纳与发布链路。
 
 ## 合规与凭据边界
 
@@ -21,7 +21,7 @@
 ```
 
 - 对 C 仍呈现单一 `jobId`（几何 worksId），通过上游作品关联寻找纹理结果。
-- 同一客户端实例对同一任务只自动提交一次纹理；演示时须复用实例。提交失败记为 `TEXTURE_STAGE_SUBMIT_FAILED`，实例内不会自动重试。**本模块尚未接入持久化编排**：重建实例或重启会丢失提交记录，不能将再次轮询当成安全重试；先人工核对上游是否已经接受提交及其结果。接入 C 的任务编排前，必须持久化纹理提交状态与外部任务标识，并处理提交结果不明的恢复，不能仅凭几何 jobId 宣称已支持安全恢复。
+- 适配器提供纹理提交抢占与记录钩子，应用编排使用数据库持久化；未提供钩子的独立调用仅有实例内去重，不能声称支持重启恢复。提交结果未知保持 RUN，核对关联作品前不再提交。
 - 白模同样有 `glbUrl`：`downloadGlb` 在 GLB 校验通过后额外要求 `materials > 0`，否则按 `INVALID_GLB` 拒绝。
 - `remainingTimes()` 返回 concept 积分池余量，供 B12 额度验收使用。
 
@@ -48,7 +48,7 @@ const client = createHunyuanWebProxyClient({
 - 所有实验输入（WebP/JPEG、合成图/真实照片、512–768px、`image2geometry` / `_singleimage` / `5views2geometry`、带/不带 `worksType`、`apose`）都被受理后进入 `hunyuan-3d-images-subject-segmentation`，随后以 `errorCode 400 / "http client codec StatusCode: Bad Request"` 失败。
 - 传 COS 直链会改为 `errNo 200010 审核失败`（桶非公开，审核服务读不到）。
 - 反代项目文档记录过同类上游步骤 7/7 全失败（`text2texture` 预处理），说明这是供应商侧/账号侧问题，不是参数格式问题。
-- 失败任务按官方说明不扣积分；应用会把上游原因显示给用户，并不会重复提交。
+- 当时的额度说明不作为扣费保证；当前应用只展示安全错误分类，不向用户透传上游原始错误文本。
 
 结论：**不能宣称照片生成链路已通过**。需要等上游恢复、更换账号/Region，或改走官方云 API（需 SecretId/SecretKey 与额度）。
 
