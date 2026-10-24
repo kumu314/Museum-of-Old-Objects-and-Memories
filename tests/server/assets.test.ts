@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
@@ -143,6 +143,20 @@ test('ALAC M4A and mu-law WAV are unsupported; truncated WAV cannot be accepted 
   await assert.rejects(processAsset({ inputBuffer: wave(16044).subarray(0, 120), originalName: 'truncated.wav', mime: 'audio/wav' }), rejectsCode('VALIDATION_ERROR'));
 });
 
+test('missing ffprobe/ffmpeg is a controlled server failure', async () => {
+  const originalPath = process.env.PATH;
+  process.env.PATH = '';
+  try {
+    await assert.rejects(
+      processAsset({ inputBuffer: wave(16044), originalName: 'voice.wav', mime: 'audio/wav' }),
+      rejectsCode('INTERNAL_ERROR'),
+    );
+  } finally {
+    if (originalPath === undefined) delete process.env.PATH;
+    else process.env.PATH = originalPath;
+  }
+});
+
 test('exact 20 MiB valid PCM WAV succeeds and one extra byte returns 413', async () => {
   const inputBuffer = wave(uploadLimits.audioBytes);
   assert.equal((await processAsset({ inputBuffer, originalName: 'boundary.wav', mime: 'audio/wav' })).kind, 'audio');
@@ -168,7 +182,9 @@ test('private preparation retains complete unique files; cleanup never removes r
   const publicDirectory = join(fakeApp, 'public');
   const alias = join(workspace, 'public-alias');
   await mkdir(publicDirectory, { recursive: true });
-  await symlink(publicDirectory, alias);
+  // A directory junction needs no elevation on Windows; both forms must actually point at public.
+  await symlink(publicDirectory, alias, process.platform === 'win32' ? 'junction' : 'dir');
+  assert.equal(await realpath(alias), await realpath(publicDirectory));
   const originalCwd = process.cwd();
   try {
     process.chdir(fakeApp);

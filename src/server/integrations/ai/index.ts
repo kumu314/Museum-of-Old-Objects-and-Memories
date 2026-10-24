@@ -9,8 +9,8 @@ const timeoutMs = 30_000;
 const maximumResponseBytes = 65_536;
 const completionSchema = z.object({
   choices: z.array(z.object({
-    finish_reason: z.literal('stop'),
-    message: z.object({ role: z.literal('assistant'), content: z.string().min(1) }),
+    finish_reason: z.string(),
+    message: z.object({ role: z.literal('assistant'), content: z.string().nullable() }),
   })).length(1),
 });
 
@@ -72,7 +72,7 @@ export async function generateDraft(input: AiInput): Promise<AiOutput> {
           { role: 'user', content: JSON.stringify(validated) },
         ],
         response_format: { type: 'json_object' },
-        max_completion_tokens: 1_024,
+        max_tokens: 2_000,
         stream: false,
       }),
     });
@@ -80,6 +80,10 @@ export async function generateDraft(input: AiInput): Promise<AiOutput> {
     const completion = completionSchema.parse(await readResponse(response));
     const choice = completion.choices[0];
     if (!choice) throw unavailable();
+    if (choice.finish_reason === 'length') {
+      throw new HttpError({ code: 'AI_UNAVAILABLE', message: 'AI 输出被截断，原文已保留，可以稍后重试或继续人工编辑。' });
+    }
+    if (choice.finish_reason !== 'stop' || choice.message.content === null || choice.message.content.length === 0) throw unavailable();
     const output: unknown = JSON.parse(choice.message.content);
     return aiOutputForSourcesSchema(validated.sourceSegments).parse(output);
   } catch (cause) {

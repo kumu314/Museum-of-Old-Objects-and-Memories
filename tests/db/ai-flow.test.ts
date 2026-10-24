@@ -92,6 +92,47 @@ test('AI草稿单独保存并复用；人工采纳才修改展签，原文保留
   }, pool);
 });
 
+test('AI服务故障或输出无效不改变已保存内容与确认，失败后仍可人工编辑并重新确认', async (context) => {
+  const setup = await fixture(context);
+  let mode: 'unavailable' | 'invalid' = 'unavailable';
+  let calls = 0;
+  await service(context, (response) => {
+    calls += 1;
+    if (mode === 'unavailable') {
+      response.statusCode = 503;
+      response.end('provider unavailable');
+    } else {
+      response.setHeader('Content-Type', 'application/json');
+      response.end(JSON.stringify({ choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: '{' } }] }));
+    }
+  });
+  const before = await withTransaction((db) => getMuseum(setup.actor, setup.museum.id, db), pool);
+  for (const failure of ['unavailable', 'invalid'] as const) {
+    mode = failure;
+    await assert.rejects(
+      requestAiDraft(setup.actor, setup.museum.id, setup.exhibit.id, { expectedVersion: setup.exhibit.version }, pool),
+      (error: unknown) => error instanceof HttpError && error.failure.code === 'AI_UNAVAILABLE',
+    );
+    const current = await withTransaction((db) => getMuseum(setup.actor, setup.museum.id, db), pool);
+    assert.deepEqual(current, before);
+    const drafts = await pool.query('SELECT id FROM ai_drafts WHERE exhibit_id=$1', [setup.exhibit.id]);
+    assert.equal(drafts.rowCount, 0);
+  }
+  assert.equal(calls, 2);
+  await withTransaction(async (db) => {
+    const changed = await updateExhibit(setup.actor, setup.museum.id, setup.exhibit.id, {
+      ...setup.input, caption: 'AI不可用时，仍然可以手工整理并保存这段展签。', expectedVersion: setup.exhibit.version,
+    }, db);
+    assert.equal(changed.rawStory, sourceText);
+    assert.deepEqual(changed.sourceSegments, setup.input.sourceSegments);
+    assert.equal(changed.confirmedVersion, null);
+    const confirmed = await confirmExhibit(setup.actor, setup.museum.id, changed.id, {
+      expectedVersion: changed.version, confirmationNote: '人工继续制作后明确确认当前版本。',
+    }, db);
+    assert.equal(confirmed.confirmedVersion, confirmed.version);
+  }, pool);
+});
+
 test('网络等待不持有事务；等待期间人工修改并确认后，旧AI结果不落库或覆盖', async (context) => {
   const setup = await fixture(context);
   const arrived = Promise.withResolvers<ServerResponse>();

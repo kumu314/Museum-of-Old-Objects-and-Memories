@@ -31,6 +31,8 @@ async function privateDirectory(uploadDir: string): Promise<string> {
   // Check before mkdir too, so a rejected configuration cannot create a public directory.
   function outsidePublic(path: string): boolean {
     const fromPublic = relative(canonicalPublic, path);
+    // On Windows, relative() returns an absolute path when the paths are on different drives.
+    if (isAbsolute(fromPublic)) return true;
     return fromPublic === '..' || fromPublic.startsWith(`..${sep}`);
   }
   if (!outsidePublic(resolve(uploadDir))) throw new Error('Asset storage must be outside public.');
