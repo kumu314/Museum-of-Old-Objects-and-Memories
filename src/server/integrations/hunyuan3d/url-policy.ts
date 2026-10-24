@@ -19,7 +19,7 @@ function rejectUrl(message: string): never {
 }
 
 /** 官方结果示例的地域端点，以及 COS 新旧域名下的存储桶端点。 */
-function isTencentCosResultHost(hostname: string): boolean {
+export function isTencentCosResultHost(hostname: string): boolean {
   const labels = hostname.toLowerCase().split('.');
   if (labels.length !== 4 && labels.length !== 5) return false;
   const tail = labels.slice(-4);

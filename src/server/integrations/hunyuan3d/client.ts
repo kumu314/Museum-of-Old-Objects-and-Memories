@@ -1,13 +1,11 @@
 import { validateGlb } from './glb';
 import { Hunyuan3DError } from './errors';
+import { downloadValidatedGlb, readResponseBytes } from './http';
+import { assertValidGenerationImage } from './input';
 import { buildAuthorization, CONTENT_TYPE } from './sign';
-import { assertProviderResultUrl } from './url-policy';
 import {
   HUNYUAN_3D_ENDPOINT,
   HUNYUAN_3D_VERSION,
-  HUNYUAN_IMAGE_MAX_BYTES,
-  HUNYUAN_IMAGE_MAX_PX,
-  HUNYUAN_IMAGE_MIN_PX,
   type Hunyuan3DClient,
   type Hunyuan3DConfig,
   type HunyuanFile,
@@ -69,15 +67,7 @@ function resolveConfig(config: Hunyuan3DConfig) {
 }
 
 function validateInput(input: HunyuanGenerationInput, configuredModel: '3.0' | '3.1' | undefined) {
-  const { bytes, mime, width, height } = input.image;
-  if (!Number.isInteger(width) || !Number.isInteger(height) || width < HUNYUAN_IMAGE_MIN_PX ||
-    height < HUNYUAN_IMAGE_MIN_PX || width > HUNYUAN_IMAGE_MAX_PX || height > HUNYUAN_IMAGE_MAX_PX) {
-    inputError(`混元 3D 输入图片每边必须为 ${HUNYUAN_IMAGE_MIN_PX} 至 ${HUNYUAN_IMAGE_MAX_PX} 像素。`);
-  }
-  if (!['image/jpeg', 'image/png', 'image/webp'].includes(mime)) inputError('混元 3D 输入图片必须是 JPEG、PNG 或 WebP。');
-  if (bytes.byteLength === 0 || bytes.byteLength > HUNYUAN_IMAGE_MAX_BYTES) {
-    inputError(`混元 3D 输入图片不能为空或超过 ${HUNYUAN_IMAGE_MAX_BYTES} 字节。`);
-  }
+  assertValidGenerationImage(input.image);
   if (input.generateType !== undefined && !['Normal', 'LowPoly', 'Geometry', 'Sketch'].includes(input.generateType)) {
     inputError('GenerateType 无效。');
   }
@@ -110,42 +100,6 @@ function responseRecord(value: unknown): Record<string, unknown> {
     upstreamError('混元 3D 服务返回错误。', code);
   }
   return response;
-}
-
-/**
- * Streams the body while enforcing a real byte cap: oversized responses are
- * cancelled mid-read instead of being buffered in full first. Returns
- * undefined when the response has no body at all.
- */
-async function readResponseBytes(
-  response: Response,
-  maxBytes: number,
-  oversize: () => Hunyuan3DError,
-): Promise<Buffer | undefined> {
-  const declaredHeader = response.headers.get('content-length');
-  if (declaredHeader !== null) {
-    const declared = Number(declaredHeader);
-    if (Number.isInteger(declared) && declared >= 0 && declared > maxBytes) throw oversize();
-  }
-  if (!response.body) return undefined;
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      total += value.byteLength;
-      if (total > maxBytes) {
-        await reader.cancel();
-        throw oversize();
-      }
-      chunks.push(value);
-    }
-  } finally {
-    reader.releaseLock();
-  }
-  return Buffer.concat(chunks, total);
 }
 
 export function createHunyuan3DClient(config: Hunyuan3DConfig): Hunyuan3DClient {
@@ -248,29 +202,11 @@ export function createHunyuan3DClient(config: Hunyuan3DConfig): Hunyuan3DClient 
       } catch {
         throw new Hunyuan3DError('RESULT_URL_REJECTED', 'GLB 下载地址无效。');
       }
-      const resultUrlPolicy = resolved.resultUrlPolicy ?? assertProviderResultUrl;
-      const controller = new AbortController();
-      let timedOut = false;
-      const timer = setTimeout(() => {
-        timedOut = true;
-        controller.abort();
-      }, resolved.timeoutMs);
-      try {
-        await resultUrlPolicy(url);
-        const response = await fetch(url, { redirect: 'error', signal: controller.signal });
-        if (!response.ok) throw new Hunyuan3DError('DOWNLOAD_FAILED', 'GLB 下载失败。');
-        const bytes = await readResponseBytes(response, resolved.maxDownloadBytes, () =>
-          new Hunyuan3DError('DOWNLOAD_FAILED', 'GLB 超过允许的下载大小。'));
-        if (bytes === undefined) throw new Hunyuan3DError('DOWNLOAD_FAILED', 'GLB 响应没有内容。');
-        return { bytes, stats: validateGlb(bytes, resolved.maxDownloadBytes) };
-      } catch (error) {
-        if (error instanceof Hunyuan3DError) throw error;
-        if (timedOut) timeoutError();
-        throw new Hunyuan3DError('DOWNLOAD_FAILED', 'GLB 下载失败。', { cause: error });
-      } finally {
-        controller.abort();
-        clearTimeout(timer);
-      }
+      return downloadValidatedGlb(url, {
+        timeoutMs: resolved.timeoutMs,
+        maxDownloadBytes: resolved.maxDownloadBytes,
+        resultUrlPolicy: resolved.resultUrlPolicy,
+      });
     },
   };
 }
