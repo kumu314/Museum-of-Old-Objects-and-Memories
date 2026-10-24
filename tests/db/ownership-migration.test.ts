@@ -25,7 +25,7 @@ test('归属迁移保留历史账号、展馆及登录节流记录，并且可�
     await pool.query("INSERT INTO team_members(id,username,password_hash) VALUES($1,'legacy-owner','test-only')", [owner]);
     await pool.query("INSERT INTO museums(id,title,created_by) VALUES($1,'历史展馆',$2)", [museum, owner]);
     await pool.query("INSERT INTO login_attempts(username,attempts,window_started_at) VALUES('register:legacy-owner',7,now())");
-    assert.deepEqual(await migrate(pool), [3, 4, 5]);
+    assert.deepEqual(await migrate(pool), [3, 4, 5, 6]);
     assert.deepEqual(await migrate(pool), []);
     const saved = await pool.query('SELECT m.id,m.title,m.created_by,u.role FROM museums m JOIN team_members u ON u.id=m.created_by');
     assert.deepEqual(saved.rows, [{ id: museum, title: '历史展馆', created_by: owner, role: 'member' }]);

@@ -27,9 +27,36 @@ export function modelInputAssetIds(input: ModelInput): string[] {
   return (input.mode === 'single' ? [input.imageAssetId] : Object.values(input.views)).filter((id): id is string => id !== null);
 }
 
-// Reserved paths only. Register these after task persistence, deduplication,
-// provider submission recovery and result validation are implemented.
+// Reserved paths. single/job/model-assets 已接入；multiview 仍保留待实现。
 export function modelGenerationPaths(museumId: string, exhibitId: string) {
   const base = `/api/museums/${encodeURIComponent(museumId)}/exhibits/${encodeURIComponent(exhibitId)}/model`;
-  return { single: `${base}/single`, multiview: `${base}/multiview` };
+  return { single: `${base}/single`, multiview: `${base}/multiview`, job: (jobId: string) => `${base}/jobs/${encodeURIComponent(jobId)}` };
 }
+
+export function modelAssetPath(museumId: string, assetId: string) {
+  return `/api/museums/${encodeURIComponent(museumId)}/model-assets/${encodeURIComponent(assetId)}`;
+}
+
+// 任务状态对齐适配器：SUBMITTING 表示已建任务但外部任务号未知（可能已消耗
+// 积分，也可能未受理）；WAIT/RUN 为上游受理后的执行态；FAIL/DONE 终态。
+export const modelJobStatusSchema = z.enum(['SUBMITTING', 'WAIT', 'RUN', 'FAIL', 'DONE']);
+
+export const modelGlbStatsSchema = z.strictObject({
+  byteLength: z.number().int().positive(),
+  meshCount: z.number().int().nonnegative(),
+  materialCount: z.number().int().nonnegative(),
+  imageCount: z.number().int().nonnegative(),
+});
+
+export const modelGenerationJobSchema = z.strictObject({
+  id: idSchema,
+  exhibitId: idSchema,
+  status: modelJobStatusSchema,
+  sourceVersion: versionSchema,
+  errorCode: z.string().max(120).nullable(),
+  errorMessage: z.string().max(240).nullable(),
+  modelAssetId: idSchema.nullable(),
+  stats: modelGlbStatsSchema.nullable(),
+  createdAt: z.string().min(1),
+});
+export type ModelGenerationJob = z.infer<typeof modelGenerationJobSchema>;
