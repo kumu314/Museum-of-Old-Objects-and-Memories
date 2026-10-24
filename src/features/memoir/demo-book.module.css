@@ -1,0 +1,19 @@
+.bookcase { display:flex; flex-direction:column; align-items:center; padding:28px 20px 12px; }
+.bookcase>p { max-width:440px; text-align:center; font-size:13px; color:var(--demo-muted); line-height:1.8; }
+.cover { width:200px; min-height:260px; padding:24px 20px; border:1px solid var(--demo-accent); border-left:13px solid #301c16; border-radius:3px 6px 6px 3px; display:flex; flex-direction:column; justify-content:space-between; gap:18px; background:#4b2d24; color:var(--demo-ink); text-align:center; cursor:pointer; box-shadow:7px 7px 0 #bba27c,10px 12px 18px #0006; transform:perspective(700px) rotateY(-9deg); }
+.cover strong { font:26px/1.7 var(--demo-serif); letter-spacing:.12em; }
+.cover span { font-size:12px; line-height:1.5; }
+.cover .stamp { letter-spacing:.1em; color:#e1c58e; }
+.cover small { font-size:11px; }
+.cover:disabled { opacity:.65; cursor:default; }
+.cover:focus-visible,.reader button:focus-visible { outline:2px solid var(--demo-accent); outline-offset:5px; }
+.reader { width:min(740px,calc(100vw - 28px)); max-height:85vh; margin:auto; padding:0; color:var(--demo-ink); background:var(--demo-panel); border:1px solid var(--demo-accent); border-radius:6px; box-shadow:0 20px 90px #0009; }
+.reader::backdrop { background:#100d0abf; }
+.toolbar { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:16px 22px; border-bottom:1px solid var(--demo-line); font-size:12px; color:var(--demo-muted); position:sticky; top:0; background:var(--demo-panel); }
+.toolbar button { min-height:44px; padding:8px 12px; border:1px solid var(--demo-line); border-radius:4px; cursor:pointer; background:transparent; color:var(--demo-ink); }
+.toolbar button:hover { border-color:var(--demo-accent); }
+.reader article { padding:24px clamp(22px,6vw,68px) 52px; }
+.reader h2 { font:28px/1.6 var(--demo-serif); margin:12px 0 28px; }
+.reader article p { font:17px/2.1 var(--demo-serif); white-space:pre-wrap; overflow-wrap:anywhere; }
+.reader article .byline { font:12px/1.8 'Microsoft YaHei',system-ui,sans-serif; color:var(--demo-muted); }
+@media(prefers-reduced-motion:reduce) { .cover { transform:none; } }

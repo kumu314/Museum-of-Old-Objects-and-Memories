@@ -2,6 +2,10 @@ import { z } from 'zod';
 
 export const idSchema = z.uuid();
 export const versionSchema = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
+export const versionedOperationInputSchema = z.strictObject({
+  operationId: idSchema,
+  expectedVersion: versionSchema,
+});
 export const timestampSchema = z.iso.datetime({ offset: true });
 export const slotIndexSchema = z.number().int().min(0).max(2_147_483_647);
 export const slotsPerPage = 6;
@@ -26,3 +30,4 @@ export const sourceIdSchema = textSchema(1, 80);
 
 export type ModelKey = z.infer<typeof modelKeySchema>;
 export type SlotIndex = z.infer<typeof slotIndexSchema>;
+export type VersionedOperationInput = z.infer<typeof versionedOperationInputSchema>;

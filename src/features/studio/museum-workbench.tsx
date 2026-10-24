@@ -130,19 +130,18 @@ function MuseumEditor({ initial }: { initial: MuseumDraft }) {
     setAction('发布'); setError(null); setMessage(null);
     try {
       const result = await apiRequest(`${path}/publish`, publishResultSchema, jsonRequest('POST', { expectedVersion: museum.version }));
-      if (result.token) setShareUrl(`${window.location.origin}/share/${result.token}`);
-      setMessage(`已发布版本 v${result.version}。草稿后续修改不会直接改变本次发布内容。`);
+      setMessage(`已生成发布快照 v${result.version}。${museum.shareEnabled ? '已有参观入口现在展示此快照。' : '展馆仍为私密，可另行开启持链接访问。'}`);
       await refreshState();
     } catch (failure) { fail(failure); }
     finally { setAction(null); }
   }
   async function rotateShare() {
     if (busy || anyDirty || refreshRequired) return;
-    if (!window.confirm('更换链接后，旧链接的新请求将无法访问。确定更换吗？')) return;
+    if (!window.confirm(museum.shareEnabled ? '更换链接后，旧链接的新请求将无法访问。确定更换吗？' : '开启后，持有链接并登录有效账号的人可参观已发布快照中的展品、照片与原声。确定开启持链接访问吗？')) return;
     setAction('更换链接'); setError(null); setMessage(null);
     try {
       const result = await apiRequest(`${path}/share`, z.strictObject({ token: shareTokenSchema }), jsonRequest('POST', { expectedVersion: museum.version }));
-      setShareUrl(`${window.location.origin}/share/${result.token}`); setMessage('新链接已生成，旧链接已失效。');
+      setShareUrl(`${window.location.origin}/share/${result.token}`); setMessage(museum.shareEnabled ? '新链接已生成，旧链接已失效。' : '已开启持链接访问，请妥善选择分享对象。');
       await refreshState();
     } catch (failure) { fail(failure); }
     finally { setAction(null); }
@@ -166,13 +165,13 @@ function MuseumEditor({ initial }: { initial: MuseumDraft }) {
     <p className="wb-hint">{museum.exhibits.length === 0 ? '从一件旧物开始。收录、核对并确认后，再发布给想念的人。' : `${museum.exhibits.length - pendingExhibits.length} / ${museum.exhibits.length} 件旧物已确认。`}</p>
     {pendingExhibits.length > 0 && <ul className="workbench-pending-list">{pendingExhibits.map((item) => <li key={item.id}><button type="button" className="wb-text-link" disabled={busy || refreshRequired} onClick={() => chooseSlot(item.slotIndex)}>待确认 · {cabinetPosition(item.slotIndex)} {item.name}</button></li>)}</ul>}
     {missingPhotos.length > 0 && <div role="status"><p className="wb-hint">以下旧物需要先补充并保存实拍照片，才能确认和发布：</p><ul className="workbench-pending-list">{missingPhotos.map((item) => <li key={item.id}><button type="button" className="wb-text-link" disabled={busy || refreshRequired} onClick={() => chooseSlot(item.slotIndex)}>待补图片 · {cabinetPosition(item.slotIndex)} {item.name}</button></li>)}</ul></div>}
-    <p className="wb-hint">发布后，持有链接并登录有效账号的人可参观已确认的展品、照片与原声。原始讲述和 AI 草稿不公开。</p>
+    <p className="wb-hint">生成发布快照后，新馆仍为私密。另行开启持链接访问后，持有链接并登录有效账号的人可参观该快照。原始讲述和 AI 草稿不公开。</p>
     <p className="wb-hint">本次发布整座展馆的名称、简介和所有页的展品；单件展签仍显示在对应旧物旁。修改简介后，需再次发布才会更新分享页。</p>
     {anyDirty && <p className="wb-hint">请先处理本页尚未保存的输入或确认记录。</p>}
-    <button type="button" className="wb-primary wb-full" disabled={publishDisabled} onClick={publish}>{action === '发布' ? '正在发布…' : '生成快照并发布分享'}</button>
+    <button type="button" className="wb-primary wb-full" disabled={publishDisabled} onClick={publish}>{action === '发布' ? '正在生成快照…' : '生成发布快照'}</button>
     {shareUrl && museum.shareEnabled && <div className="workbench-share-link"><Field label="当前参观链接"><input readOnly value={shareUrl} onFocus={(event) => event.target.select()} /></Field><div className="wb-actions"><button type="button" className="wb-secondary" onClick={copyShare}>复制链接</button><a className="wb-text-link" href={shareUrl} target="_blank" rel="noreferrer">打开参观页 ↗</a></div></div>}
     {museum.shareEnabled && !shareUrl && <p className="wb-hint">分享已启用。已有链接可继续使用；如未保留，可更换链接取得新的参观地址。</p>}
-    {museum.publishedVersion !== null && <div className="wb-actions"><button type="button" className="wb-text-link" disabled={busy || anyDirty || refreshRequired} onClick={rotateShare}>更换参观链接</button>{museum.shareEnabled && <button type="button" className="wb-text-link" disabled={busy || anyDirty || refreshRequired} onClick={stopSharing}>停止分享</button>}</div>}
+    {museum.publishedVersion !== null && <div className="wb-actions"><button type="button" className="wb-text-link" disabled={busy || anyDirty || refreshRequired} onClick={rotateShare}>{museum.shareEnabled ? '更换参观链接' : '开启持链接访问'}</button>{museum.shareEnabled && <button type="button" className="wb-text-link" disabled={busy || anyDirty || refreshRequired} onClick={stopSharing}>停止分享并设为私密</button>}</div>}
   </section>;
 
   return <main className="memory-workbench">

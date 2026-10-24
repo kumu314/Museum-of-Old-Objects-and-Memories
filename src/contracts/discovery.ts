@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { successResponseSchema } from './errors';
-import { idSchema, textSchema } from './primitives';
+import { exhibitNameSchema, idSchema, textSchema, timestampSchema, versionedOperationInputSchema, versionSchema } from './primitives';
 
 /**
  * 河南省 17 个地级市 + 济源（省直辖县级市），共 18 个城市。
@@ -68,3 +68,82 @@ export type LeaderboardEntry = z.infer<typeof leaderboardEntrySchema>;
 export type Leaderboard = z.infer<typeof leaderboardSchema>;
 export type RegionBucket = z.infer<typeof regionBucketSchema>;
 export type RegionDistribution = z.infer<typeof regionDistributionSchema>;
+
+export const museumAccessModeSchema = z.enum(['private', 'link_only', 'discoverable']);
+export const newMuseumAccessMode: MuseumAccessMode = 'private';
+export const publicAuthorSchema = z.strictObject({ userId: idSchema, nickname: textSchema(1, 80) });
+export const publicProfileSchema = publicAuthorSchema.extend({ version: versionSchema, updatedAt: timestampSchema });
+export const updatePublicProfileInputSchema = versionedOperationInputSchema.extend({ nickname: textSchema(1, 80) });
+export const museumTagsSchema = z.array(textSchema(1, 30)).max(10)
+  .refine((tags) => new Set(tags).size === tags.length, '标签不得重复。');
+export const updateMuseumTagsInputSchema = versionedOperationInputSchema.extend({ tags: museumTagsSchema });
+export const museumTagsStateSchema = z.strictObject({ museumId: idSchema, version: versionSchema, tags: museumTagsSchema });
+export const museumAccessSchema = z.strictObject({
+  museumId: idSchema,
+  version: versionSchema,
+  accessMode: museumAccessModeSchema,
+  accessEpoch: idSchema.nullable(),
+}).refine((access) => access.accessMode === 'private' ? access.accessEpoch === null : access.accessEpoch !== null,
+  '私密馆不提供外部访问版本；开放访问必须有当前版本。');
+export const updateMuseumAccessInputSchema = versionedOperationInputSchema.extend({ accessMode: museumAccessModeSchema });
+
+export const discoveryMuseumSchema = z.strictObject({
+  museumId: idSchema,
+  accessEpoch: idSchema,
+  owner: publicAuthorSchema,
+  title: textSchema(1, 120),
+  description: textSchema(0, 2_000),
+  tags: museumTagsSchema,
+  exhibitNames: z.array(exhibitNameSchema),
+  publishedAt: timestampSchema,
+  favoriteCount: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  isFollowing: z.boolean(),
+  isFavorited: z.boolean(),
+});
+// A cursor is opaque data, never a URL or client-provided SQL fragment.
+export const discoveryCursorSchema = z.string().regex(/^[A-Za-z0-9_-]{1,2048}$/);
+export const discoverySearchInputSchema = z.strictObject({
+  query: textSchema(0, 100),
+  cursor: discoveryCursorSchema.nullable(),
+  limit: z.number().int().min(1).max(50),
+});
+export const discoveryPageSchema = z.strictObject({
+  items: z.array(discoveryMuseumSchema).max(50),
+  nextCursor: discoveryCursorSchema.nullable(),
+}).refine((page) => new Set(page.items.map(({ museumId }) => museumId)).size === page.items.length,
+  '目录页不得重复返回展馆。');
+export const discoveryPageResponseSchema = successResponseSchema(discoveryPageSchema);
+export const discoveryMuseumResponseSchema = successResponseSchema(discoveryMuseumSchema);
+export const relationshipInputSchema = z.strictObject({ operationId: idSchema });
+export const favoriteResultSchema = z.strictObject({
+  museumId: idSchema,
+  isFavorited: z.boolean(),
+  favoriteCount: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+});
+export const followResultSchema = z.strictObject({ followedUserId: idSchema, isFollowing: z.boolean() });
+export const followingListSchema = z.strictObject({
+  items: z.array(z.strictObject({
+    profile: publicAuthorSchema,
+    followedAt: timestampSchema,
+    museums: z.array(discoveryMuseumSchema).max(50),
+  })).max(50),
+  nextCursor: discoveryCursorSchema.nullable(),
+});
+
+// This marker describes fixture provenance. It is never an authorization input.
+export function demoFixtureSchema<T extends z.ZodType>(data: T) {
+  return z.strictObject({ provenance: z.literal('demo'), generation: z.literal('fixture'), data });
+}
+
+export type MuseumAccessMode = z.infer<typeof museumAccessModeSchema>;
+export type MuseumAccess = z.infer<typeof museumAccessSchema>;
+export type PublicAuthor = z.infer<typeof publicAuthorSchema>;
+export type PublicProfile = z.infer<typeof publicProfileSchema>;
+export type DiscoveryMuseum = z.infer<typeof discoveryMuseumSchema>;
+export type DiscoveryPage = z.infer<typeof discoveryPageSchema>;
+export type DiscoverySearchInput = z.infer<typeof discoverySearchInputSchema>;
+export type FollowingList = z.infer<typeof followingListSchema>;
+export type UpdatePublicProfileInput = z.infer<typeof updatePublicProfileInputSchema>;
+export type UpdateMuseumTagsInput = z.infer<typeof updateMuseumTagsInputSchema>;
+export type UpdateMuseumAccessInput = z.infer<typeof updateMuseumAccessInputSchema>;
+export type RelationshipInput = z.infer<typeof relationshipInputSchema>;

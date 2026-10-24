@@ -88,16 +88,17 @@ test('跨页收录与发布包含全部展品，未确认清单超过六项，�
     });
     for (const exhibit of draft.exhibits) await confirmExhibit(actor, museum.id, exhibit.id, { expectedVersion: exhibit.version, confirmationNote: '核对本件展品。' }, db);
     const published = await publishMuseum(actor, museum.id, await currentVersion(db, actor, museum.id), db);
-    assert.ok(published.token);
-    const before = await readShare(actor, published.token, db);
+    assert.equal(published.token, null);
+    const { token } = await rotateShareToken(actor, museum.id, await currentVersion(db, actor, museum.id), db);
+    const before = await readShare(actor, token, db);
     assert.equal(before.exhibits.length, 8);
     assert.equal(before.exhibits[7]?.slotIndex, 7);
     const updated = await updateMuseum(actor, museum.id, { title: museum.title, description: '新的全馆简介', expectedVersion: await currentVersion(db, actor, museum.id) }, db);
     assert.equal(updated.description, '新的全馆简介');
-    assert.deepEqual(await readShare(actor, published.token, db), before);
+    assert.deepEqual(await readShare(actor, token, db), before);
     await publishMuseum(actor, museum.id, updated.version, db);
-    assert.equal((await readShare(actor, published.token, db)).description, '新的全馆简介');
-    assert.equal((await readShare(actor, published.token, db)).exhibits[0]?.caption, exhibitInput(1).caption);
+    assert.equal((await readShare(actor, token, db)).description, '新的全馆简介');
+    assert.equal((await readShare(actor, token, db)).exhibits[0]?.caption, exhibitInput(1).caption);
   });
 });
 
@@ -113,9 +114,10 @@ test('建模照片准备持久保存并校验归属和类型，分享不泄露�
     await rejected(updateExhibit(actor, museum.id, exhibit.id, { ...editInput(exhibit), modelInput: { mode: 'single', imageAssetId: randomUUID() } }, db), 'NOT_FOUND');
     await confirmExhibit(actor, museum.id, exhibit.id, { expectedVersion: exhibit.version, confirmationNote: '确认演示展示。' }, db);
     const published = await publishMuseum(actor, museum.id, await currentVersion(db, actor, museum.id), db);
-    assert.ok(published.token);
-    assert.equal('modelInput' in ((await readShare(actor, published.token, db)).exhibits[0] ?? {}), false);
-    for (const id of Object.values(views)) await rejected(getShareAsset(actor, published.token, id, db), 'SHARE_NOT_FOUND');
+    assert.equal(published.token, null);
+    const { token } = await rotateShareToken(actor, museum.id, await currentVersion(db, actor, museum.id), db);
+    assert.equal('modelInput' in ((await readShare(actor, token, db)).exhibits[0] ?? {}), false);
+    for (const id of Object.values(views)) await rejected(getShareAsset(actor, token, id, db), 'SHARE_NOT_FOUND');
     assert.equal((await getPrivateAsset(actor, museum.id, views.front, db)).asset.id, views.front);
   });
 });
@@ -153,8 +155,9 @@ test('缺图照片平面可保存草稿，确认和发布明确拒绝；补图�
     await rejected(publishMuseum(actor, museum.id, await currentVersion(db, actor, museum.id), db), 'NOT_CONFIRMED');
     await confirmExhibit(actor, museum.id, updated.id, { expectedVersion: updated.version, confirmationNote: '补图并核对当前版本。' }, db);
     const published = await publishMuseum(actor, museum.id, await currentVersion(db, actor, museum.id), db);
-    assert.ok(published.token);
-    assert.equal((await readShare(actor, published.token, db)).exhibits[0]?.photoAssetId, image);
+    assert.equal(published.token, null);
+    const { token } = await rotateShareToken(actor, museum.id, await currentVersion(db, actor, museum.id), db);
+    assert.equal((await readShare(actor, token, db)).exhibits[0]?.photoAssetId, image);
   });
 });
 
@@ -186,8 +189,8 @@ test('制作确认发布：完整未确认清单、旧快照隔离、替换素�
     });
     for (const exhibit of [first, second]) await confirmExhibit(actor, museum.id, exhibit.id, { expectedVersion: exhibit.version, confirmationNote: '测试确认，仅用于自动化测试。' }, db);
     const published = await publishMuseum(actor, museum.id, await currentVersion(db, actor, museum.id), db);
-    assert.ok(published.token);
-    const token = published.token;
+    assert.equal(published.token, null);
+    const { token } = await rotateShareToken(actor, museum.id, await currentVersion(db, actor, museum.id), db);
     const before = await readShare(actor, token, db);
     assert.equal(before.exhibits.length, 2);
     assert.equal(JSON.stringify(before).includes('内部原文不可公开'), false);
@@ -247,8 +250,8 @@ test('停止分享和换链立即撤销旧数据与素材入口，所有不可�
     const exhibit = await createExhibit(actor, museum.id, { ...exhibitInput(museum.version), photoAssetId: image }, db);
     await confirmExhibit(actor, museum.id, exhibit.id, { expectedVersion: exhibit.version, confirmationNote: '自动化测试确认' }, db);
     const published = await publishMuseum(actor, museum.id, await currentVersion(db, actor, museum.id), db);
-    assert.ok(published.token);
-    const token = published.token;
+    assert.equal(published.token, null);
+    const { token } = await rotateShareToken(actor, museum.id, await currentVersion(db, actor, museum.id), db);
     const rotated = await rotateShareToken(actor, museum.id, await currentVersion(db, actor, museum.id), db);
     assert.notEqual(rotated.token, token);
     await rejected(readShare(actor, token, db), 'SHARE_NOT_FOUND');

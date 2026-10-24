@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { sourceSegmentsSchema } from './ai';
+import { museumAccessModeSchema } from './discovery';
 import { modelInputSchema } from './model-generation';
 import { successResponseSchema } from './errors';
 import { captionSchema, eraSchema, exhibitNameSchema, idSchema, modelKeySchema,
@@ -79,6 +80,8 @@ export const museumSummarySchema = z.strictObject({
   version: versionSchema,
   publishedVersion: versionSchema.nullable(),
   shareEnabled: z.boolean(),
+  accessMode: museumAccessModeSchema,
+  accessEpoch: idSchema.nullable(),
   createdAt: timestampSchema,
   updatedAt: timestampSchema,
 });

@@ -122,7 +122,11 @@ test('素材HTTP闭环：真实上传、脱敏、字节边界、快照保护及�
     const confirmed = await request(`/api/museums/${museumId}/exhibits/${exhibit.id}/confirm`, 'POST', { expectedVersion: exhibit.version, confirmationNote: '明确确认本次合成验收样例。' });
     assert.equal(confirmed.status, 200);
     const publication = await request(`/api/museums/${museumId}/publish`, 'POST', { expectedVersion: (await museum(museumId)).version });
-    assert.equal(publication.status, 200); const token = publishResponseSchema.parse(await publication.json()).data.token; assert.ok(token);
+    assert.equal(publication.status, 200);
+    assert.equal(publishResponseSchema.parse(await publication.json()).data.token, null);
+    const opening = await request(`/api/museums/${museumId}/share`, 'POST', { expectedVersion: (await museum(museumId)).version });
+    assert.equal(opening.status, 200);
+    const { token } = shareLinkResponseSchema.parse(await opening.json()).data;
     const sharePath = `/api/share/${token}/assets/${photo.id}`;
     const audioPath = `/api/share/${token}/assets/${audio.id}`;
     await error(await request(sharePath, 'GET', undefined, false), 401, 'UNAUTHORIZED');
