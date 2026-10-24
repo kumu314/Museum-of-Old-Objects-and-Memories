@@ -61,7 +61,7 @@ export function parseCosUploadInfo(raw: unknown, contentType: string, requireHos
   }
   if (uploadUrl === undefined) cosError('上传凭证缺少目标地址字段，需要按真实响应核对上传流程。');
   if (uploadUrl.protocol !== 'https:' && uploadUrl.protocol !== 'http:') cosError('上传地址协议无效。');
-  if (uploadUrl.protocol === 'https:') requireHost(uploadUrl);
+  requireHost(uploadUrl);
 
   return {
     uploadUrl,
@@ -79,13 +79,13 @@ export function buildCosAuthorization(info: CosUploadInfo, nowMs = Date.now()): 
   const keyTime = `${startSecond};${startSecond + 900}`;
   const signKey = createHmac('sha1', info.secretKey).update(keyTime).digest('hex');
   const headerList = 'content-type;host';
-  const headerString = `content-type=${info.contentType.toLowerCase()}&host=${info.uploadUrl.host.toLowerCase()}`;
-  const httpString = `put\n${info.uploadUrl.pathname}\n\n${headerString}\n`;
+  const headerString = `content-type=${encodeURIComponent(info.contentType)}&host=${encodeURIComponent(info.uploadUrl.host.toLowerCase())}`;
+  const httpString = `put\n${decodeURIComponent(info.uploadUrl.pathname)}\n\n${headerString}\n`;
   const httpStringHash = createHash('sha1').update(httpString).digest('hex');
   const stringToSign = `sha1\n${keyTime}\n${httpStringHash}\n`;
   const signature = createHmac('sha1', signKey).update(stringToSign).digest('hex');
-  return `q-sign-algorithm=sha1&q-ak=${encodeURIComponent(info.secretId)}&q-sign-time=${encodeURIComponent(keyTime)}` +
-    `&q-key-time=${encodeURIComponent(keyTime)}&q-header-list=${headerList}&q-url-param-list=&q-signature=${signature}`;
+  return `q-sign-algorithm=sha1&q-ak=${info.secretId}&q-sign-time=${keyTime}` +
+    `&q-key-time=${keyTime}&q-header-list=${headerList}&q-url-param-list=&q-signature=${signature}`;
 }
 
 export function cosUploadHeaders(info: CosUploadInfo, nowMs = Date.now()): Record<string, string> {

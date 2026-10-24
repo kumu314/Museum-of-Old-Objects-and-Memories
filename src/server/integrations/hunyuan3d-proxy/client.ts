@@ -27,8 +27,8 @@ import { isTencentCosResultHost } from '../hunyuan3d/url-policy';
  *
  * 对上层（C 的任务编排）仍呈现单一的 jobId（几何 worksId）：纹理阶段由
  * queryJob 在几何完成后自动接续，纹理作品通过 dependonWorksInfo 关联找到，
- * 不需要额外持久化字段。每个进程对同一任务只自动发起一次纹理提交；
- * 提交失败按任务失败上报，重试由上层显式决定，避免重复消耗积分。
+ * 演示期间复用同一客户端实例；接入持久化编排前仍需保存纹理提交记录。
+ * 提交失败按任务失败上报，重建实例或进程重启后须先核对上游结果。
  *
  * ⚠️ 上游是逆向的网页端接口（个人 Cookie 会话），仅用于演示；生产路径仍是
  * 官方云 API 适配器。Cookie 属于凭据，绝不进入本仓库、客户端或日志。
@@ -64,6 +64,9 @@ function timeoutError(): never {
 }
 
 function defaultCosHostPolicy(url: URL): void {
+  if (url.protocol !== 'https:' || url.username !== '' || url.password !== '' || url.port !== '') {
+    throw new Hunyuan3DError('UPSTREAM_ERROR', '上传地址必须使用不携带凭据或非默认端口的 HTTPS。');
+  }
   if (!isTencentCosResultHost(url.hostname)) {
     throw new Hunyuan3DError('UPSTREAM_ERROR', '上传地址不在允许的腾讯 COS 来源内。');
   }
@@ -233,7 +236,12 @@ export function createHunyuanWebProxyClient(config: HunyuanProxyConfig): Hunyuan
 
   async function uploadImage(image: HunyuanGenerationInput['image']): Promise<string> {
     const fileName = uploadFileNameFor(image);
-    const uploadInfo = await proxyLocal('/api/3d/resource/genUploadInfo', { fileName });
+    // 此路径由 ProxyMain 透传，不使用反代本地接口的 ok/data 信封。
+    const { status, json } = await request('POST', '/api/3d/resource/genUploadInfo', JSON.stringify({ fileName }));
+    if (status < 200 || status >= 300 || !isRecord(json) || json.ok === false) {
+      upstreamError('混元 3D 上传凭证请求失败。');
+    }
+    const uploadInfo = isRecord(json.data) ? json.data : json;
     const info = parseCosUploadInfo(uploadInfo, image.mime, resolved.cosHostPolicy);
     const controller = new AbortController();
     let timedOut = false;
@@ -261,7 +269,7 @@ export function createHunyuanWebProxyClient(config: HunyuanProxyConfig): Hunyuan
   }
 
   /**
-   * 进程内去重的纹理阶段提交：同一几何任务最多自动提交一次。已结算的
+   * 实例内去重的纹理阶段提交：同一几何任务最多自动提交一次。已结算的
    * promise 保留在 map 中，轮询重复到达时直接复用结果；失败记入
    * textureStartFailed，后续轮询按任务失败上报，不自动重试。
    */
@@ -270,11 +278,20 @@ export function createHunyuanWebProxyClient(config: HunyuanProxyConfig): Hunyuan
     let tracked = textureStarts.get(geometryWorksId);
     if (tracked === undefined) {
       tracked = (async () => {
-        await proxyLocal('/api/text3d/texture', {
+        const submission = await proxyLocal('/api/text3d/texture', {
           worksId: geometryWorksId,
           method: 'image',
           modelVersion: resolved.modelVersion,
         });
+        // Go 反代的 ok 只表示本地封装成功，实际上游状态在 status/body 内。
+        if (!isRecord(submission) || typeof submission.status !== 'number' ||
+          submission.status < 200 || submission.status >= 300 || !isRecord(submission.body)) {
+          upstreamError('纹理阶段未返回有效的上游提交结果。');
+        }
+        const body = submission.body;
+        if (body.errNo !== undefined && body.errNo !== 0) upstreamError('纹理阶段提交被上游拒绝。');
+        const result = isRecord(body.data) ? body.data : body;
+        if (asString(result.worksId) === undefined) upstreamError('纹理阶段提交未返回 worksId。');
         return 'started' as const;
       })().catch(() => {
         textureStartFailed.add(geometryWorksId);
@@ -316,7 +333,8 @@ export function createHunyuanWebProxyClient(config: HunyuanProxyConfig): Hunyuan
 
       // 几何完成：查找已关联的纹理作品（worksPipeline=TEXTURE）。
       const textureData = await conceptUpstream('/game3d/general_info/get_works_list', { worksPipeline: TEXTURE_PIPELINE });
-      const textureList = isRecord(textureData) && Array.isArray(textureData.list) ? textureData.list : [];
+      if (!isRecord(textureData) || !Array.isArray(textureData.list)) upstreamError('混元 3D 纹理任务列表结构无效。');
+      const textureList = textureData.list;
       const textureItem = textureList.find((item): item is Record<string, unknown> =>
         isRecord(item) && dependsOn(item, id));
 

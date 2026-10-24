@@ -20,8 +20,8 @@
   → DONE：texturePaintingRsp.glbUrl（成品 PBR GLB）
 ```
 
-- 对 C 仍呈现单一 `jobId`（几何 worksId）；纹理作品不需要额外持久化字段。
-- 每个进程对同一任务只自动发起一次纹理提交；提交失败记为任务失败（`TEXTURE_STAGE_SUBMIT_FAILED`），重试由上层显式决定，不自动重复消耗积分。进程重启后允许再试一次。
+- 对 C 仍呈现单一 `jobId`（几何 worksId），通过上游作品关联寻找纹理结果。
+- 同一客户端实例对同一任务只自动提交一次纹理；演示时须复用实例。提交失败记为 `TEXTURE_STAGE_SUBMIT_FAILED`，实例内不会自动重试。**本模块尚未接入持久化编排**：重建实例或重启会丢失提交记录，不能将再次轮询当成安全重试；先人工核对上游是否已经接受提交及其结果。接入 C 的任务编排前，必须持久化纹理提交状态与外部任务标识，并处理提交结果不明的恢复，不能仅凭几何 jobId 宣称已支持安全恢复。
 - 白模同样有 `glbUrl`：`downloadGlb` 在 GLB 校验通过后额外要求 `materials > 0`，否则按 `INVALID_GLB` 拒绝。
 - `remainingTimes()` 返回 concept 积分池余量，供 B12 额度验收使用。
 
@@ -53,3 +53,5 @@ const client = createHunyuanWebProxyClient({
 ## 验证
 
 `tests/server/hunyuan3d-proxy.test.ts` 用本地假反代 + 假 COS 覆盖：登录预检、COS PUT 签名与令牌头、几何提交参数、两阶段轮询、自动接续纹理的进程内去重、白模拒绝、未登录、errNo 错误码映射、上传地址来源校验、超时。全部离线，不消耗积分、不访问腾讯。
+
+合入前补充的回归按[反代源码](https://github.com/montezl/hunyuan3d-proxy)区分两种响应：`genUploadInfo` 是主站透明代理，直接解析上传凭证；`/api/text3d/texture` 的 `ok=true` 仅代表本地封装完成，必须继续检查 `data.status` 与 `data.body` 中的上游结果和作品 ID。COS 签名依据[官方规范](https://cloud.tencent.com/document/product/436/7778)编码头部值；HTTP 测试地址必须显式注入策略，默认上传仅允许腾讯 COS 的 HTTPS 地址。无效纹理列表不能被当成空列表触发新提交。

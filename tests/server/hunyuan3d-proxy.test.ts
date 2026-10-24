@@ -3,6 +3,8 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { test, type TestContext } from 'node:test';
 import {
   createHunyuanWebProxyClient,
+  buildCosAuthorization,
+  parseCosUploadInfo,
   Hunyuan3DError,
   type HunyuanProxyConfig,
 } from '../../src/server/integrations/hunyuan3d-proxy';
@@ -100,6 +102,11 @@ function makeConfig(proxyOrigin: string, cosOrigin: string, overrides: Partial<H
     baseUrl: proxyOrigin,
     timeoutMs: 2_000,
     maxDownloadBytes: 1024 * 1024,
+    cosHostPolicy: (url) => {
+      if (url.origin !== new URL(cosOrigin).origin) {
+        throw new Hunyuan3DError('UPSTREAM_ERROR', '测试策略只允许本地上传地址。');
+      }
+    },
     resultUrlPolicy: (url) => {
       if (url.origin !== new URL(cosOrigin).origin) {
         throw new Hunyuan3DError('RESULT_URL_REJECTED', '测试策略只允许本地下载地址。');
@@ -146,17 +153,14 @@ test('完整链路：登录预检、COS 上传、几何提交、自动接续纹�
       return;
     }
     if (url === '/api/3d/resource/genUploadInfo') {
-      response.end(JSON.stringify({
-        ok: true,
-        data: state.uploadInfo ?? {
-          encryptTmpSecretId: 'tmp-id',
-          encryptTmpSecretKey: 'tmp-key',
-          sessionToken: 'tmp-token',
-          bucketName: 'bucket-1',
-          region: 'ap-guangzhou',
-          location: 'upload/abc.png',
-          resourceUrl: `${cos.origin}/upload/abc.png`,
-        },
+      response.end(JSON.stringify(state.uploadInfo ?? {
+        encryptTmpSecretId: 'tmp-id',
+        encryptTmpSecretKey: 'tmp-key',
+        sessionToken: 'tmp-token',
+        bucketName: 'bucket-1',
+        region: 'ap-guangzhou',
+        location: 'upload/abc.png',
+        resourceUrl: `${cos.origin}/upload/abc.png`,
       }));
       return;
     }
@@ -193,7 +197,9 @@ test('完整链路：登录预检、COS 上传、几何提交、自动接续纹�
         response.end(JSON.stringify({ ok: false, error: 'upstream busy' }));
         return;
       }
-      response.end(JSON.stringify({ ok: true, data: { worksId: 'tex-1', method: 'image' } }));
+      response.end(JSON.stringify({ ok: true, data: {
+        status: 200, body: { errNo: 0, data: { worksId: 'tex-1' } }, method: 'image',
+      } }));
       return;
     }
     if (url === '/game3d/general_info/get_remaining_times') {
@@ -439,4 +445,91 @@ test('反代无响应时按超时处理，不自动重试', async (context) => {
     image: { bytes: new Uint8Array([1]), mime: 'image/jpeg' as const, width: 256, height: 256 },
   }), 'TIMEOUT');
   assert.equal(count, 1);
+});
+
+test('COS 签名按官方规范编码头部值并在 Authorization 中保留时间分隔符', () => {
+  // https://cloud.tencent.com/document/product/436/7778，固定合成凭据向量。
+  const authorization = buildCosAuthorization({
+    uploadUrl: new URL('https://example-1250000000.cos.ap-guangzhou.myqcloud.com/upload.png'),
+    resourceUrl: 'https://example-1250000000.cos.ap-guangzhou.myqcloud.com/upload.png',
+    secretId: 'synthetic-id', secretKey: 'synthetic-key', contentType: 'image/png',
+  }, 1_700_000_000_000);
+  assert.equal(new URLSearchParams(authorization).get('q-signature'), 'e15cbf4951c403175c0bcd60b8c7b4622b242368');
+  assert.match(authorization, /q-sign-time=1700000000;1700000900&/);
+});
+
+test('HTTP 上传同样必须经过显式来源策略', () => {
+  let checked = false;
+  assert.throws(() => parseCosUploadInfo({
+    tmpSecretId: 'synthetic-id', tmpSecretKey: 'synthetic-key',
+    resourceUrl: 'http://127.0.0.1:1234/private',
+  }, 'image/png', () => {
+    checked = true;
+    throw new Hunyuan3DError('UPSTREAM_ERROR', '拒绝测试地址');
+  }), Hunyuan3DError);
+  assert.equal(checked, true);
+});
+
+test('纹理封装 ok=true 不掩盖内层拒绝', async (context) => {
+  let textureCalls = 0;
+  const proxy = await fakeServer(context, (request, response, body) => {
+    if (request.url === '/game3d/general_info/get_works_list') {
+      const parsed: unknown = JSON.parse(body);
+      const hasIds = typeof parsed === 'object' && parsed !== null && 'worksIds' in parsed;
+      response.end(JSON.stringify({ errNo: 0, data: { list: hasIds ? [
+        { worksId: 'geo-1', pipelineStatus: 2 },
+      ] : [] } }));
+      return;
+    }
+    textureCalls += 1;
+    response.end(JSON.stringify({ ok: true, data: {
+      status: 200, body: { errNo: 200002, errMsg: '输入参数错误', data: null },
+    } }));
+  });
+  const client = createHunyuanWebProxyClient({ baseUrl: proxy.origin });
+  assert.equal((await client.queryJob('geo-1')).status, 'FAIL');
+  assert.equal((await client.queryJob('geo-1')).status, 'FAIL');
+  assert.equal(textureCalls, 1);
+});
+
+test('纹理列表结构无效时拒绝查询，不当成空列表发起付费提交', async (context) => {
+  let textureCalls = 0;
+  const proxy = await fakeServer(context, (request, response, body) => {
+    if (request.url === '/game3d/general_info/get_works_list') {
+      const parsed: unknown = JSON.parse(body);
+      const hasIds = typeof parsed === 'object' && parsed !== null && 'worksIds' in parsed;
+      response.end(JSON.stringify({ errNo: 0, data: hasIds ? { list: [
+        { worksId: 'geo-1', pipelineStatus: 2 },
+      ] } : {} }));
+      return;
+    }
+    textureCalls += 1;
+    response.end(JSON.stringify({ ok: true, data: { status: 200, body: { worksId: 'tex-1' } } }));
+  });
+  const client = createHunyuanWebProxyClient({ baseUrl: proxy.origin });
+  await rejectsCode(client.queryJob('geo-1'), 'UPSTREAM_ERROR');
+  assert.equal(textureCalls, 0);
+});
+
+test('默认上传策略在发送照片前拒绝 HTTP 回环地址', async (context) => {
+  let uploadCalls = 0;
+  const cos = await fakeServer(context, (_request, response) => {
+    uploadCalls += 1;
+    response.end();
+  });
+  const proxy = await fakeServer(context, (request, response) => {
+    if (request.url === '/api/login/status') {
+      response.end(JSON.stringify({ ok: true, data: { loggedIn: true } }));
+      return;
+    }
+    response.end(JSON.stringify({
+      tmpSecretId: 'synthetic-id', tmpSecretKey: 'synthetic-key', sessionToken: 'synthetic-token',
+      resourceUrl: `${cos.origin}/upload.png`,
+    }));
+  });
+  const client = createHunyuanWebProxyClient({ baseUrl: proxy.origin });
+  await rejectsCode(client.submitImage({ image: {
+    bytes: new Uint8Array([1]), mime: 'image/png', width: 256, height: 256,
+  } }), 'UPSTREAM_ERROR');
+  assert.equal(uploadCalls, 0);
 });

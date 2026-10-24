@@ -30,7 +30,9 @@ function configError(message: string): never {
 
 function inputError(message: string): never {
   throw new Hunyuan3DError('INPUT_INVALID', message);
-}function upstreamError(message: string, upstreamCode?: string): never {
+}
+
+function upstreamError(message: string, upstreamCode?: string): never {
   throw new Hunyuan3DError('UPSTREAM_ERROR', message, upstreamCode === undefined ? undefined : { upstreamCode });
 }
 
