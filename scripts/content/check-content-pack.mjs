@@ -23,8 +23,11 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, basename } from 'node:path';
 
-const CATEGORIES = ['立体重点', '简单立体', '照片或票据'];
+// v0.6 三类保留；v0.7 起按"样例 / 独立新输入 / 照片票据展示"区分，真实支持范围以实测为准
+const CATEGORIES = ['立体重点', '简单立体', '照片或票据', '独立新输入', '样例'];
 const VISIBILITIES = ['可公开', '仅限家人', '不可公开'];
+// v0.7 §1.3：默认私有草稿，由用户明确发布；"仅限家人"是用途记录，不等于账号级鉴权
+const SHARE_SCOPES = ['私有草稿', '持链接分享'];
 const EXACT_YEAR = /^\d{4}$/;          // 纯 4 位数字 = 补造的精确年份
 const YEAR_WITH_QUALIFIER = /约|可能|记不清|大概|左右|前后|年代|世纪/;
 
@@ -78,6 +81,16 @@ function checkPack(pack) {
       W('facts.originalNarrative 短于 10 字，确认是否真的只有这些');
     }
 
+    // 录音整理文本（v0.7 起与原始讲述并列，对应工程契约 transcript）。
+    // 两者来源不同，不能混为一栏。
+    if (facts.transcript != null) {
+      if (!isNonEmptyString(facts.transcript)) {
+        E('facts.transcript 若填就必须是非空字符串（没有录音就整项设 null）');
+      } else if (isNonEmptyString(nar) && facts.transcript.trim() === nar.trim()) {
+        E('facts.transcript 与 originalNarrative 完全相同——录音转写与用户原话是两种来源，不能混为一栏');
+      }
+    }
+
     const src = facts.narrativeSource;
     if (src === null || typeof src !== 'object' || isArray(src)) {
       E('facts.narrativeSource 必须是对象（谁 / 何时 / 渠道）');
@@ -97,6 +110,10 @@ function checkPack(pack) {
         else if (seen.has(s.id)) E(`facts.sourceSegments[${i}].id 重复：${s.id}`);
         else seen.add(s.id);
         if (!isNonEmptyString(s?.text)) E(`facts.sourceSegments[${i}].text 不能为空`);
+        // 与工程契约对齐：每条片段要标明出自原始讲述还是录音转写
+        if (s?.source != null && !['rawStory', 'transcript'].includes(s.source)) {
+          E(`facts.sourceSegments[${i}].source = ${JSON.stringify(s.source)} 不在允许值内（rawStory / transcript）`);
+        }
       });
     }
 
@@ -125,6 +142,9 @@ function checkPack(pack) {
   } else {
     if (!isNonEmptyString(cur.currentLabel)) {
       E('curation.currentLabel 不能为空（待确认的最终展签文本）');
+    } else if (Array.from(cur.currentLabel).length > 120) {
+      // 工程契约 caption 上限 120 字，超了填不进系统
+      E(`curation.currentLabel 有 ${Array.from(cur.currentLabel).length} 字，工程契约 caption 上限 120 字`);
     }
 
     if (cur.aiDraft != null) {
@@ -166,8 +186,44 @@ function checkPack(pack) {
     for (const k of ['version', 'confirmedBy', 'confirmedAt', 'channel', 'scope']) {
       if (!isNonEmptyString(cf[k])) E(`confirmation.${k} 不能为空`);
     }
-    if (!VISIBILITIES.includes(cf.visibility)) {
-      E(`confirmation.visibility 必须是 ${VISIBILITIES.join(' / ')} 之一，当前为 ${JSON.stringify(cf.visibility)}`);
+    // v0.7 起用 shareScope 表达分享范围（默认私有草稿，用户明确发布才算公开）。
+    // visibility 是 v0.6 旧字段，仍接受但提示迁移。
+    if (cf.shareScope != null) {
+      if (!SHARE_SCOPES.includes(cf.shareScope)) {
+        E(`confirmation.shareScope 必须是 ${SHARE_SCOPES.join(' / ')} 之一，当前为 ${JSON.stringify(cf.shareScope)}`);
+      }
+    } else if (cf.visibility != null) {
+      if (!VISIBILITIES.includes(cf.visibility)) {
+        E(`confirmation.visibility 必须是 ${VISIBILITIES.join(' / ')} 之一，当前为 ${JSON.stringify(cf.visibility)}`);
+      } else {
+        W('confirmation.visibility 是 v0.6 旧字段，v0.7 改用 shareScope（私有草稿 / 持链接分享），建议迁移');
+      }
+    } else {
+      E('confirmation 缺少 shareScope（v0.7）或 visibility（v0.6），分享范围必须显式记录');
+    }
+  }
+
+  // ── 模型生成记录（v0.7 §1.5；方案 B 的核心证据） ──
+  const gen = pack.generation;
+  if (gen != null) {
+    if (gen === null || typeof gen !== 'object' || isArray(gen)) {
+      E('generation 必须是对象或 null（没有生成记录就写 null，不要留空对象）');
+    } else {
+      for (const k of ['input', 'task', 'output', 'status']) {
+        const v = gen[k];
+        const emptyObj = v !== null && typeof v === 'object' && !isArray(v) && Object.keys(v).length === 0;
+        if (v == null || (typeof v === 'string' && v.trim() === '') || emptyObj) {
+          E(`generation.${k} 不能为空——模型生成记录要能对上输入、任务、输出与状态`);
+        }
+      }
+      const st = gen.status;
+      if (st && typeof st === 'object') {
+        for (const k of ['result', 'durationMs', 'costNote']) {
+          if (!isNonEmptyString(String(st[k] ?? ''))) {
+            E(`generation.status.${k} 不能为空（真实耗时、费用与结果如实记录，未知就写"未知"）`);
+          }
+        }
+      }
     }
   }
 

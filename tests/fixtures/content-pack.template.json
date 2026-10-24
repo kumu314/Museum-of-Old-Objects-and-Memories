@@ -39,7 +39,18 @@
     "confirmedAt": "",
     "channel": "",
     "scope": "",
-    "visibility": ""
+    "shareScope": ""
+  },
+  "generation": {
+    "input": "",
+    "task": "",
+    "output": "",
+    "status": {
+      "result": "",
+      "durationMs": "",
+      "costNote": ""
+    },
+    "adoption": ""
   },
   "licenses": [
     {
