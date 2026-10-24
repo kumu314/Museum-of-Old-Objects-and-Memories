@@ -40,7 +40,9 @@ const cacheTtlMs = 1_000;
 let settingsCache: { path: string; mtimeMs: number; loadedAt: number; value: ModelProviderSettings | null } | undefined;
 
 /** 读取替换配置；文件不存在返回 null。语法/字段错误按受控失败处理。 */
-export function readProviderSettings(path = resolve('.local', 'model-provider.json')): ModelProviderSettings | null {
+export function readProviderSettings(
+  path = process.env.HUNYUAN_PROVIDER_CONFIG?.trim() || resolve('.local', 'model-provider.json'),
+): ModelProviderSettings | null {
   let mtimeMs: number;
   try {
     mtimeMs = statSync(path).mtimeMs;

@@ -19,13 +19,14 @@ const pool = new Pool({ connectionString: getIsolatedTestDatabaseUrl(), max: 1, 
 // getServerConfig 是进程级单例：整个文件共享一个上传根目录，用例内以
 // uuid 存储键隔离，避免目录切换被缓存吞掉。
 const uploadRoot = resolve('.local', `model-jobs-${randomUUID()}`);
-const providerEnv = ['HUNYUAN_PROVIDER', 'HUNYUAN_SECRET_ID', 'HUNYUAN_SECRET_KEY', 'HUNYUAN_REGION'] as const;
+const providerEnv = ['HUNYUAN_PROVIDER', 'HUNYUAN_PROVIDER_CONFIG', 'HUNYUAN_SECRET_ID', 'HUNYUAN_SECRET_KEY', 'HUNYUAN_REGION'] as const;
 const previousProviderEnv = providerEnv.map((name) => [name, process.env[name]] as const);
 before(async () => {
   await mkdir(uploadRoot, { recursive: true });
   process.env.UPLOAD_DIR = uploadRoot;
-  // 默认隔离本机真实云密钥：本文件的反代用例必须走假反代。
+  // 隔离本机真实配置文件与云密钥：本文件的反代用例必须走假反代。
   process.env.HUNYUAN_PROVIDER = 'proxy';
+  process.env.HUNYUAN_PROVIDER_CONFIG = resolve('.local', 'no-such-provider-config.json');
   delete process.env.HUNYUAN_SECRET_ID;
   delete process.env.HUNYUAN_SECRET_KEY;
   delete process.env.HUNYUAN_REGION;
