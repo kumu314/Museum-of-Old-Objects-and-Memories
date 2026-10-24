@@ -1,0 +1,64 @@
+/* 世界 DEMO 专属样式：米白底、木色点缀、灰绿主色，只作用于本页面，不改公共 demo.module.css。 */
+
+/* 目录与筛选 */
+.catalogueSection { scroll-margin-top: 24px; }
+.filterGroup { display:flex; gap:9px; flex-wrap:wrap; }
+.filterGroup button { min-height:44px; }
+.emptyActions { display:flex; gap:10px; flex-wrap:wrap; justify-content:center; margin-top:14px; }
+.emptyActions button { min-height:44px; }
+
+/* 展馆卡片 */
+.cardGrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:18px; margin:22px 0; }
+.card { position:relative; display:flex; flex-direction:column; gap:2px; padding:20px; border:1px solid #d6d8c9; border-radius:14px; background:#fffcf6; min-width:0; }
+.card h3 { font-size:20px; font-weight:600; margin:2px 0 6px; overflow-wrap:anywhere; }
+.card p { font-size:14px; line-height:1.8; margin:4px 0; overflow-wrap:anywhere; }
+.cardSelected { border-color:#425c45; box-shadow:0 0 0 2px rgba(66,92,69,.28); background:#f6f8ec; }
+.cardBadge { position:absolute; top:14px; right:14px; background:#425c45; color:#fffcf6; font-size:12px; font-weight:700; letter-spacing:.08em; padding:4px 10px; border-radius:999px; }
+.art { height:110px; display:flex; align-items:center; justify-content:center; background:linear-gradient(135deg,#ece7d8 0%,#e2e6d6 100%); border:1px solid #cfc9b4; border-radius:10px; font-size:40px; color:#6b5a3f; margin-bottom:10px; }
+.ownerEyebrow { font-size:12px; letter-spacing:.1em; color:#5f6e58; font-weight:700; margin:0; }
+.tag { font-size:12px; padding:4px 8px; background:#e9e8dd; border-radius:4px; display:inline-block; margin:4px 4px 4px 0; color:#4b503f; }
+.tagRow { display:flex; flex-wrap:wrap; }
+.cardActions { display:flex; gap:9px; flex-wrap:wrap; margin-top:auto; padding-top:12px; }
+.cardActions button { min-height:44px; }
+
+/* 参观区：选中状态与返回目录入口 */
+.visitBar { position:sticky; top:12px; z-index:6; display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin:26px 0 14px; padding:12px 18px; background:#3d5340; color:#f5f1e9; border:1px solid #2f4233; border-radius:12px; box-shadow:0 8px 22px rgba(46,48,42,.22); scroll-margin-top:12px; }
+.visitLabel { display:flex; align-items:center; gap:10px; flex-wrap:wrap; min-width:0; }
+.visitLabel strong { font-size:16px; font-weight:600; overflow-wrap:anywhere; }
+.visitOwner { color:#ccd5bd; font-size:13px; }
+.visitBadge { background:#f5f1e9; color:#3d5340; font-size:12px; font-weight:700; letter-spacing:.08em; padding:4px 10px; border-radius:999px; flex:none; }
+.visitActions { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+.backLink { color:#f0f2e6; text-decoration:underline; text-underline-offset:4px; font-size:14px; min-height:44px; display:inline-flex; align-items:center; }
+.exitVisit { background:transparent; color:#f0f2e6; border:1px solid #93a58c; border-radius:8px; padding:10px 14px; min-height:44px; font-size:14px; cursor:pointer; }
+.exitVisit:hover { background:rgba(255,255,255,.08); }
+
+/* 留言簿：根留言/回复层级与管理状态 */
+.threads { list-style:none; margin:14px 0 0; padding:0; display:flex; flex-direction:column; gap:12px; }
+.thread { background:#fffdf7; border:1px solid #dcd9ce; border-radius:12px; padding:4px 16px; min-width:0; }
+.thread p { overflow-wrap:anywhere; }
+.replyList { list-style:none; margin:0 0 12px 10px; padding:0 0 0 14px; border-left:2px solid #d4d8c9; display:flex; flex-direction:column; gap:8px; }
+.replyList p { overflow-wrap:anywhere; }
+.commentHead { display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding-top:12px; }
+.commentHead strong { font-size:14px; }
+.commentText { margin:8px 0; line-height:1.8; white-space:pre-wrap; }
+.commentActions { display:flex; gap:8px; flex-wrap:wrap; margin:6px 0 12px; }
+.commentActions button { min-height:40px; }
+.replyTag { color:#60645b; font-size:13px; }
+.commentHidden { background:#f7ece4; border:1px solid #dcb9a4; border-radius:8px; padding:10px 12px; margin:8px 0; }
+.deletedText { color:#60645b; font-style:italic; }
+.bannedBadge { background:#f3e3d3; color:#7a4a21; font-size:12px; padding:2px 8px; border-radius:999px; flex:none; }
+.threadState { display:flex; flex-direction:column; gap:8px; margin:12px 0; }
+.formNotice { background:#eef1e4; border:1px solid #ccd5bd; border-radius:8px; padding:10px 12px; font-size:14px; line-height:1.7; color:#3f4a3a; }
+.replyingRow { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin:10px 0 0; }
+.replyingRow button { min-height:40px; }
+.formBlock { border-top:1px solid #dedfd3; margin-top:16px; padding-top:6px; }
+.formBlock button[type="submit"] { min-height:44px; }
+
+/* 窄屏 */
+@media(max-width:800px) {
+  .toolRow { grid-template-columns:1fr; align-items:stretch; }
+  .visitBar { position:sticky; top:8px; padding:10px 14px; }
+  .art { height:96px; }
+  .thread { padding:2px 12px; }
+  .replyList { margin-left:2px; padding-left:10px; }
+}

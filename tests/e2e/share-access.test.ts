@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { test, type TestContext } from 'node:test';
 import { assetResponseSchema, errorResponseSchema, exhibitDraftResponseSchema, museumDraftResponseSchema,
-  publicMuseumResponseSchema, publishResponseSchema, type CreateExhibitInput } from '../../src/contracts';
+  publicMuseumResponseSchema, publishResponseSchema, shareLinkResponseSchema, type CreateExhibitInput } from '../../src/contracts';
 
 const configuredOrigin = process.env.E2E_BASE_URL;
 const username = process.env.E2E_USERNAME;
@@ -78,8 +78,10 @@ test('参观页、快照和图片音频均要求有效会话；其他登录用�
   })).status, 200);
   const publication = await request(`${f.path}/publish`, f.cookie, 'POST', { expectedVersion: (await f.current()).version });
   assert.equal(publication.status, 200);
-  const token = publishResponseSchema.parse(await publication.json()).data.token;
-  assert.ok(token);
+  assert.equal(publishResponseSchema.parse(await publication.json()).data.token, null);
+  const opening = await request(`${f.path}/share`, f.cookie, 'POST', { expectedVersion: (await f.current()).version });
+  assert.equal(opening.status, 200);
+  const { token } = shareLinkResponseSchema.parse(await opening.json()).data;
   const share = `/api/share/${token}`;
   const dataPaths = [share, `${share}/assets/${photo}`, `${share}/assets/${photo}?variant=thumbnail`, `${share}/assets/${audio}`];
   for (const path of dataPaths) {
