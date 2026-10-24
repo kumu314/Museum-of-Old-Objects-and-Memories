@@ -1,0 +1,60 @@
+.museum { max-width: 1600px; margin: 0 auto; padding: 32px 42px 20px; min-height: 100svh; background: radial-gradient(ellipse at 50% 35%, #31251a66, transparent 65%); }
+.museum button, .unavailable button { border: 1px solid #ac90624d; border-radius: 8px; background: #211a14e6; color: #eadfc8; padding: 10px 15px; cursor: pointer; font: inherit; transition: border-color 150ms; }
+.museum button:hover, .unavailable button:hover { border-color: #d7ba80; }
+.museum button:disabled, .unavailable button:disabled { cursor: wait; opacity: .55; }
+.header { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; padding: 0 12px; }
+.eyebrow { margin: 0 0 9px; color: #bfa77e; font-size: 12px; letter-spacing: .13em; }
+.header h1 { margin: 0; font: 400 clamp(24px, 2.6vw, 36px)/1.45 'Noto Serif CJK SC', 'Songti SC', serif; overflow-wrap: anywhere; }
+.description { max-width: 780px; white-space: pre-wrap; overflow-wrap: anywhere; color: #b1a48f; font-size: 14px; line-height: 1.8; margin: 12px 0 0; }
+.museum .refresh { flex: 0 0 auto; font-size: 12px; background: transparent; }
+.exhibition { position: relative; margin-top: 12px; }
+.stage { position: relative; height: clamp(480px, 65svh, 780px); }
+.canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+.stageToolbar { position: absolute; z-index: 1; left: 12px; top: 16px; display: flex; flex-direction: column; align-items: flex-start; gap: 12px; max-width: calc(100% - 30px); pointer-events: none; }
+.stageToolbar button { pointer-events: auto; font-size: 13px; min-height: 44px; }
+.zoomControls { display: flex; gap: 8px; pointer-events: auto; }
+.stageToolbar span { color: #c5b59d; font-size: 12px; text-shadow: 0 1px 5px #000; }
+.surfaceNotice { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(90%, 480px); text-align: center; padding: 26px; border: 1px solid #8c735838; border-radius: 14px; background: #211a14cc; }
+.surfaceNotice h2 { font-size: 21px; font-weight: 400; }
+.surfaceNotice p { color: #b8aa94; line-height: 1.9; font-size: 14px; }
+.museum .reset { position: absolute; bottom: 18px; left: 14px; font-size: 12px; }
+.story { position: absolute; z-index: 2; top: 4px; right: 0; bottom: 0; width: min(36%, 380px); overflow-y: auto; padding: 25px; background: #211a14f2; border: 1px solid #ac906239; border-radius: 14px; scrollbar-width: thin; }
+.story h2 { font: 400 26px/1.5 'Noto Serif CJK SC', 'Songti SC', serif; margin: 0 0 14px; overflow-wrap: anywhere; }
+.caption { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 15px; line-height: 2; color: #e0d3bc; }
+.photo { margin: 24px 0 18px; }
+.photo img { display: block; width: 100%; height: auto; max-height: 250px; object-fit: contain; border-radius: 6px; background: #17130f; }
+.photo figcaption, .mediaNote { color: #ac9b81; font-size: 12px; line-height: 1.8; }
+.photo figcaption { margin-top: 8px; }
+.audio { margin: 22px 0; }
+.audio label { display: block; margin-bottom: 10px; color: #d9c6a5; font-size: 13px; }
+.audio audio { width: 100%; height: 40px; }
+.audio p, .photo p { font-size: 13px; line-height: 1.8; color: #e4b8a0; }
+.sources { margin: 22px 0 16px; border-top: 1px solid #ac90622b; padding-top: 16px; color: #ad9d86; font-size: 12px; line-height: 1.9; overflow-wrap: anywhere; }
+.sources summary { cursor: pointer; color: #cdb997; }
+.sources p { white-space: pre-wrap; }
+.guide { text-align: center; color: #c4b18d; font-size: 13px; line-height: 1.9; margin: 10px 0 24px; }
+.catalog { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; max-width: 1080px; margin: 0 auto; }
+.catalog button { display: flex; gap: 14px; align-items: center; text-align: left; min-width: 0; background: #211a1466; }
+.catalog button[aria-pressed='true'] { border-color: #c7a66e; background: #4b382655; }
+.slot { font-family: Georgia, serif; font-size: 23px; color: #a98c5c; }
+.catalog button > span:nth-child(2) { flex: 1; min-width: 0; }
+.catalog strong, .catalog small { display: block; overflow-wrap: anywhere; }
+.catalog strong { font-size: 14px; font-weight: 400; }
+.catalog small { margin-top: 5px; color: #a99a82; font-size: 11px; }
+.footer { text-align: center; padding-top: 25px; color: #97856c; font-size: 11px; }
+.unavailable { max-width: 640px; margin: 0 auto; padding: 90px 24px; text-align: center; line-height: 2; }
+.unavailable h1 { font-size: 26px; font-weight: 400; }
+.unavailable p { color: #b8aa94; }
+@media (max-width: 760px) {
+  .museum { padding: 23px 16px 20px; }
+  .header { padding: 0; gap: 12px; flex-wrap: wrap; }
+  .header h1 { font-size: 25px; }
+  .description { font-size: 13px; }
+  .stage { height: 55svh; min-height: 370px; }
+  .stageToolbar { left: 0; top: 12px; }
+  .story { position: static; width: 100%; max-height: none; margin-top: 12px; padding: 22px; }
+  .catalog { grid-template-columns: 1fr; gap: 9px; }
+  .catalog button { padding: 13px 16px; }
+  .guide { margin: 20px 0; font-size: 12px; }
+}
+@media (prefers-reduced-motion: reduce) { .museum button { transition: none; } }

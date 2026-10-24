@@ -76,6 +76,15 @@ test('HTTP制作发布与分享撤销：会话、CAS、确认、快照和统一�
     assert.match(share.headers.get('cache-control') ?? '', /no-store/);
     const before = publicMuseumResponseSchema.parse(await share.json()).data;
     assert.equal(JSON.stringify(before).includes('内部原文不应公开'), false);
+    const page = await request(`/share/${token}`, 'GET', undefined, false);
+    assert.equal(page.status, 200);
+    assert.match(page.headers.get('cache-control') ?? '', /no-store/);
+    assert.equal(page.headers.get('referrer-policy'), 'no-referrer');
+    assert.equal(page.headers.get('x-content-type-options'), 'nosniff');
+    const html = await page.text();
+    assert.ok(html.includes(initial.title));
+    assert.ok(html.includes(exhibitFields.caption));
+    assert.equal(html.includes('内部原文不应公开'), false);
     const edit = await request(`${base}/exhibits/${exhibit.id}`, 'PATCH', { ...exhibitFields, name: '修改后的相机', expectedVersion: exhibit.version });
     assert.equal(edit.status, 200);
     const changed = exhibitDraftResponseSchema.parse(await edit.json()).data;
@@ -83,16 +92,29 @@ test('HTTP制作发布与分享撤销：会话、CAS、确认、快照和统一�
     await expectError(await request(`${base}/exhibits/${exhibit.id}`, 'PATCH', { ...exhibitFields, expectedVersion: exhibit.version }), 409, 'VERSION_CONFLICT');
     const unchangedShare = await request(`/api/share/${token}`, 'GET', undefined, false);
     assert.deepEqual(publicMuseumResponseSchema.parse(await unchangedShare.json()).data, before);
+    const unchangedPage = await request(`/share/${token}`, 'GET', undefined, false);
+    assert.equal(unchangedPage.status, 200);
+    assert.equal((await unchangedPage.text()).includes('修改后的相机'), false);
     const rotation = await request(`${base}/share`, 'POST', { expectedVersion: (await museum()).version });
     assert.equal(rotation.status, 200);
     const rotated = shareLinkResponseSchema.parse(await rotation.json()).data;
     const expired = await expectError(await request(`/api/share/${token}`, 'GET', undefined, false), 404, 'SHARE_NOT_FOUND');
     const invalid = await expectError(await request('/api/share/invalid', 'GET', undefined, false), 404, 'SHARE_NOT_FOUND');
     assert.equal(expired.message, invalid.message);
+    for (const path of [`/share/${token}`, '/share/invalid']) {
+      const unavailable = await request(path, 'GET', undefined, false);
+      assert.equal(unavailable.status, 404);
+      assert.match(unavailable.headers.get('cache-control') ?? '', /no-store/);
+      const body = await unavailable.text();
+      assert.ok(body.includes(invalid.message), `Unavailable share page must show the shared message (default404=${body.includes('This page could not be found')}, html=${unavailable.headers.get('content-type')}).`);
+      assert.equal(body.includes(initial.title), false);
+    }
     const stopped = await request(`${base}/share`, 'DELETE', { expectedVersion: (await museum()).version });
     assert.equal(stopped.status, 200);
     mutationSuccessSchema.parse(await stopped.json());
     await expectError(await request(`/api/share/${rotated.token}`, 'GET', undefined, false), 404, 'SHARE_NOT_FOUND');
+    const stoppedPage = await request(`/share/${rotated.token}`, 'GET', undefined, false);
+    assert.equal(stoppedPage.status, 404);
   } finally {
     if (museumId && cookie) {
       const latest = await museum();

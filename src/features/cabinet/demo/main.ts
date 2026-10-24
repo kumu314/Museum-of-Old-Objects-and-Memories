@@ -6,7 +6,7 @@ function element(id: string) { const value = document.getElementById(id); if (va
 const canvas = document.querySelector('canvas');
 if (!(canvas instanceof HTMLCanvasElement)) throw new Error('Missing canvas');
 const canvasElement = canvas;
-const items: CabinetStageItem[] = [{ id: 'camera', slot: 0, modelKey: 'camera-01' }, { id: 'cassette', slot: 1, modelKey: 'cassette' }, { id: 'ticket', slot: 4, modelKey: 'ticket' }];
+const items = [{ id: 'camera', slot: 0, modelKey: 'camera-01' }, { id: 'cassette', slot: 1, modelKey: 'cassette' }, { id: 'ticket', slot: 4, modelKey: 'ticket' }] satisfies CabinetStageItem[];
 const storageKey = 'shiwuguan.demo.arrangement.v1';
 const defaultArrangement: CabinetArrangement = items.map((item) => {
   const model = modelManifest[item.modelKey];
@@ -81,7 +81,7 @@ const descriptions: Record<string, {title:string;description:string;source:strin
 const controller = createInspectionController(items.map((item) => item.id));
 const assets = new Map<string, AssetStatus>();
 let surface: SurfaceStatus = 'unavailable';
-const phaseLabels = { overview:'展柜总览', focusing:'正在取出', inspecting:'拖动旋转 · 滚轮缩放', returning:'正在放回' };
+const phaseLabels = { overview:'展柜总览', focusing:'正在取出', inspecting:'拖动旋转 · 双指、按钮或滚轮缩放', returning:'正在放回' };
 // Metrics are opt-in on the local demo, never part of the visitor UI.
 const samples: { cpuMs: number; interval: number }[] = [];
 let previousSampleTime = 0;
@@ -132,6 +132,7 @@ function update() {
   element('back').hidden = state.phase === 'overview';
   element('story').hidden = state.phase === 'overview';
   element('interaction-hint').hidden = state.phase !== 'inspecting';
+  for (const id of ['zoom-in', 'zoom-out']) element(id).toggleAttribute('disabled', state.phase !== 'inspecting');
   const item = arrangement.find((item) => item.id === state.selectedId);
   const description = state.selectedId === null ? undefined : descriptions[state.selectedId];
   const status = state.selectedId === null ? undefined : assets.get(state.selectedId);
@@ -139,7 +140,7 @@ function update() {
   const retry = document.getElementById('retry-model');
   if (retry !== null) retry.hidden = status !== 'failed';
   element('state-label').textContent = surface !== 'ready' ? '三维暂不可用 · 可查看样例说明' : status === 'failed' ? '模型载入失败 · 可重试' : status === 'loading' ? '模型载入中' : phaseLabels[state.phase];
-  element('guide').textContent = state.phase === 'overview' ? '点击展柜中的旧物，取出查看立体细节并倾听物主讲述' : '拖动旋转 · 滚轮缩放 · 按 Esc 放回展柜';
+  element('guide').textContent = state.phase === 'overview' ? '点击展柜中的旧物，取出查看立体细节并倾听物主讲述' : '拖动旋转 · 双指、按钮或滚轮缩放 · 按 Esc 放回展柜';
   if (editingRequested) element('guide').textContent = editingActive ? '拖动展品换格 · 已有展品时交换 · Esc 取消拖动 · 更改仅保存在此浏览器' : '正在放回展品，完成后可拖动换位';
   if (assets.get('cabinet-material') === 'failed') element('guide').textContent = '木纹材质未能载入，可刷新重试。展品目录仍可操作。';
   for (const button of document.querySelectorAll<HTMLButtonElement>('button[data-item]')) button.setAttribute('aria-pressed', String(button.dataset.item === state.selectedId));
@@ -184,6 +185,8 @@ element('arrangement-plaque-form').addEventListener('submit', (event) => {
 });
 element('back').addEventListener('click', () => controller.returnToOverview());
 element('reset').addEventListener('click', () => { stage.resetView(); canvasElement.focus(); });
+element('zoom-in').addEventListener('click', () => stage.zoomBy(1.12));
+element('zoom-out').addEventListener('click', () => stage.zoomBy(1 / 1.12));
 element('retry').addEventListener('click', () => stage.retry());
 document.getElementById('retry-model')?.addEventListener('click', () => { const id=controller.getSnapshot().selectedId; if (id !== null) stage.retryModel(id); });
 document.addEventListener('keydown', (event) => {

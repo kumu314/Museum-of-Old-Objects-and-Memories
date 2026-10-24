@@ -375,3 +375,5 @@ canvas:focus-visible { outline-offset: -5px; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; }
 }
+.inspection-zoom { display: flex; gap: 8px; }
+.inspection-zoom .reset { flex: 1; min-height: 44px; }
