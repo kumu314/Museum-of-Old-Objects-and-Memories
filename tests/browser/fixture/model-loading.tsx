@@ -11,7 +11,8 @@ const initial: CabinetExhibit[] = [
 function Fixture() {
   const [exhibits, setExhibits] = useState(initial);
   const [selectedSlot, setSelectedSlot] = useState(0);
-  return <><style>{`.workbench-cabinet-viewport { width: 780px; height: 520px; position: relative; } canvas { width: 100%; height: 100%; }`}</style>
+  // 此页检查状态和请求生命周期；较小画布减少 CI 软件光栅开销，视觉验收另用正式视口。
+  return <><style>{`.workbench-cabinet-viewport { width: 320px; height: 220px; position: relative; } canvas { width: 100%; height: 100%; }`}</style>
     <button onClick={() => setExhibits((items) => items.map((item) => ({ ...item, name: `${item.name}更新` })))}>刷新资料</button>
     <button onClick={() => setExhibits((items) => items.map((item) => ({ ...item, slotIndex: item.slotIndex === 0 ? 1 : 0 })))}>交换格位</button>
     <button onClick={() => setExhibits((items) => items.map((item) => item.id === 'first' ? { ...item, generatedModelAssetId: 'new-model' } : item))}>替换模型</button>
