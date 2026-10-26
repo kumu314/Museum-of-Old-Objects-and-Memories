@@ -4,6 +4,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
+import sharp from 'sharp';
 
 const threePath = resolve(process.argv[2]);
 const texturePath = resolve(process.argv[3]);
@@ -265,7 +266,9 @@ async function exportModel(model, filename, maps) {
   async function addTexture(name) {
     if (textureIndices.has(name)) return textureIndices.get(name);
     const isNormal = name.endsWith('normal');
-    const data = await readFile(resolve(texturePath, `${name}.${isNormal ? 'png' : 'jpg'}`));
+    const source = await readFile(resolve(texturePath, `${name}.${isNormal ? 'png' : 'jpg'}`));
+    // 保留颜色贴图分辨率和文字的色度细节；法线数据不作有损压缩。
+    const data = isNormal ? source : await sharp(source).jpeg({ quality: 85, chromaSubsampling: '4:4:4', mozjpeg: true }).toBuffer();
     const pad = (4 - size % 4) % 4; chunks.push(Buffer.alloc(pad)); size += pad;
     const view = json.bufferViews.push({ buffer: 0, byteOffset: size, byteLength: data.length }) - 1;
     chunks.push(data); size += data.length;

@@ -23,10 +23,20 @@ export function CabinetPreview({ exhibits, selectedSlot, disabled, onSelectSlot,
   const modelAssetBase = assetBase.replace(/\/assets$/, '/model-assets');
   // 按模型素材记录失败；替换模型后自动尝试加载新模型。
   const [modelFallback, setModelFallback] = useState<ReadonlySet<string>>(new Set());
-  const items = useMemo(
+  const nextItems = useMemo(
     () => cabinetItems(pageExhibits, assetBase, modelAssetBase, modelFallback),
     [pageExhibits, assetBase, modelAssetBase, modelFallback]);
-  const controller = useMemo(() => createInspectionController(items.map((item) => item.id)), [items]);
+  // 资料刷新会创建新数组；只有模型来源或成员变化才需要重建 GPU 场景。
+  // 格位和铭牌由 setArrangement 更新，保留已经下载、解析的模型。
+  const modelIdentity = JSON.stringify(nextItems.map((item) => ({ ...item, slot: 0 })).sort((a, b) => a.id.localeCompare(b.id)));
+  const [scene, setScene] = useState(() => ({ identity: modelIdentity, items: nextItems,
+    controller: createInspectionController(nextItems.map((item) => item.id)) }));
+  if (scene.identity !== modelIdentity) {
+    setScene({ identity: modelIdentity, items: nextItems, controller: createInspectionController(nextItems.map((item) => item.id)) });
+  }
+  const { items, controller } = scene;
+  const arrangement = useMemo(() => pageExhibits.filter((exhibit) => items.some((item) => item.id === exhibit.id))
+    .map((exhibit) => ({ id: exhibit.id, slot: exhibit.slotIndex, plaqueText: Array.from(exhibit.name).slice(0, 24).join('') })), [pageExhibits, items]);
   const inspection = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
   const [surfaceState, setSurface] = useState<{ controller: typeof controller; value: SurfaceStatus | 'loading' }>({ controller, value: 'loading' });
   const [assetState, setAssetStates] = useState<{ controller: typeof controller; values: Readonly<Record<string, AssetStatus>> }>({ controller, values: {} });
@@ -44,6 +54,7 @@ export function CabinetPreview({ exhibits, selectedSlot, disabled, onSelectSlot,
   const modelLoading = generatedSelected && !modelLoadFailed && selected !== undefined && assetStates[selected.id] === 'loading';
 
   const selectSlot = useEffectEvent((slot: number) => { if (!disabled) onSelectSlot(slot); });
+  const arrange = useEffectEvent((instance: ReturnType<typeof mountCabinetStage>) => instance.setArrangement(arrangement));
 
   useEffect(() => {
     let cancelled = false;
@@ -64,12 +75,15 @@ export function CabinetPreview({ exhibits, selectedSlot, disabled, onSelectSlot,
           }
         },
       });
-      instance.setArrangement(pageExhibits.filter((exhibit) => items.some((item) => item.id === exhibit.id))
-        .map((exhibit) => ({ id: exhibit.id, slot: exhibit.slotIndex, plaqueText: Array.from(exhibit.name).slice(0, 24).join('') })));
+      arrange(instance);
       stage.current = instance;
     }).catch(() => { if (!cancelled) setSurface({ controller, value: 'unavailable' }); });
     return () => { cancelled = true; stage.current?.destroy(); stage.current = null; };
-  }, [items, controller, pageExhibits, page, sceneRetry]);
+  }, [items, controller, page, sceneRetry]);
+
+  useEffect(() => {
+    stage.current?.setArrangement(arrangement);
+  }, [arrangement]);
 
   useEffect(() => {
     stage.current?.setSelectedSlot(mode === 'edit' ? selectedSlot % slotsPerPage : null);

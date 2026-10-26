@@ -1,8 +1,8 @@
 [
   {
     "file": "cassette.glb",
-    "bytes": 3974308,
-    "sha256": "0951e1ccf8db0d2f7303730573d6f7718fa336941560c3487f1b6d24dd5b236d",
+    "bytes": 3104240,
+    "sha256": "e9d82a00ec56905dd7cfcc7fdf8cca15a2fe1522dc35a3759a3f414577ed420c",
     "meshes": 11,
     "triangles": 31116,
     "bounds": {
@@ -30,8 +30,8 @@
   },
   {
     "file": "ticket.glb",
-    "bytes": 2441244,
-    "sha256": "ae9835f47bb286f371a92d18eae6946799796503600230e3dd5dd8f13864b7a7",
+    "bytes": 1461520,
+    "sha256": "1b6eebc0c4fc191227741076ad181aa28cd71cb63d769f658e68f668281cc286",
     "meshes": 3,
     "triangles": 9616,
     "bounds": {
