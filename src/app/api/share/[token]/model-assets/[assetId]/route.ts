@@ -5,10 +5,10 @@ import { errorResponse } from '@/server/http';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-export async function GET(_request: Request, { params }: { params: Promise<{ token: string; assetId: string }> }) {
+export async function GET(request: Request, { params }: { params: Promise<{ token: string; assetId: string }> }) {
   try {
     const member = await requireMember();
     const { token, assetId } = await params;
-    return await sharedModelFileResponse(await getShareModelAsset(member.id, token, assetId));
+    return await sharedModelFileResponse(await getShareModelAsset(member.id, token, assetId), request);
   } catch (error) { return errorResponse(error); }
 }
