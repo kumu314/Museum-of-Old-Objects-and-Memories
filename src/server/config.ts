@@ -19,6 +19,8 @@ const environmentSchema = z.object({
   // 归属与权限判断不受这个开关影响。
   SELF_REGISTRATION: z.enum(['open', 'closed']).default('open'),
   DEMO_ALLOW_HTTP: z.enum(['true', 'false']).default('false'),
+  // 单图生成按账号与 UTC 日期计数的每日上限；默认 10 次，防止单账号无限消耗 3D 费用。
+  MODEL_DAILY_GENERATION_LIMIT: z.coerce.number().int().min(1).max(100).default(10),
 });
 
 export function parseServerConfig(environment: Readonly<Record<string, string | undefined>>) {
@@ -40,6 +42,7 @@ export function parseServerConfig(environment: Readonly<Record<string, string | 
     secureCookies: value.APP_ORIGIN.startsWith('https://'),
     uploadDir: value.UPLOAD_DIR,
     selfRegistration: value.SELF_REGISTRATION === 'open',
+    modelDailyGenerationLimit: value.MODEL_DAILY_GENERATION_LIMIT,
   };
 }
 

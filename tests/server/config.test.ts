@@ -28,6 +28,14 @@ test('自助注册默认开启，可显式关闭，非法取值直接失败', ()
   assert.throws(() => parseServerConfig({ ...valid, SELF_REGISTRATION: 'yes' }));
 });
 
+test('每日生成额度默认 10 次，可配置且拒绝越界值', () => {
+  assert.equal(parseServerConfig(valid).modelDailyGenerationLimit, 10);
+  assert.equal(parseServerConfig({ ...valid, MODEL_DAILY_GENERATION_LIMIT: '3' }).modelDailyGenerationLimit, 3);
+  assert.throws(() => parseServerConfig({ ...valid, MODEL_DAILY_GENERATION_LIMIT: '0' }));
+  assert.throws(() => parseServerConfig({ ...valid, MODEL_DAILY_GENERATION_LIMIT: '101' }));
+  assert.throws(() => parseServerConfig({ ...valid, MODEL_DAILY_GENERATION_LIMIT: 'many' }));
+});
+
 test('HTTP 演示需显式开启，HTTPS 会话始终使用安全 Cookie', () => {
   const production = { ...valid, NODE_ENV: 'production' };
   assert.throws(() => parseServerConfig(production));
