@@ -234,6 +234,55 @@ test('馆主收回待回应邀请后，对方立刻失去写入资格', async ()
   });
 });
 
+test('馆主停止已接受的共写：不能新增，写下的讲述仍按本人同意公开', async () => {
+  await inRollback(async (db) => {
+    const owner = await account(db, 'revoke-owner');
+    const guest = await account(db, 'revoke-guest');
+    const { museumId, exhibitId } = await museumWithExhibit(db, owner.id, 'revoke');
+    const invitation = await inviteContributor(owner.id, museumId, exhibitId, { username: guest.username }, db);
+    const accepted = await respondInvitation(guest.id, invitation.id, { status: 'accepted' }, db);
+    const story = await contribute(guest.id, museumId, exhibitId,
+      { story: '缸底刻的编号我认得。', sourceNote: '李素云口述', publishConsent: true }, db);
+
+    const revoked = await cancelInvitation(owner.id, invitation.id, db);
+    assert.equal(revoked.status, 'cancelled');
+    assert.ok(revoked.revokedAt, '停止共写必须留下时间');
+    // 对方当初接受的时间仍是事实，不被撤销覆盖。
+    assert.equal(revoked.respondedAt, accepted.respondedAt);
+
+    // 写入资格消失：再写一份就是 NOT_FOUND，不区分"没资格"与"展品不存在"。
+    await assert.rejects(contribute(guest.id, museumId, exhibitId,
+      { story: '再补一句。', sourceNote: '李素云口述', publishConsent: true }, db), notFound);
+
+    // 已写下的讲述不下架：馆主预览里它仍在公开版本内，库里那行也没被动过。
+    const view = toPublicationView(await readContributionState(owner.id, museumId, exhibitId, db));
+    assert.deepEqual(view.contributions.map((item) => item.id), [story.id]);
+    const stored = await db.query<{ publish_consent: boolean; withdrawn_at: Date | null }>(
+      'SELECT publish_consent, withdrawn_at FROM contributions WHERE id=$1', [story.id]);
+    assert.deepEqual(stored.rows[0], { publish_consent: true, withdrawn_at: null });
+
+    // 撤销不占"生效中邀请"的名额，可以重新发一条；再拒绝也不影响已写下的讲述。
+    const again = await inviteContributor(owner.id, museumId, exhibitId, { username: guest.username }, db);
+    assert.notEqual(again.id, invitation.id);
+    await respondInvitation(guest.id, again.id, { status: 'declined' }, db);
+    const after = toPublicationView(await readContributionState(owner.id, museumId, exhibitId, db));
+    assert.deepEqual(after.contributions.map((item) => item.id), [story.id]);
+
+    // 已有结果的邀请没有任何可收回的状态。
+    await assert.rejects(cancelInvitation(owner.id, again.id, db), (error: unknown) => {
+      assert.ok(error instanceof HttpError);
+      assert.equal(error.failure.code, 'VALIDATION_ERROR');
+      return true;
+    });
+
+    // 数据库自己拒绝：回应前就被收回或拒绝的邀请不能记撤销时间。
+    await db.query('SAVEPOINT bad_revoked');
+    await assert.rejects(db.query(
+      `INSERT INTO contribution_invitations(museum_id,exhibit_id,invitee_id,invited_by,invitee_name,status,responded_at,revoked_at)
+       VALUES($1,$2,$3,$4,'x','declined',now(),now())`, [museumId, exhibitId, guest.id, owner.id]), { code: '23514' });
+  });
+});
+
 test('被邀请人只看得到自己的邀请与讲述', async () => {
   await inRollback(async (db) => {
     const owner = await account(db, 'mine-owner');
