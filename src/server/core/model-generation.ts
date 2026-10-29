@@ -188,6 +188,25 @@ async function generateModelFile(client: Hunyuan3DClient, externalJobId: string,
   return { kind: 'done' as const, prepared, stats };
 }
 
+// 每日生成额度：与任务插入同事务累加，超限抛错由外层回滚，并发提交不会绕过上限。
+export async function consumeDailyGenerationQuota(
+  db: Pick<PoolClient, 'query'>, ownerId: string, limit: number,
+): Promise<number> {
+  const usage = await db.query<{ task_count: number }>(
+    `INSERT INTO model_generation_usage(owner_id,usage_date,task_count)
+     VALUES($1,(now() AT TIME ZONE 'UTC')::date,1)
+     ON CONFLICT (owner_id,usage_date) DO UPDATE SET task_count=model_generation_usage.task_count+1
+     RETURNING task_count`, [ownerId]);
+  const used = usage.rows[0]?.task_count ?? 1;
+  if (used > limit) {
+    throw new HttpError({
+      code: 'GENERATION_QUOTA_EXHAUSTED',
+      message: `今日单图生成额度已用完（每日 ${limit} 次），请明天再试；已有任务仍可在原处查看。`,
+    });
+  }
+  return used;
+}
+
 export async function requestSingleModelGeneration(
   actorId: string, museumId: string, exhibitId: string,
   input: { expectedVersion: number; requestId: string; generationConsent: true; imageAssetId: string },
@@ -196,6 +215,7 @@ export async function requestSingleModelGeneration(
   // 配置缺失在任务创建前受控失败，避免留下无意义的失败任务。
   const provider = selectedProvider();
   const uploadDir = getServerConfig().uploadDir;
+  const dailyLimit = getServerConfig().modelDailyGenerationLimit;
 
   const claim = await withTransaction(async (db) => {
     await requireActor(db, actorId);
@@ -235,6 +255,7 @@ export async function requestSingleModelGeneration(
       }
     }
     const id = randomUUID();
+    await consumeDailyGenerationQuota(db, actorId, dailyLimit);
     await db.query(
       `INSERT INTO model_generation_jobs(id,museum_id,exhibit_id,source_version,mode,input_asset_id,provider,status,created_by,request_id)
        VALUES($1,$2,$3,$4,'single',$5,$6,'SUBMITTING',$7,$8)`,
