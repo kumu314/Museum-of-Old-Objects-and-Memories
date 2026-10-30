@@ -27,7 +27,8 @@ export type ContributorRole = z.infer<typeof contributorRoleSchema>;
  * - `pending`  馆主已发出，被邀请人尚未回应 → 不产生署名权
  * - `accepted` 被邀请人已接受 → 产生该展品的署名权
  * - `declined` 被邀请人拒绝 → 不产生署名权；同一展品再邀请需新建记录
- * - `cancelled` 馆主在对方回应前收回 → 不产生署名权
+ * - `cancelled` 馆主收回：回应前收回，或对方接受后**停止共写**（后者 `revokedAt` 非空）
+ *   → 不产生新的署名权；停止共写前写下的讲述仍属于作者，不随撤销消失
  *
  * `declined` 与 `cancelled` 分开，是因为动作主体不同：前者是被邀请人的决定，
  * 后者是馆主的决定。合并成一个状态会丢掉"谁拒绝的"这个事实。
@@ -45,14 +46,23 @@ export const contributionInvitationSchema = z.strictObject({
   inviteeName: textSchema(1, 80),
   status: invitationStatusSchema,
   invitedAt: timestampSchema,
-  /** 回应或收回的时间；`pending` 时必须为空。 */
+  /** 回应或收回的时间；`pending` 时必须为空。停止共写时保留对方当初接受的时间。 */
   respondedAt: timestampSchema.nullable(),
+  /**
+   * 停止共写的时间。只在对方**接受之后**被馆主收回时写入，状态同时转为 `cancelled`；
+   * 非空即表示这个人曾拥有该展品的署名权——已写下的讲述继续按本人同意公开，
+   * 但不再能新增。未回应就被收回的邀请保持为空。
+   */
+  revokedAt: timestampSchema.nullable(),
   isDemo: z.boolean(),
 }).refine((invitation) => invitation.status === 'pending'
   ? invitation.respondedAt === null
   : invitation.respondedAt !== null, {
   message: '邀请一旦有结果就必须记录时间，未回应时不得有回应时间。',
   path: ['respondedAt'],
+}).refine((invitation) => invitation.revokedAt === null || invitation.status === 'cancelled', {
+  message: '只有被收回的邀请才能记录撤销时间。',
+  path: ['revokedAt'],
 });
 
 /**

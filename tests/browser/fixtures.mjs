@@ -71,6 +71,6 @@ export function memoirFixture() {
   };
 }
 export const contributionInbox = {
-  invitations:[1,2].map(n=>({invitation:{id:id(n),exhibitId:id(n+10),museumId:id(20),inviteeId:id(30),inviteeName:'合成用户',status:'accepted',invitedAt:now,respondedAt:now,isDemo:false},exhibitName:`展品${n}`,museumTitle:'合成馆'})),
+  invitations:[1,2].map(n=>({invitation:{id:id(n),exhibitId:id(n+10),museumId:id(20),inviteeId:id(30),inviteeName:'合成用户',status:'accepted',invitedAt:now,respondedAt:now,revokedAt:null,isDemo:false},exhibitName:`展品${n}`,museumTitle:'合成馆'})),
   contributions:[],
 };

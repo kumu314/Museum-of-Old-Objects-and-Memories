@@ -1,12 +1,34 @@
 import { randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
 import { aiDraftSchema, aiInputSchema, type AiDraft, type AdoptAiInput, type RequestAiInput } from '../../contracts';
+import { getServerConfig } from '../config';
 import { getPool, withTransaction } from '../db/pool';
+import { HttpError } from '../http';
 import { generateDraft, readAiConfig } from '../integrations/ai';
 import { inTransaction, updateExhibit } from './museums';
 import { assertVersion, exhibitRecord, invalid, museumRecord, notFound, requireActor } from './records';
 
 const pending = new WeakMap<Pool, Map<string, Promise<AiDraft>>>();
+
+// 文本 AI 每日额度：与首次校验同事务累加，超限抛错由外层回滚，并发提交不会绕过上限。
+// 预留发生在调用上游之前，因此上游失败也计入当日用量。
+export async function consumeDailyDraftQuota(
+  db: Pick<PoolClient, 'query'>, ownerId: string, limit: number,
+): Promise<number> {
+  const usage = await db.query<{ draft_count: number }>(
+    `INSERT INTO ai_draft_daily_usage(owner_id,usage_date,draft_count)
+     VALUES($1,(now() AT TIME ZONE 'UTC')::date,1)
+     ON CONFLICT (owner_id,usage_date) DO UPDATE SET draft_count=ai_draft_daily_usage.draft_count+1
+     RETURNING draft_count`, [ownerId]);
+  const used = usage.rows[0]?.draft_count ?? 1;
+  if (used > limit) {
+    throw new HttpError({
+      code: 'AI_QUOTA_EXHAUSTED',
+      message: `今日 AI 展签整理额度已用完（每日 ${limit} 次），请明天再试；原文已保留，可以继续人工编辑。`,
+    });
+  }
+  return used;
+}
 
 async function savedDraft(db: PoolClient, museumId: string, exhibitId: string, sourceVersion: number, draftId?: string): Promise<AiDraft | null> {
   const result = await db.query<Record<string, unknown>>(`SELECT id,exhibit_id AS "exhibitId",source_version AS "sourceVersion",output,created_at AS "createdAt"
@@ -30,6 +52,8 @@ async function generateAndSave(actorId: string, museumId: string, exhibitId: str
       const original = segment.source === 'rawStory' ? exhibit.rawStory : exhibit.transcript;
       if (!original?.includes(segment.text)) invalid('讲述片段与原文不一致，请先重新保存讲述。');
     }
+    // 已有同版本草稿直接复用，不占用当日额度；只有真正要调用上游时才累加。
+    if (!previous) await consumeDailyDraftQuota(db, actorId, getServerConfig().aiDraftDailyLimit);
     return { generation, previous };
   }, pool);
   if (source.previous) return source.previous;

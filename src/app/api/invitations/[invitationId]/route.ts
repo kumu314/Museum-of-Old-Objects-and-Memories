@@ -17,7 +17,13 @@ export async function PATCH(request: Request, { params }: InvitationContext) {
   } catch (error) { return errorResponse(error); }
 }
 
-/** 馆主收回还没被回应的邀请。已接受的收回属于"移出共同作者"，首版没有这个动作。 */
+/**
+ * 馆主收回邀请。
+ *
+ * 未回应的直接作废；已接受的转为**停止共写**（`cancelled` 并记 `revoked_at`）：
+ * 对方不能再新增讲述，已经写下的讲述属于作者本人，仍按本人同意公开，
+ * 要下架只能由作者撤回那份内容。
+ */
 export async function DELETE(request: Request, { params }: InvitationContext) {
   try {
     requireSameOrigin(request);

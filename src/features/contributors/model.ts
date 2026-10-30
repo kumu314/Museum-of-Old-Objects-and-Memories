@@ -20,9 +20,16 @@ import {
  * 而那样等于替作者改了话、也抹掉了来源。
  */
 
-/** 该展品上真正拥有署名权的人。只有 accepted 算数，其余状态一律不算。 */
-export function acceptedAuthorIds(invitations: readonly ContributionInvitation[], exhibitId: string): Set<string> {
-  return new Set(invitations.filter((invitation) => invitation.status === 'accepted' && invitation.exhibitId === exhibitId).map((invitation) => invitation.inviteeId));
+/**
+ * 该展品上真正拥有署名权的人。
+ *
+ * 已接受的邀请算数；`revokedAt` 非空的邀请也算数——那是"接受之后被馆主停止共写"，
+ * 拿走的是继续新增的资格，不是作者已经写下的内容。待回应、已拒绝、回应前就被收回的
+ * 邀请一律不算。
+ */
+export function coauthorRightAuthorIds(invitations: readonly ContributionInvitation[], exhibitId: string): Set<string> {
+  return new Set(invitations.filter((invitation) => invitation.exhibitId === exhibitId
+    && (invitation.status === 'accepted' || invitation.revokedAt !== null)).map((invitation) => invitation.inviteeId));
 }
 
 /**
@@ -37,8 +44,8 @@ export function exclusionReasonFor(
 ): ExclusionReason | null {
   if (contribution.withdrawnAt !== null) return 'withdrawn';
   if (!contribution.publishConsent) return 'no-consent';
-  // 馆主不需要邀请；共同作者必须有该展品上已接受的邀请，否则不得署名。
-  if (contribution.authorRole === 'coauthor' && !acceptedAuthorIds(invitations, contribution.exhibitId).has(contribution.authorId)) {
+  // 馆主不需要邀请；共同作者必须有该展品上已接受的邀请（含接受后被停止共写的）。
+  if (contribution.authorRole === 'coauthor' && !coauthorRightAuthorIds(invitations, contribution.exhibitId).has(contribution.authorId)) {
     return 'invitation-not-accepted';
   }
   return null;
