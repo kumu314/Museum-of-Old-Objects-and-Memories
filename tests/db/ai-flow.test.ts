@@ -98,6 +98,19 @@ test('AI草稿单独保存并复用；人工采纳才修改展签，原文保留
   }, pool);
 });
 
+test('复用同版本草稿不重复占用当日额度', async (context) => {
+  const setup = await fixture(context);
+  let calls = 0;
+  await service(context, (response) => { calls += 1; complete(response); });
+  const request = { expectedVersion: setup.exhibit.version };
+  await requestAiDraft(setup.actor, setup.museum.id, setup.exhibit.id, request, pool);
+  await requestAiDraft(setup.actor, setup.museum.id, setup.exhibit.id, request, pool);
+  assert.equal(calls, 1);
+  const usage = await pool.query<{ draft_count: number }>(
+    'SELECT draft_count FROM ai_draft_daily_usage WHERE owner_id=$1', [setup.actor]);
+  assert.equal(usage.rows[0]?.draft_count, 1);
+});
+
 test('他人请求同一展品的 AI 整理在调用上游前被拒绝，不复用拥有者的在途结果', async (context) => {
   const setup = await fixture(context);
   const stranger = randomUUID();
