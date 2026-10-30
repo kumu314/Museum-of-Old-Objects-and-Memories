@@ -415,7 +415,7 @@ export function mountCabinetStage(canvas: HTMLCanvasElement, items: readonly Cab
     display.status = 'loading'; options.onAssetStatus(display.item.id, 'loading');
     let model: Group | null = null;
     try {
-      const signal = AbortSignal.any([resourceAbort.signal, request.signal, AbortSignal.timeout(30_000)]);
+      const signal = AbortSignal.any([resourceAbort.signal, request.signal, AbortSignal.timeout(120_000)]);
       const item = display.item;
       let stats: ModelStats | null = null;
       if (item.modelKey === 'glb') {

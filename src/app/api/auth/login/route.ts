@@ -1,3 +1,5 @@
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 import { loginInputSchema } from '@/contracts/session';
 import { loginMember, requireSameOrigin } from '@/server/auth/session';
 import { dataResponse, errorResponse, readJsonRequest } from '@/server/http';
