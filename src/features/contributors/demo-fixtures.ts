@@ -36,6 +36,7 @@ export const demoState: ContributionState = contributionStateSchema.parse({
       status: 'accepted',
       invitedAt: '2026-10-01T10:20:00+08:00',
       respondedAt: '2026-10-01T21:05:00+08:00',
+      revokedAt: null,
       isDemo: true,
     },
     {
@@ -47,6 +48,7 @@ export const demoState: ContributionState = contributionStateSchema.parse({
       status: 'pending',
       invitedAt: '2026-10-05T09:00:00+08:00',
       respondedAt: null,
+      revokedAt: null,
       isDemo: true,
     },
     {
@@ -58,6 +60,7 @@ export const demoState: ContributionState = contributionStateSchema.parse({
       status: 'accepted',
       invitedAt: '2026-10-02T08:30:00+08:00',
       respondedAt: '2026-10-02T19:40:00+08:00',
+      revokedAt: null,
       isDemo: true,
     },
   ],

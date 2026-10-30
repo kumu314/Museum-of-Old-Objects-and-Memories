@@ -23,15 +23,16 @@ import { exhibitRecord, invalid, museumRecord, notFound, requireActor } from './
  * 纯规则在 `src/features/contributors/model.ts`，这里只负责"把规则和数据库对齐"，
  * 两处判定必须一致：
  * - 写入时判定署名权（`contribute`）：馆主不需要邀请，共同作者必须有已接受的邀请。
- * - 读取时再判定一次（公开视图那份纯函数）：邀请被收回后，历史内容立刻不再公开，
- *   不需要回头改数据。
+ * - 停止共写把邀请转成 `cancelled` 并记 `revoked_at`，写入资格随之消失；
+ *   已公开的讲述属于作者本人，仍按"本人同意 + 未撤回"出现在参观页，不随撤销下架。
  *
  * **这里没有任何"合并多人讲述"的入口。** 同一实物下保留多人独立讲述、各自署名、
  * 各自来源，不生成共同摘要——这条是产品红线，不是暂未实现。
  */
 
 const invitationColumns = `i.id, i.exhibit_id AS "exhibitId", i.museum_id AS "museumId", i.invitee_id AS "inviteeId",
-  i.invitee_name AS "inviteeName", i.status, i.invited_at AS "invitedAt", i.responded_at AS "respondedAt"`;
+  i.invitee_name AS "inviteeName", i.status, i.invited_at AS "invitedAt", i.responded_at AS "respondedAt",
+  i.revoked_at AS "revokedAt"`;
 
 const contributionColumns = `c.id, c.exhibit_id AS "exhibitId", c.author_id AS "authorId", c.author_name AS "authorName",
   c.author_role AS "authorRole", c.story, c.source_note AS "sourceNote", c.publish_consent AS "publishConsent",
@@ -47,7 +48,7 @@ function isoOrNull(value: unknown): string | null {
 
 type InvitationRow = {
   id: string; exhibitId: string; museumId: string; inviteeId: string; inviteeName: string;
-  status: string; invitedAt: Date; respondedAt: Date | null;
+  status: string; invitedAt: Date; respondedAt: Date | null; revokedAt: Date | null;
 };
 type ContributionRow = {
   id: string; exhibitId: string; authorId: string; authorName: string; authorRole: string;
@@ -65,6 +66,7 @@ function toInvitation(row: InvitationRow): ContributionInvitation {
     status: row.status,
     invitedAt: iso(row.invitedAt),
     respondedAt: isoOrNull(row.respondedAt),
+    revokedAt: isoOrNull(row.revokedAt),
     isDemo: false,
   });
 }
@@ -153,7 +155,7 @@ export function inviteContributor(actorId: string, museumId: string, exhibitId: 
         `INSERT INTO contribution_invitations(museum_id, exhibit_id, invitee_id, invited_by, invitee_name)
          VALUES($1, $2, $3, $4, $5) RETURNING id, exhibit_id AS "exhibitId", museum_id AS "museumId",
            invitee_id AS "inviteeId", invitee_name AS "inviteeName", status,
-           invited_at AS "invitedAt", responded_at AS "respondedAt"`,
+           invited_at AS "invitedAt", responded_at AS "respondedAt", revoked_at AS "revokedAt"`,
         [museumId, exhibitId, target.id, actorId, target.username]);
       const row = inserted.rows[0];
       if (row === undefined) throw new Error('Invitation insert returned no row.');
@@ -197,7 +199,13 @@ export function respondInvitation(actorId: string, invitationId: string,
   }, client);
 }
 
-/** 馆主收回一条还没被回应的邀请。已接受的要收回属于"移出共同作者"，首版没有这个动作。 */
+/**
+ * 馆主收回邀请。
+ *
+ * 待回应的直接作废；**已接受的转为停止共写**：状态变 `cancelled` 并记 `revoked_at`，
+ * 对方从此不能再新增讲述，也不再占"生效中邀请"的名额（可以重新邀请）。
+ * 已公开的讲述属于作者本人，不随撤销移除——要下架内容由作者自己撤回。
+ */
 export function cancelInvitation(actorId: string, invitationId: string, client?: PoolClient): Promise<ContributionInvitation> {
   return inTransaction(async (db) => {
     await requireActor(db, actorId);
@@ -211,10 +219,16 @@ export function cancelInvitation(actorId: string, invitationId: string, client?:
       `SELECT ${invitationColumns} FROM contribution_invitations i WHERE i.id=$1 FOR UPDATE`, [invitationId]);
     const current = found.rows[0];
     if (current === undefined) notFound();
-    if (current.status !== 'pending') invalid('只有还没回应的邀请可以收回。');
-    const updated = await db.query<InvitationRow>(
-      `UPDATE contribution_invitations i SET status='cancelled', responded_at=now()
-       WHERE i.id=$1 RETURNING ${invitationColumns}`, [invitationId]);
+    if (current.status !== 'pending' && current.status !== 'accepted') {
+      invalid('这条邀请已经没有可收回的状态。');
+    }
+    // 已接受的保留原 respondedAt（对方何时接受仍是事实），另记 revokedAt。
+    const statement = current.status === 'accepted'
+      ? `UPDATE contribution_invitations i SET status='cancelled', revoked_at=now()
+         WHERE i.id=$1 RETURNING ${invitationColumns}`
+      : `UPDATE contribution_invitations i SET status='cancelled', responded_at=now()
+         WHERE i.id=$1 RETURNING ${invitationColumns}`;
+    const updated = await db.query<InvitationRow>(statement, [invitationId]);
     const row = updated.rows[0];
     if (row === undefined) notFound();
     return toInvitation(row);
