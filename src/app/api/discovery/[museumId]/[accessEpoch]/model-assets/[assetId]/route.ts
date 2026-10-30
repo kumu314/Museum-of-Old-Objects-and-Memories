@@ -5,9 +5,9 @@ import { errorResponse } from '@/server/http';
 import { privateId } from '../../../../../museums/_params';
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
-export async function GET(_request: Request, { params }: { params: Promise<{ museumId: string; accessEpoch: string; assetId: string }> }) {
+export async function GET(request: Request, { params }: { params: Promise<{ museumId: string; accessEpoch: string; assetId: string }> }) {
   try {
     const actor = await requireMember(); const path = await params;
-    return await sharedModelFileResponse(await getDiscoveryModelAsset(actor.id, privateId(path.museumId), privateId(path.accessEpoch), privateId(path.assetId)));
+    return await sharedModelFileResponse(await getDiscoveryModelAsset(actor.id, privateId(path.museumId), privateId(path.accessEpoch), privateId(path.assetId)), request);
   } catch (error) { return errorResponse(error); }
 }

@@ -1,10 +1,10 @@
-import { readFile } from 'node:fs/promises';
 import type { PoolClient } from 'pg';
 import { shareNotFoundMessage, uploadLimits, type Asset } from '../../contracts';
 import { cleanupAllowed, cleanupUncommittedAsset, prepareAsset, processAsset, resolveAssetPath, type AssetInput } from '../assets';
+import { privateFileResponse } from '../assets/file-response';
 import { getServerConfig } from '../config';
 import { getPool } from '../db/pool';
-import { HttpError, privateHeaders } from '../http';
+import { HttpError } from '../http';
 import { getMuseum } from './museums';
 import { assetRecord, museumRecord, type StoredAsset } from './records';
 
@@ -154,14 +154,10 @@ export async function assetFileResponse(stored: StoredAsset, request: Request, s
   if (variant !== 'display' && variant !== 'thumbnail') throw missing();
   const key = variant === 'thumbnail' ? stored.thumbnailStorageKey : stored.storageKey;
   if (key === null) throw missing();
-  let bytes: Buffer;
-  try { bytes = await readFile(resolveAssetPath(getServerConfig().uploadDir, key)); }
-  catch (error) {
-    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') throw missing();
-    throw error;
-  }
-  return new Response(new Uint8Array(bytes), { headers: { ...privateHeaders,
-    'Content-Type': variant === 'thumbnail' ? 'image/webp' : stored.asset.contentType,
-    'Content-Length': String(bytes.length),
-  } });
+  return privateFileResponse({
+    request,
+    path: resolveAssetPath(getServerConfig().uploadDir, key),
+    contentType: variant === 'thumbnail' ? 'image/webp' : stored.asset.contentType,
+    onMissing: () => { throw missing(); },
+  });
 }

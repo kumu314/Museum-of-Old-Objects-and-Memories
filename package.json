@@ -20,6 +20,7 @@
     "db:migrate:test": "node --env-file-if-exists=.env.local --import tsx scripts/migrate.ts --test",
     "check": "pnpm typecheck && pnpm lint && pnpm test && pnpm test:db && pnpm test:scene && pnpm build && pnpm build:scene",
     "db:local": "node scripts/local-db.mjs",
+    "assets:cleanup": "node --env-file-if-exists=.env.local --import tsx scripts/cleanup-orphan-assets.ts",
     "test:scene": "node --import tsx --test src/features/**/*.test.ts",
     "team:create": "node --env-file-if-exists=.env.local --import tsx scripts/create-member.ts",
     "dev:scene": "vite --config vite.scene.config.mjs",
