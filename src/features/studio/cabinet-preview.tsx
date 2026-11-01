@@ -5,6 +5,7 @@ import { ObjectEngraving, StageIcon } from './curator-details';
 import { useEffect, useEffectEvent, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { AssetStatus, SurfaceStatus, mountCabinetStage } from '../cabinet/cabinet-stage';
 import { createInspectionController } from '../viewer/inspection-controller';
+import { clearGlbBufferCache } from '../cabinet/glb-model';
 import { cabinetItems, type CabinetExhibit } from './cabinet-items';
 import { cabinetPage, cabinetPageCount, cabinetPosition, exhibitsOnPage, slotsPerPage } from './cabinet-pages';
 
@@ -58,6 +59,10 @@ export function CabinetPreview({ exhibits, selectedSlot, disabled, onSelectSlot,
 
   const selectSlot = useEffectEvent((slot: number) => { if (!disabled) onSelectSlot(slot); });
   const arrange = useEffectEvent((instance: ReturnType<typeof mountCabinetStage>) => instance.setArrangement(arrangement));
+
+  useEffect(() => {
+    return () => { clearGlbBufferCache(); };
+  }, [page]);
 
   useEffect(() => {
     let cancelled = false;
@@ -191,9 +196,9 @@ export function CabinetPreview({ exhibits, selectedSlot, disabled, onSelectSlot,
       const exhibit = pageExhibits.find((item) => item.slotIndex === slot);
       return <button key={slot} type="button" disabled={disabled || expanded || !exhibit} aria-pressed={selectedSlot === globalSlot} onClick={() => onSelectSlot(globalSlot)}><span>第 {slot + 1} 格</span>{exhibit?.name ?? '尚未收录'}{exhibit && confirmedIds && <small className={confirmedIds.includes(exhibit.id) ? 'workbench-slot-confirmed' : ''}>{confirmedIds.includes(exhibit.id) ? '已确认' : '待确认'}</small>}</button>;
     })}</div>)}
-    {mode === 'edit' && <>
+    {mode === 'edit' && !expanded && <>
       <label className="workbench-cabinet-selection"><span>当前格位</span><select aria-label="选择柜格" disabled={disabled || expanded} value={selectedSlot} onChange={(event) => onSelectSlot(Number(event.target.value))}>{Array.from({length: slotsPerPage}, (_, slot) => <option key={slot} value={page * slotsPerPage + slot}>第 {slot + 1} 格 · {pageExhibits.find((item) => item.slotIndex === slot)?.name ?? '收录旧物'}</option>)}</select></label>
-      <div className="workbench-object-stage workbench-photo-stage" role="group" aria-label="当前旧物预览舞台">
+      <div className="workbench-object-stage workbench-photo-stage" role="group" aria-label="当前旧物预览舞台" style={{ position: 'relative', overflow: 'hidden', minHeight: 280 }}>
         <div className="workbench-stage-photo" style={{ width: '100%', height: '100%', position: 'absolute', inset: 0, padding: 0 }}>
           {generatedSelected && !modelLoadFailed && selectedItem?.modelKey === 'glb' ? (
             <div style={{ width: '100%', height: '100%', position: 'relative' }}>
@@ -209,13 +214,13 @@ export function CabinetPreview({ exhibits, selectedSlot, disabled, onSelectSlot,
             <div className="workbench-stage-empty"><ObjectEngraving /><span>{selected ? '尚未上传实拍，可检视模型' : '此处将安放你的旧物'}</span></div>
           )}
         </div>
-        <div className="workbench-stage-tools" role="group" aria-label="单品预览工具">
+        <div className="workbench-stage-tools" role="group" aria-label="单品预览工具" style={{ position: 'absolute', left: 10, top: 30, zIndex: 10 }}>
           <button type="button" aria-label="3D 预览" title="3D 预览" disabled={!ready} onClick={() => inspect()}><StageIcon kind="3d"/><span>3D</span></button>
           {selected?.photoAssetId ? <a href={`${assetBase}/${encodeURIComponent(selected.photoAssetId)}`} aria-label="查看实拍原图" title="实拍" target="_blank" rel="noreferrer"><StageIcon kind="photo"/></a> : <button type="button" aria-label="查看实拍原图" title="尚未上传实拍" disabled><StageIcon kind="photo"/></button>}
           <button type="button" aria-label="旋转模型预览" title="旋转模型" disabled={!ready} onClick={() => { inspect('rotate'); stagePreviewInstance.current?.rotateBy(Math.PI / 6); }}><StageIcon kind="rotate"/></button>
           <button type="button" aria-label="放大模型预览" title="放大模型" disabled={!ready} onClick={() => { inspect('zoom'); stagePreviewInstance.current?.zoomBy(1.15); }}><StageIcon kind="zoom"/></button>
         </div>
-        <div className="workbench-stage-caption"><div><h3>{selected?.name ?? '待藏旧物'}</h3><p>{generatedSelected && !modelLoadFailed ? '已采纳 3D 深度模型 · 立体呈现' : selected?.era ?? '从一张实拍，开始收录'}</p></div><button ref={inspectButton} type="button" className="wb-secondary" disabled={!ready} onClick={() => inspect()}>检视模型 →</button></div>
+        <div className="workbench-stage-caption" style={{ position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 10, pointerEvents: 'none' }}><div><h3>{selected?.name ?? '待藏旧物'}</h3><p>{generatedSelected && !modelLoadFailed ? '已采纳 3D 深度模型 · 立体呈现' : selected?.era ?? '从一张实拍，开始收录'}</p></div><button ref={inspectButton} type="button" className="wb-secondary" disabled={!ready} style={{ pointerEvents: 'auto' }} onClick={() => inspect()}>检视模型 →</button></div>
       </div>
     </>}
     <nav className="workbench-pagination" aria-label="展柜翻页"><button type="button" className="wb-text-link" disabled={disabled || expanded || page === 0} onClick={() => onSelectSlot(exhibits.find((item) => cabinetPage(item.slotIndex) === page - 1)?.slotIndex ?? (page - 1) * slotsPerPage)}>← 上一页</button>
@@ -225,6 +230,7 @@ export function CabinetPreview({ exhibits, selectedSlot, disabled, onSelectSlot,
     {selected && <p className="wb-hint">{generatedSelected && !modelLoadFailed ? '已采纳本次照片生成的模型 · 近似复原' : selectedItem?.modelKey === 'photo-plane' ? '实拍照片平面展示 · 非三维复原' : '内置演示模型 · 非本次照片生成'}</p>}
     {selected && assetStates[selected.id] === 'failed' && selectedItem?.modelKey !== 'glb' && <p className="wb-hint" role="alert">展示素材读取失败，照片与故事仍可使用。<button type="button" className="wb-text-link" onClick={() => stage.current?.retryModel(selected.id)}>重试素材</button></p>}
     {selected && modelLoadFailed && adoptedId && <p className="wb-hint" role="alert">生成模型加载失败，{selectedItem?.modelKey === 'photo-plane' ? '已回退为照片展示。' : '暂时使用原有展示。'}<button type="button" className="wb-text-link" onClick={() => {
+      clearGlbBufferCache();
       setModelFallback((current) => { const next = new Set(current); next.delete(adoptedId); return next; });
       setAssetStates((current) => ({ controller, values: { ...current.values, [selected.id]: 'loading' } }));
     }}>重试模型</button></p>}
