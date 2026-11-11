@@ -119,10 +119,32 @@ export async function parseGlbModel(buffer: ArrayBuffer, signal: AbortSignal,
   } catch (error: unknown) { disposeResources(object); throw error; }
 }
 
+const activeGlbBuffers = new Map<string, Promise<ArrayBuffer>>();
+
+export function clearGlbBufferCache(): void {
+  activeGlbBuffers.clear();
+}
+
+export function evictGlbBuffer(url: string): void {
+  activeGlbBuffers.delete(url);
+}
+
 export async function loadGlbModel(input: GlbModelSource, signal: AbortSignal): Promise<{ object: Group; stats: ModelStats }> {
   const source = glbModelSourceSchema.parse(input);
   const url = resolveModelUrl(source.url, document.baseURI);
-  const response = await fetch(url, { signal, cache: 'no-store', credentials: 'same-origin', redirect: 'error', referrerPolicy: 'no-referrer' });
-  const buffer = await readModelResponse(response, signal);
-  return parseGlbModel(buffer, signal);
+  let bufferPromise = activeGlbBuffers.get(url);
+  if (!bufferPromise) {
+    bufferPromise = (async () => {
+      try {
+        const response = await fetch(url, { signal, cache: 'no-store', credentials: 'same-origin', redirect: 'error', referrerPolicy: 'no-referrer' });
+        return await readModelResponse(response, signal);
+      } catch (err) {
+        activeGlbBuffers.delete(url);
+        throw err;
+      }
+    })();
+    activeGlbBuffers.set(url, bufferPromise);
+  }
+  const buffer = await bufferPromise;
+  return parseGlbModel(buffer.slice(0), signal);
 }
